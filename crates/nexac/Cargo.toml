@@ -1,6 +1,6 @@
 [package]
-name = "your-cli"
-description = "Command-line interface for your Rust workspace project."
+name = "nexac"
+description = "Command-line interface for the Nexa bootstrap compiler."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,16 +10,14 @@ homepage.workspace = true
 authors.workspace = true
 
 [[bin]]
-name = "your"
+name = "nexac"
 path = "src/main.rs"
 
 [dependencies]
-your-core.workspace = true
-your-config.workspace = true
 anyhow.workspace = true
 clap.workspace = true
-tracing.workspace = true
-tracing-subscriber.workspace = true
+nexa_parser.workspace = true
+nexa_span.workspace = true
 
 [lints]
 workspace = true

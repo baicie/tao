@@ -1,101 +1,56 @@
-# Agent Guide — Rust Workspace Template
+# Nexa Compiler Agent Guide
 
-Welcome. This is a production-ready Rust workspace template for CLI/library projects.
+Nexa is a Rust bootstrap compiler workspace. Keep the repository shaped around compiler phases, not generic application layers.
 
 ## Project Structure
 
-```
-crates/cli       → Binary: CLI entrypoint (clap)
-crates/core      → Library: business logic + domain types
-crates/config    → Library: configuration loading (TOML/JSON)
-crates/utils     → Library: shared utilities (leaf, no internal deps)
-crates/macros    → Proc-macro: optional procedural macros
-xtask            → Binary: development automation
-tests/           → Integration tests
-benches/         → Criterion benchmarks
+```text
+crates/nexa_span         -> FileId, TextRange, and source spans
+crates/nexa_diagnostics  -> errors, warnings, and source labels
+crates/nexa_syntax       -> tokens, SyntaxKind, and future lossless CST
+crates/nexa_parser       -> parser entry points and recovery diagnostics
+crates/nexac             -> CLI entry point
+xtask                    -> development automation
+docs/spec                -> language design notes
+crates/*/tests           -> crate-level integration tests
 ```
 
-**Dependency graph:**
+## Dependency Graph
+
+```text
+nexac -> nexa_parser -> nexa_syntax -> nexa_span
+                    \-> nexa_diagnostics -> nexa_span
 ```
-cli → core, config
-core → utils
-config → (none)
-macros → (none)
-```
+
+Do not introduce circular dependencies. Add new crates only when a real phase boundary exists.
 
 ## Key Commands
 
 | Command | What it does |
-|---------|-------------|
-| `make check` | fmt + clippy + test (alias: `cargo xtask check`) |
-| `cargo test --all` | Run all workspace tests |
-| `cargo doc --no-deps` | Build documentation |
-| `cargo deny check` | Dependency audit |
-| `cargo audit` | Security vulnerability scan |
-| `cargo machete` | Detect unused dependencies |
+|---------|--------------|
+| `make check` | fmt + clippy + test + docs |
+| `cargo test --workspace` | Run all workspace tests |
+| `cargo doc --workspace --no-deps` | Build documentation |
+| `cargo xtask security` | Run optional dependency and security checks |
 
-**Never commit code that fails `make check`.**
+Never commit code that fails `make check`.
 
-## Code Conventions
+## Compiler Rules
 
-### Style
-- Run `cargo fmt` before committing
-- Clippy lints are enforced (`cargo clippy -D warnings`)
-- Follow idiomatic Rust: prefer `Result` over `Option` for fallible operations, use `thiserror` for error types, `anyhow` for application errors
+- Parser code must not perform type checking.
+- Code generation must not consume syntax tokens or AST directly.
+- Diagnostics must use stable source spans.
+- Do not add LLVM dependencies before a middle IR exists.
+- Do not add JavaScript runtime semantics solely for TypeScript compatibility.
+- New language behavior requires accepted and rejected tests.
+- Compile-fail tests are first-class tests.
+- Avoid empty placeholder crates.
 
-### Dependencies
-- All versions live in `[workspace.dependencies]` at root `Cargo.toml`
-- Individual crate `Cargo.toml` files use `.workspace = true` — **never hardcode versions**
-- Adding a new dependency: add it to `[workspace.dependencies]` first, then use in crate manifests
-- MSRV is `1.80` — check new dependencies for MSRV impact
+## Rust Conventions
 
-### Crate Types
-- Library crates: public API should be minimal; internals `pub(crate)` or private
-- Binary crates: parse args with `clap`, delegate to library crates
-- Keep business logic in library crates, not in `cli`
-
-### Testing
-- Unit tests: `#[cfg(test)] mod tests` co-located in `src/`
-- Integration tests: `tests/integration.rs` at workspace root
-- Doctests: `/// # Examples` in `src/lib.rs` doc comments
-- Run `cargo xtask test` before marking a feature complete
-
-### Error Handling
-- Use `thiserror` for library error types (structured, `?`-friendly)
-- Use `anyhow` for binary/application errors
-- Avoid `panic!` in library code; prefer returning `Result`
-- `unsafe` blocks must be isolated, documented, and tested
-
-## CI/CD
-
-Tests run on **Ubuntu, Windows, and macOS** (see `.github/workflows/ci.yml`). Security scans run weekly. Multi-platform binary releases on tag push.
-
-## Documentation
-
-- Public API documentation should be written in doc comments (`///`)
-- Architecture decisions should be documented in `docs/`
-- Run `cargo doc --no-deps` to build docs locally
-
-## Before Starting Work
-
-1. Read `CONTRIBUTING.md` for contribution guidelines
-2. Run `cargo xtask check` to confirm the workspace builds cleanly
-3. Understand the crate dependency graph before adding cross-crate dependencies
-
-## Skills
-
-This project includes skills for common agent workflows. Use them by invoking the slash command:
-
-| Skill | When to use |
-|-------|------------|
-| `/setup-rust` | Configure the agent for this workspace (run once) |
-| `/tdd` | Test-driven development with red-green-refactor |
-| `/diagnose` | Debug compilation errors, panics, or incorrect output |
-| `/zoom-out` | Get a high-level overview of the codebase |
-| `/improve-codebase-architecture` | Find architectural refactoring opportunities |
-| `/grill-me` | Stress-test a plan before implementing |
-| `/caveman` | Ultra-compressed communication mode |
-| `/rust-async-patterns` | Tokio async patterns, channels, graceful shutdown |
-| `/rust-best-practices` | Idiomatic Rust: borrowing, errors, clippy, generics |
-| `/rust-security` | cargo-audit, cargo-deny, RUSTSEC, fuzzing, Miri |
-| `/tdd-rust` | Red-green-refactor with real fixtures, insta snapshots |
+- MSRV is Rust 1.80, so the workspace stays on edition 2021 until MSRV is raised.
+- Dependency versions live in root `[workspace.dependencies]`.
+- Crate manifests should use `.workspace = true` for shared dependencies.
+- Front-end crates should use `#![forbid(unsafe_code)]`.
+- Future low-level crates that need `unsafe` must isolate it, document it, and test it.
+- Library crates use structured errors; binary crates can use `anyhow`.

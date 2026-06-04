@@ -1,3 +1,5 @@
+//! Repository automation tasks for Nexa.
+
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use std::process::{Command, Stdio};
@@ -31,14 +33,42 @@ fn main() -> Result<()> {
     match cli.command {
         Task::Check => {
             run("cargo", &["fmt", "--all", "--", "--check"])?;
-            run("cargo", &["clippy", "--workspace", "--all-targets", "--all-features", "--", "-D", "warnings"])?;
+            run(
+                "cargo",
+                &[
+                    "clippy",
+                    "--workspace",
+                    "--all-targets",
+                    "--all-features",
+                    "--",
+                    "-D",
+                    "warnings",
+                ],
+            )?;
             run("cargo", &["test", "--workspace", "--all-features"])?;
-            run("cargo", &["doc", "--workspace", "--all-features", "--no-deps"])?;
+            run(
+                "cargo",
+                &["doc", "--workspace", "--all-features", "--no-deps"],
+            )?;
         }
         Task::Fmt => run("cargo", &["fmt", "--all"])?,
-        Task::Lint => run("cargo", &["clippy", "--workspace", "--all-targets", "--all-features", "--", "-D", "warnings"])?,
+        Task::Lint => run(
+            "cargo",
+            &[
+                "clippy",
+                "--workspace",
+                "--all-targets",
+                "--all-features",
+                "--",
+                "-D",
+                "warnings",
+            ],
+        )?,
         Task::Test => run("cargo", &["test", "--workspace", "--all-features"])?,
-        Task::Doc => run("cargo", &["doc", "--workspace", "--all-features", "--no-deps"])?,
+        Task::Doc => run(
+            "cargo",
+            &["doc", "--workspace", "--all-features", "--no-deps"],
+        )?,
         Task::Security => {
             run_optional("cargo-deny", &["check"])?;
             run_optional("cargo-audit", &["audit"])?;
@@ -66,7 +96,14 @@ fn run(cmd: &str, args: &[&str]) -> Result<()> {
 }
 
 fn run_optional(cmd: &str, args: &[&str]) -> Result<()> {
-    if which::which(cmd).is_err() {
+    if Command::new(cmd)
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_err()
+    {
         eprintln!("skip {cmd}: command not installed");
         return Ok(());
     }

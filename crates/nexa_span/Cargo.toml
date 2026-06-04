@@ -1,6 +1,6 @@
 [package]
-name = "your-config"
-description = "Configuration loading for your Rust workspace project."
+name = "nexa_span"
+description = "Source file and text range primitives for the Nexa compiler."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,10 +10,6 @@ homepage.workspace = true
 authors.workspace = true
 
 [dependencies]
-anyhow.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-toml.workspace = true
 
 [lints]
 workspace = true

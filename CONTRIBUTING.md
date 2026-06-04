@@ -24,8 +24,8 @@ cargo xtask security
 Conventional Commits are recommended:
 
 ```txt
-feat: add new command
-fix: handle empty config path
+feat(parser): parse let statements
+fix(nexac): report check diagnostics on stderr
 docs: update usage
 chore: update dependencies
 ```

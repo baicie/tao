@@ -1,8 +1,8 @@
 {
-  "name": "@your-org/your-repo-docs",
+  "name": "@baicie/nexa-docs",
   "version": "0.1.0",
   "private": true,
-  "description": "Documentation site for Rust Workspace Template",
+  "description": "Documentation site for Nexa",
   "type": "module",
   "scripts": {
     "dev": "vitepress dev",

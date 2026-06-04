@@ -1,6 +1,6 @@
 [package]
-name = "your-core"
-description = "Core business logic for your Rust workspace project."
+name = "nexa_syntax"
+description = "Token and syntax primitives for the Nexa compiler."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,12 +10,8 @@ homepage.workspace = true
 authors.workspace = true
 
 [dependencies]
-your-utils.workspace = true
-thiserror.workspace = true
-tracing.workspace = true
-
-[dev-dependencies]
-pretty_assertions = "1"
+nexa_span.workspace = true
+rowan.workspace = true
 
 [lints]
 workspace = true

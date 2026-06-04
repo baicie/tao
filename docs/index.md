@@ -2,34 +2,24 @@
 layout: home
 
 hero:
-  name: "Rust Workspace Template"
-  text: "A production-ready Rust workspace template for multi-crate CLI/library projects"
-  tagline: Fast, safe, and productive — ship production-grade Rust with confidence
+  name: "Nexa"
+  text: "Rust bootstrap compiler workspace"
+  tagline: A small first compiler front end: spans, diagnostics, syntax, parser, and nexac.
   actions:
     - theme: brand
       text: Get Started
       link: /guide/getting-started
     - theme: alt
       text: View on GitHub
-      link: https://github.com/your-org/your-repo
+      link: https://github.com/baicie/nexa
 
 features:
-  - icon: ⚡
-    title: Multi-Crate Workspace
-    details: Organized Cargo workspace with CLI, core, config, utils, and optional proc-macro crates. Clean dependency boundaries.
-  - icon: 🔒
-    title: Production Ready
-    details: rustfmt, clippy, cargo-deny, cargo-audit, cargo-llvm-cov, and multi-platform CI on Linux, macOS, and Windows.
-  - icon: 🚀
-    title: xtask Automation
-    details: Built-in xtask pattern for development commands — check, fmt, lint, test, doc, security — all in one place.
-  - icon: 📦
-    title: Smart Releases
-    details: GitHub Release workflow with multi-platform binary builds. Manual crates.io publishing with dry-run support.
-  - icon: 🔧
-    title: VSCode Integration
-    details: Recommended settings, tasks, and extensions configured out of the box for a seamless editing experience.
-  - icon: 📚
-    title: Documentation
-    details: Comprehensive docs, changelog, and API reference to help you understand and extend the project.
+  - title: Compiler-Shaped Workspace
+    details: Crates are organized by compiler phase boundaries instead of generic app layers.
+  - title: Stable Source Spans
+    details: Diagnostics and parser output share source ranges through nexa_span.
+  - title: Front-End Loop
+    details: nexac can parse and check source files while the grammar grows.
+  - title: Rust Tooling
+    details: fmt, clippy, tests, docs, xtask automation, CI, and security checks stay in place.
 ---

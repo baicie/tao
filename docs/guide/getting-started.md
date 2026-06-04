@@ -2,53 +2,38 @@
 
 ## Prerequisites
 
-- **Rust** (latest stable, MSRV: 1.80)
-- **cargo** (included with Rust)
+- Rust stable with MSRV 1.80
+- cargo
 
-Optional tools for full experience:
+Optional tools:
 
 ```bash
 cargo install cargo-deny cargo-audit cargo-machete cargo-llvm-cov git-cliff
 ```
 
-## Quick Start
-
-Clone and build:
+## Build
 
 ```bash
-git clone https://github.com/your-org/your-repo.git
-cd your-repo
+git clone https://github.com/baicie/nexa.git
+cd nexa
 cargo build --workspace
 ```
 
-Run tests:
+## Test
 
 ```bash
 cargo test --workspace
 ```
 
-Try the CLI:
+## Try the CLI
 
 ```bash
-cargo run -p your-cli -- hello Zeus
-```
-
-## Project Layout
-
-```
-crates/
-  cli/       # Binary: CLI entrypoint using clap
-  core/      # Library: business logic and domain types
-  config/    # Library: TOML/JSON configuration loading
-  utils/     # Library: shared utilities (no internal deps)
-  macros/    # Proc-macro: optional procedural macros
-xtask/       # Binary: development automation commands
-tests/       # Integration tests
-benches/     # Criterion benchmarks
+cargo run -p nexac -- check examples/basic.nexa
+cargo run -p nexac -- parse examples/basic.nexa
 ```
 
 ## Next Steps
 
-- Read the [Project Structure](/guide/project-structure) guide
-- Learn about [Development](/guide/development) commands
-- Check out the [API Reference](/api/overview)
+- Read [Project Structure](/guide/project-structure).
+- Read [Development](/guide/development).
+- Track language behavior in [Spec](/spec/).
