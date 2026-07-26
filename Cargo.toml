@@ -30,7 +30,8 @@ nexa_parser = { path = "crates/nexa_parser", version = "0.1.0" }
 
 anyhow = "1"
 thiserror = "2"
-clap = { version = "4", features = ["derive"] }
+# Keep the resolved CLI stack compatible with the workspace MSRV (Rust 1.80).
+clap = { version = "=4.5.32", features = ["derive"] }
 rowan = "0.16"
 insta = "1"
 pretty_assertions = "1"

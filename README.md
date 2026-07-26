@@ -8,7 +8,7 @@ Nexa is a Rust bootstrap compiler workspace.
 crates/
   nexa_span/         # FileId, TextRange, and source spans
   nexa_diagnostics/  # Structured errors, warnings, and source labels
-  nexa_syntax/       # Tokens, SyntaxKind, and future lossless CST support
+  nexa_syntax/       # Tokens, SyntaxKind, and lossless CST support
   nexa_parser/       # Parser entry points and recovery diagnostics
   nexac/             # CLI entry point
 xtask/               # Repository automation commands
@@ -33,3 +33,5 @@ cargo run -p nexac -- parse examples/basic.nexa
 
 The first milestone is a small front-end loop: stable spans, diagnostics,
 lossless tokens, parser boundaries, and a CLI that can `parse` and `check`.
+The MVP grammar builds a lossless CST for integer bindings such as
+`let answer = 42;` and reports source-spanned syntax errors.

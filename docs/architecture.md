@@ -8,7 +8,7 @@ Nexa starts as a small compiler front end. The workspace keeps each crate aligne
 |-------|----------------|
 | `nexa_span` | `FileId`, `TextRange`, and source spans |
 | `nexa_diagnostics` | structured errors, warnings, and source labels |
-| `nexa_syntax` | tokens, `SyntaxKind`, and future lossless CST support |
+| `nexa_syntax` | tokens, `SyntaxKind`, and lossless CST support |
 | `nexa_parser` | parser entry points and recovery diagnostics |
 | `nexac` | command-line interface |
 

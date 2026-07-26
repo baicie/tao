@@ -3,35 +3,104 @@
 
 use nexa_span::TextRange;
 
-/// Lossless syntax kind used by tokens and future CST nodes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Lossless syntax kind used by tokens and CST nodes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u16)]
 pub enum SyntaxKind {
     /// An identifier.
-    Ident,
+    Ident = 0,
     /// An integer literal.
-    Int,
+    Int = 1,
     /// Whitespace trivia.
-    Whitespace,
+    Whitespace = 2,
     /// A line comment.
-    LineComment,
+    LineComment = 3,
     /// `(`
-    LParen,
+    LParen = 4,
     /// `)`
-    RParen,
+    RParen = 5,
     /// `{`
-    LBrace,
+    LBrace = 6,
     /// `}`
-    RBrace,
+    RBrace = 7,
     /// `,`
-    Comma,
+    Comma = 8,
     /// `;`
-    Semicolon,
+    Semicolon = 9,
     /// `=`
-    Eq,
+    Eq = 10,
     /// An unrecognized character.
-    Unknown,
+    Unknown = 11,
+    /// The `let` keyword.
+    LetKw = 12,
+    /// The root of a parsed source file.
+    SourceFile = 13,
+    /// A `let` binding statement.
+    LetStatement = 14,
+    /// Tokens skipped during parser recovery.
+    Error = 15,
 }
+
+impl SyntaxKind {
+    /// Returns true for whitespace and comments.
+    #[must_use]
+    pub const fn is_trivia(self) -> bool {
+        matches!(self, Self::Whitespace | Self::LineComment)
+    }
+
+    fn from_raw(raw: u16) -> Self {
+        match raw {
+            0 => Self::Ident,
+            1 => Self::Int,
+            2 => Self::Whitespace,
+            3 => Self::LineComment,
+            4 => Self::LParen,
+            5 => Self::RParen,
+            6 => Self::LBrace,
+            7 => Self::RBrace,
+            8 => Self::Comma,
+            9 => Self::Semicolon,
+            10 => Self::Eq,
+            11 => Self::Unknown,
+            12 => Self::LetKw,
+            13 => Self::SourceFile,
+            14 => Self::LetStatement,
+            15 => Self::Error,
+            _ => unreachable!("invalid Nexa syntax kind: {raw}"),
+        }
+    }
+}
+
+impl From<SyntaxKind> for rowan::SyntaxKind {
+    fn from(kind: SyntaxKind) -> Self {
+        Self(kind as u16)
+    }
+}
+
+/// Rowan language marker for Nexa concrete syntax trees.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum NexaLanguage {}
+
+impl rowan::Language for NexaLanguage {
+    type Kind = SyntaxKind;
+
+    fn kind_from_raw(raw: rowan::SyntaxKind) -> Self::Kind {
+        SyntaxKind::from_raw(raw.0)
+    }
+
+    fn kind_to_raw(kind: Self::Kind) -> rowan::SyntaxKind {
+        kind.into()
+    }
+}
+
+/// A typed Nexa concrete syntax node.
+pub type SyntaxNode = rowan::SyntaxNode<NexaLanguage>;
+
+/// A typed Nexa concrete syntax token.
+pub type SyntaxToken = rowan::SyntaxToken<NexaLanguage>;
+
+/// A node or token in a Nexa concrete syntax tree.
+pub type SyntaxElement = rowan::SyntaxElement<NexaLanguage>;
 
 /// A lossless token with source range and original text.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,11 +176,13 @@ pub fn tokenize(source: &str) -> Vec<Token> {
         };
 
         let end = chars.peek().map_or(source.len(), |(index, _)| *index);
-        tokens.push(Token::new(
-            kind,
-            TextRange::new(start, end),
-            &source[start..end],
-        ));
+        let text = &source[start..end];
+        let kind = if kind == SyntaxKind::Ident && text == "let" {
+            SyntaxKind::LetKw
+        } else {
+            kind
+        };
+        tokens.push(Token::new(kind, TextRange::new(start, end), text));
     }
 
     tokens
@@ -140,7 +211,7 @@ mod tests {
         assert_eq!(
             kinds,
             [
-                SyntaxKind::Ident,
+                SyntaxKind::LetKw,
                 SyntaxKind::Whitespace,
                 SyntaxKind::Ident,
                 SyntaxKind::Whitespace,
@@ -150,5 +221,51 @@ mod tests {
                 SyntaxKind::Semicolon
             ]
         );
+    }
+
+    #[test]
+    fn tokenization_preserves_source_text() {
+        let source = "// binding\r\nlet answer = 42;";
+        let tokenized = tokenize(source)
+            .iter()
+            .map(|token| token.text())
+            .collect::<String>();
+
+        assert_eq!(tokenized, source);
+    }
+
+    #[test]
+    fn identifiers_starting_with_let_are_not_keywords() {
+        let tokens = tokenize("letter");
+
+        assert_eq!(tokens[0].kind(), SyntaxKind::Ident);
+    }
+
+    #[test]
+    fn syntax_kinds_round_trip_through_rowan() {
+        let kinds = [
+            SyntaxKind::Ident,
+            SyntaxKind::Int,
+            SyntaxKind::Whitespace,
+            SyntaxKind::LineComment,
+            SyntaxKind::LParen,
+            SyntaxKind::RParen,
+            SyntaxKind::LBrace,
+            SyntaxKind::RBrace,
+            SyntaxKind::Comma,
+            SyntaxKind::Semicolon,
+            SyntaxKind::Eq,
+            SyntaxKind::Unknown,
+            SyntaxKind::LetKw,
+            SyntaxKind::SourceFile,
+            SyntaxKind::LetStatement,
+            SyntaxKind::Error,
+        ];
+
+        for kind in kinds {
+            let raw: rowan::SyntaxKind = kind.into();
+
+            assert_eq!(SyntaxKind::from_raw(raw.0), kind);
+        }
     }
 }
