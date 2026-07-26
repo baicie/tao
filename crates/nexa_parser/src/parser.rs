@@ -1,7 +1,9 @@
-use nexa_diagnostics::{Diagnostic, Label};
+use nexa_diagnostics::{Diagnostic, DiagnosticCode, Label};
 use nexa_span::{FileId, SourceSpan, TextRange};
 use nexa_syntax::{SyntaxKind, Token};
 use rowan::{GreenNode, GreenNodeBuilder};
+
+const PARSE_ERROR: DiagnosticCode = DiagnosticCode::new("E1001");
 
 pub(super) fn parse_tokens(
     file: FileId,
@@ -24,7 +26,7 @@ fn lexical_diagnostics(file: FileId, tokens: &[Token]) -> Vec<Diagnostic> {
         .iter()
         .filter(|token| token.kind() == SyntaxKind::Unknown)
         .map(|token| {
-            Diagnostic::error("unknown token").with_label(Label::new(
+            Diagnostic::error(PARSE_ERROR, "unknown token").with_label(Label::new(
                 SourceSpan::new(file, token.range()),
                 format!("unexpected `{}`", token.text()),
             ))
@@ -174,7 +176,7 @@ impl Parser<'_> {
             Token::range,
         );
         self.diagnostics.push(
-            Diagnostic::error(message)
+            Diagnostic::error(PARSE_ERROR, message)
                 .with_label(Label::new(SourceSpan::new(self.file, range), message)),
         );
     }

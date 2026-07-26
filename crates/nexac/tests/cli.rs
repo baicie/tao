@@ -30,8 +30,9 @@ fn nexac_check_rejects_invalid_syntax() -> Result<(), Box<dyn std::error::Error>
 
     assert!(!output.status.success());
     assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert!(stderr.contains("E1001"), "stderr: {stderr}");
     assert!(stderr.contains("expected binding name"), "stderr: {stderr}");
-    assert!(stderr.contains("4..5"), "stderr: {stderr}");
+    assert!(stderr.contains(":1:5:"), "stderr: {stderr}");
 
     Ok(())
 }
@@ -80,8 +81,9 @@ fn nexac_parse_reports_invalid_syntax() -> Result<(), Box<dyn std::error::Error>
 
     assert!(!output.status.success());
     assert!(stdout.contains("LetStatement@0..9"), "stdout: {stdout}");
+    assert!(stderr.contains("E1001"), "stderr: {stderr}");
     assert!(stderr.contains("expected binding name"), "stderr: {stderr}");
-    assert!(stderr.contains("4..5"), "stderr: {stderr}");
+    assert!(stderr.contains(":1:5:"), "stderr: {stderr}");
 
     Ok(())
 }

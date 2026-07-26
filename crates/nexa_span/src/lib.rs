@@ -29,9 +29,12 @@ pub struct TextRange {
 impl TextRange {
     /// Creates a new half-open range.
     ///
-    /// The caller must provide `start <= end`.
+    /// # Panics
+    ///
+    /// Panics when `start` is greater than `end`.
     #[must_use]
     pub const fn new(start: usize, end: usize) -> Self {
+        assert!(start <= end, "text range start must not exceed end");
         Self { start, end }
     }
 
@@ -92,5 +95,11 @@ mod tests {
         assert_eq!(span.file().raw(), 7);
         assert_eq!(span.range().start(), 2);
         assert_eq!(span.range().end(), 5);
+    }
+
+    #[test]
+    #[should_panic(expected = "text range start must not exceed end")]
+    fn text_range_rejects_an_inverted_range() {
+        let _ = TextRange::new(5, 2);
     }
 }

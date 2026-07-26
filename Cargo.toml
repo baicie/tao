@@ -1,11 +1,12 @@
 [workspace]
 members = [
-  "crates/nexa_span",
-  "crates/nexa_diagnostics",
-  "crates/nexa_syntax",
-  "crates/nexa_parser",
-  "crates/nexac",
-  "xtask",
+    "crates/nexa_span",
+    "crates/nexa_source",
+    "crates/nexa_diagnostics",
+    "crates/nexa_syntax",
+    "crates/nexa_parser",
+    "crates/nexac",
+    "xtask",
 ]
 resolver = "2"
 
@@ -24,6 +25,7 @@ categories = ["compilers", "command-line-utilities"]
 
 [workspace.dependencies]
 nexa_span = { path = "crates/nexa_span", version = "0.1.0" }
+nexa_source = { path = "crates/nexa_source", version = "0.1.0" }
 nexa_diagnostics = { path = "crates/nexa_diagnostics", version = "0.1.0" }
 nexa_syntax = { path = "crates/nexa_syntax", version = "0.1.0" }
 nexa_parser = { path = "crates/nexa_parser", version = "0.1.0" }
