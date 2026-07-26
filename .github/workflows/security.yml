@@ -37,7 +37,7 @@ jobs:
         run: cargo deny check
 
       - name: cargo audit
-        run: cargo audit
+        run: cargo audit --db "$RUNNER_TEMP/cargo-audit-db"
 
       - name: cargo machete
         run: cargo machete --with-metadata
