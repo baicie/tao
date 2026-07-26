@@ -15,6 +15,8 @@ allow = [
   "BSD-2-Clause",
   "BSD-3-Clause",
   "ISC",
+  # Required by `unicode-ident`, used by Rust procedural macro dependencies.
+  "Unicode-3.0",
   "Unicode-DFS-2016",
 ]
 exceptions = []

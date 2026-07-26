@@ -13,6 +13,7 @@ authors.workspace = true
 nexa_diagnostics.workspace = true
 nexa_span.workspace = true
 nexa_syntax.workspace = true
+rowan.workspace = true
 
 [lints]
 workspace = true
