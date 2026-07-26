@@ -1,0 +1,10 @@
+function add(left: Int, right: Int): Int {
+  return left + right;
+}
+
+function main(): Unit {
+  const answer: Int = add(40, 2);
+  if (answer === 42) {
+    print(answer);
+  }
+}

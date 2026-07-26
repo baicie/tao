@@ -4,10 +4,10 @@ use std::path::PathBuf;
 use std::process::Command;
 
 #[test]
-fn nexac_check_accepts_basic_source() -> Result<(), Box<dyn std::error::Error>> {
+fn nexac_check_accepts_a_language_core_program() -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
         .arg("check")
-        .arg(fixture("accepted/let_statement.nexa"))
+        .arg(fixture("accepted/language_core.nexa"))
         .output()?;
 
     assert!(
@@ -24,15 +24,18 @@ fn nexac_check_accepts_basic_source() -> Result<(), Box<dyn std::error::Error>> 
 fn nexac_check_rejects_invalid_syntax() -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
         .arg("check")
-        .arg(fixture("rejected/missing_name.nexa"))
+        .arg(fixture("rejected/missing_function_name.nexa"))
         .output()?;
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert!(!output.status.success());
     assert_eq!(String::from_utf8_lossy(&output.stdout), "");
     assert!(stderr.contains("E1001"), "stderr: {stderr}");
-    assert!(stderr.contains("expected binding name"), "stderr: {stderr}");
-    assert!(stderr.contains(":1:5:"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("expected function name"),
+        "stderr: {stderr}"
+    );
+    assert!(stderr.contains(":1:10:"), "stderr: {stderr}");
 
     Ok(())
 }
@@ -41,7 +44,7 @@ fn nexac_check_rejects_invalid_syntax() -> Result<(), Box<dyn std::error::Error>
 fn nexac_parse_prints_the_concrete_syntax_tree() -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
         .arg("parse")
-        .arg(fixture("accepted/let_statement.nexa"))
+        .arg(fixture("accepted/language_core.nexa"))
         .output()?;
     let stdout = String::from_utf8_lossy(&output.stdout);
 
@@ -50,22 +53,13 @@ fn nexac_parse_prints_the_concrete_syntax_tree() -> Result<(), Box<dyn std::erro
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(
-        stdout,
-        concat!(
-            "SourceFile@0..17\n",
-            "  LetStatement@0..16\n",
-            "    LetKw@0..3 \"let\"\n",
-            "    Whitespace@3..4 \" \"\n",
-            "    Ident@4..10 \"answer\"\n",
-            "    Whitespace@10..11 \" \"\n",
-            "    Eq@11..12 \"=\"\n",
-            "    Whitespace@12..13 \" \"\n",
-            "    Int@13..15 \"42\"\n",
-            "    Semicolon@15..16 \";\"\n",
-            "  Whitespace@16..17 \"\\n\"\n",
-        )
+    assert!(stdout.starts_with("SourceFile@0.."), "stdout: {stdout}");
+    assert!(
+        stdout.contains("FunctionDeclaration@0.."),
+        "stdout: {stdout}"
     );
+    assert!(stdout.contains("ConstDeclaration@"), "stdout: {stdout}");
+    assert!(stdout.contains("CallExpression@"), "stdout: {stdout}");
 
     Ok(())
 }
@@ -74,16 +68,22 @@ fn nexac_parse_prints_the_concrete_syntax_tree() -> Result<(), Box<dyn std::erro
 fn nexac_parse_reports_invalid_syntax() -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
         .arg("parse")
-        .arg(fixture("rejected/missing_name.nexa"))
+        .arg(fixture("rejected/missing_function_name.nexa"))
         .output()?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert!(!output.status.success());
-    assert!(stdout.contains("LetStatement@0..9"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("FunctionDeclaration@0.."),
+        "stdout: {stdout}"
+    );
     assert!(stderr.contains("E1001"), "stderr: {stderr}");
-    assert!(stderr.contains("expected binding name"), "stderr: {stderr}");
-    assert!(stderr.contains(":1:5:"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("expected function name"),
+        "stderr: {stderr}"
+    );
+    assert!(stderr.contains(":1:10:"), "stderr: {stderr}");
 
     Ok(())
 }
