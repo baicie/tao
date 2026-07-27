@@ -5,6 +5,8 @@ members = [
     "crates/nexa_diagnostics",
     "crates/nexa_syntax",
     "crates/nexa_parser",
+    "crates/nexa_hir",
+    "crates/nexa_compiler",
     "crates/nexac",
     "xtask",
 ]
@@ -29,6 +31,8 @@ nexa_source = { path = "crates/nexa_source", version = "0.1.0" }
 nexa_diagnostics = { path = "crates/nexa_diagnostics", version = "0.1.0" }
 nexa_syntax = { path = "crates/nexa_syntax", version = "0.1.0" }
 nexa_parser = { path = "crates/nexa_parser", version = "0.1.0" }
+nexa_hir = { path = "crates/nexa_hir", version = "0.1.0" }
+nexa_compiler = { path = "crates/nexa_compiler", version = "0.1.0" }
 
 anyhow = "1"
 thiserror = "2"

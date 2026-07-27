@@ -1,6 +1,6 @@
 [package]
-name = "nexac"
-description = "Command-line interface for the Nexa bootstrap compiler."
+name = "nexa_compiler"
+description = "Compiler driver for the Nexa language front end."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,17 +9,10 @@ repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
 
-[[bin]]
-name = "nexac"
-path = "src/main.rs"
-
 [dependencies]
-anyhow.workspace = true
-clap.workspace = true
-nexa_compiler.workspace = true
 nexa_diagnostics.workspace = true
+nexa_hir.workspace = true
 nexa_parser.workspace = true
-nexa_source.workspace = true
 nexa_span.workspace = true
 
 [lints]

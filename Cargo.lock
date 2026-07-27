@@ -129,10 +129,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
+name = "nexa_compiler"
+version = "0.1.0"
+dependencies = [
+ "nexa_diagnostics",
+ "nexa_hir",
+ "nexa_parser",
+ "nexa_span",
+]
+
+[[package]]
 name = "nexa_diagnostics"
 version = "0.1.0"
 dependencies = [
  "nexa_span",
+]
+
+[[package]]
+name = "nexa_hir"
+version = "0.1.0"
+dependencies = [
+ "nexa_diagnostics",
+ "nexa_parser",
+ "nexa_span",
+ "nexa_syntax",
 ]
 
 [[package]]
@@ -171,6 +191,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "nexa_compiler",
+ "nexa_diagnostics",
  "nexa_parser",
  "nexa_source",
  "nexa_span",

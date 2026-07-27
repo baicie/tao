@@ -5,8 +5,11 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
+use nexa_compiler::{check, CheckResult};
+use nexa_diagnostics::{Diagnostic, Severity};
 use nexa_parser::{parse_source, Parse};
 use nexa_source::SourceMap;
+use nexa_span::FileId;
 
 #[derive(Debug, Parser)]
 #[command(name = "nexac", version, about = "Nexa bootstrap compiler")]
@@ -38,22 +41,25 @@ fn main() -> Result<()> {
             let parse = parse_file(&mut sources, &file)?;
 
             println!("{}", parse.debug_tree());
-            emit_diagnostics(&sources, &parse);
+            emit_diagnostics(&sources, parse.diagnostics());
 
             if !parse.is_ok() {
-                bail!("parse produced {} diagnostic(s)", parse.diagnostics().len());
+                bail!(
+                    "parse produced {} error(s)",
+                    error_count(parse.diagnostics())
+                );
             }
         }
         Command::Check { file } => {
             let mut sources = SourceMap::default();
-            let parse = parse_file(&mut sources, &file)?;
+            let result = check_file(&mut sources, &file)?;
 
-            emit_diagnostics(&sources, &parse);
+            emit_diagnostics(&sources, result.diagnostics());
 
-            if !parse.is_ok() {
+            if !result.is_ok() {
                 bail!(
-                    "check failed with {} diagnostic(s)",
-                    parse.diagnostics().len()
+                    "check failed with {} error(s)",
+                    error_count(result.diagnostics())
                 );
             }
 
@@ -69,19 +75,35 @@ fn read_source(file: &Path) -> Result<String> {
 }
 
 fn parse_file(sources: &mut SourceMap, path: &Path) -> Result<Parse> {
-    let source = read_source(path)?;
-    let file = sources
-        .add(path, source)
-        .context("failed to register source file")?;
-    let source = sources
-        .file(file)
-        .ok_or_else(|| anyhow::anyhow!("registered source file was not found"))?;
+    let file = register_source(sources, path)?;
+    let source = source_text(sources, file)?;
 
-    Ok(parse_source(file, source.text()))
+    Ok(parse_source(file, source))
 }
 
-fn emit_diagnostics(sources: &SourceMap, parse: &Parse) {
-    for diagnostic in parse.diagnostics() {
+fn check_file(sources: &mut SourceMap, path: &Path) -> Result<CheckResult> {
+    let file = register_source(sources, path)?;
+    let source = source_text(sources, file)?;
+
+    Ok(check(file, source))
+}
+
+fn register_source(sources: &mut SourceMap, path: &Path) -> Result<FileId> {
+    let source = read_source(path)?;
+    sources
+        .add(path, source)
+        .context("failed to register source file")
+}
+
+fn source_text(sources: &SourceMap, file: FileId) -> Result<&str> {
+    sources
+        .file(file)
+        .map(|source| source.text())
+        .ok_or_else(|| anyhow::anyhow!("registered source file was not found"))
+}
+
+fn emit_diagnostics(sources: &SourceMap, diagnostics: &[Diagnostic]) {
+    for diagnostic in diagnostics {
         eprintln!(
             "{} {:?}: {}",
             diagnostic.code(),
@@ -109,4 +131,11 @@ fn emit_diagnostics(sources: &SourceMap, parse: &Parse) {
             }
         }
     }
+}
+
+fn error_count(diagnostics: &[Diagnostic]) -> usize {
+    diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity() == Severity::Error)
+        .count()
 }

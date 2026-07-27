@@ -41,6 +41,26 @@ fn nexac_check_rejects_invalid_syntax() -> Result<(), Box<dyn std::error::Error>
 }
 
 #[test]
+fn nexac_check_rejects_invalid_semantics() -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("check")
+        .arg(fixture("rejected/non_boolean_condition.nexa"))
+        .output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert!(stderr.contains("E3002"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("if condition must have type `Bool`"),
+        "stderr: {stderr}"
+    );
+    assert!(stderr.contains(":2:7:"), "stderr: {stderr}");
+
+    Ok(())
+}
+
+#[test]
 fn nexac_parse_prints_the_concrete_syntax_tree() -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
         .arg("parse")
