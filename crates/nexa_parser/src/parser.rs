@@ -174,6 +174,10 @@ impl Parser<'_> {
                     self.error_at_current("unexpected `else`");
                     self.bump();
                 }
+                Some(SyntaxKind::FunctionKw) => {
+                    self.error_at_current("expected `}` to close block");
+                    break;
+                }
                 Some(_) => {
                     let statement_position = self.position;
                     self.parse_expression_statement();

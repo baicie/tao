@@ -178,7 +178,22 @@ fn parse_source_recovers_from_a_function_declaration_inside_a_block() {
     assert_eq!(parse.syntax().to_string(), source);
     assert_eq!(
         count_nodes(&parse.syntax(), SyntaxKind::FunctionDeclaration),
-        1
+        2
+    );
+}
+
+#[test]
+fn parse_source_recovers_the_next_function_after_a_missing_block_brace() {
+    let source = r#"function broken(): Unit {
+  const answer = 42;
+function main(): Unit { return; }"#;
+    let parse = parse_source(FileId::new(0), source);
+
+    assert!(!parse.is_ok());
+    assert_eq!(parse.syntax().to_string(), source);
+    assert_eq!(
+        count_nodes(&parse.syntax(), SyntaxKind::FunctionDeclaration),
+        2
     );
 }
 
