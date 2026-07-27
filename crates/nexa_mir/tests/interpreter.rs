@@ -1,7 +1,9 @@
 //! MIR lowering and interpretation regression tests.
 
 use nexa_hir::{lower as lower_hir, type_check, BinaryOperator};
-use nexa_mir::{lower as lower_mir, run, MirExpression, MirProgram, MirStatement, MirTerminator};
+use nexa_mir::{
+    lower as lower_mir, run, run_with_args, MirExpression, MirProgram, MirStatement, MirTerminator,
+};
 use nexa_parser::parse_source;
 use nexa_span::{FileId, SourceSpan, TextRange};
 
@@ -144,6 +146,254 @@ function main(): Unit {
     let execution = run(&program)?;
 
     assert_eq!(execution.output(), ["1"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_executes_strings_and_immutable_arrays() -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"function sum(values: Int[]): Int {
+  let index = 0;
+  let total = 0;
+  while (index < values.length) {
+    total = total + values[index];
+    index = index + 1;
+  }
+  return total;
+}
+
+function main(): Unit {
+  const words: String[] = ["Nexa", "native"];
+  print(words[0] + " " + words[1]);
+  print(sum([20, 22]));
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["Nexa native", "42"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_passes_cli_arguments_to_main() -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile("function main(args: String[]): Unit { print(args[1]); }")?;
+    let arguments = ["first".to_owned(), "second".to_owned()];
+
+    let execution = run_with_args(&program, &arguments)?;
+
+    assert_eq!(execution.output(), ["second"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_evaluates_array_elements_left_to_right() -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"function first(): Int { print(1); return 20; }
+function second(): Int { print(2); return 22; }
+function main(): Unit {
+  const values = [first(), second()];
+  print(values[0] + values[1]);
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["1", "2", "42"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_reports_array_bounds_with_the_index_expression_span(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = r#"function main(): Unit {
+  print("before");
+  const values: Int[] = [1];
+  print(values[1]);
+}"#;
+    let index_start = source
+        .find("values[1]")
+        .ok_or_else(|| std::io::Error::other("expected index expression"))?;
+    let expected_span = SourceSpan::new(
+        FileId::new(3),
+        TextRange::new(index_start, index_start + "values[1]".len()),
+    );
+    let program = compile(source)?;
+
+    let failure = run(&program)
+        .err()
+        .ok_or_else(|| std::io::Error::other("expected an array bounds error"))?;
+
+    assert_eq!(
+        failure.error().message(),
+        "array index 1 out of bounds for length 1"
+    );
+    assert_eq!(failure.error().span(), expected_span);
+    assert_eq!(failure.output(), ["before"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_reports_a_negative_array_index_with_the_index_expression_span(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = r#"function main(): Unit {
+  const values = [10];
+  print(values[-1]);
+}"#;
+    let index_start = source
+        .find("values[-1]")
+        .ok_or_else(|| std::io::Error::other("expected negative index expression"))?;
+    let expected_span = SourceSpan::new(
+        FileId::new(3),
+        TextRange::new(index_start, index_start + "values[-1]".len()),
+    );
+    let program = compile(source)?;
+
+    let failure = run(&program)
+        .err()
+        .ok_or_else(|| std::io::Error::other("expected a negative array bounds error"))?;
+
+    assert_eq!(
+        failure.error().message(),
+        "array index -1 out of bounds for length 1"
+    );
+    assert_eq!(failure.error().span(), expected_span);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_reads_the_first_and_last_valid_array_indices(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        "function main(): Unit { const values = [10, 20, 30]; print(values[0]); print(values[2]); }",
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["10", "30"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_evaluates_an_index_base_before_its_subscript(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"function values(): Int[] { print(1); return [10, 20]; }
+function subscript(): Int { print(2); return 1; }
+function main(): Unit { print(values()[subscript()]); }"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["1", "2", "20"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_evaluates_string_concatenation_operands_left_to_right(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"function left(): String { print(1); return "Ne"; }
+function right(): String { print(2); return "xa"; }
+function main(): Unit { print(left() + right()); }"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["1", "2", "Nexa"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_evaluates_string_equality_operands_left_to_right(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"function left(): String { print(1); return "Nexa"; }
+function right(): String { print(2); return "Nexa"; }
+function main(): Unit { print(left() === right()); }"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["1", "2", "true"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_compares_utf8_strings_without_unicode_normalization(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = format!(
+        "function main(): Unit {{ print(\"{}\" === \"{}\"); }}",
+        '\u{00e9}', "e\u{0301}"
+    );
+    let program = compile(&source)?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["false"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_decodes_all_supported_string_escapes() -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"function main(): Unit {
+  print("slash:\\ quote:\" line\ncarriage\rtab\tend");
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(
+        execution.output(),
+        ["slash:\\ quote:\" line\ncarriage\rtab\tend"]
+    );
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_indexes_nested_immutable_arrays() -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"function main(): Unit {
+  const matrix: Int[][] = [[10, 20], [30, 40]];
+  print(matrix[1][0]);
+  print(matrix.length);
+  print(matrix[0].length);
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["30", "2", "2"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_returns_immutable_arrays_from_functions() -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"function pair(): Int[] { return [20, 22]; }
+function main(): Unit {
+  const values = pair();
+  print(values[0] + values[1]);
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["42"]);
 
     Ok(())
 }
@@ -438,8 +688,16 @@ fn expression_contains_logical_binary(expression: &MirExpression) -> bool {
         MirExpression::Call { arguments, .. } => {
             arguments.iter().any(expression_contains_logical_binary)
         }
+        MirExpression::Array { elements, .. } => {
+            elements.iter().any(expression_contains_logical_binary)
+        }
+        MirExpression::Index { target, index, .. } => {
+            expression_contains_logical_binary(target) || expression_contains_logical_binary(index)
+        }
+        MirExpression::Length { target, .. } => expression_contains_logical_binary(target),
         MirExpression::Integer { .. }
         | MirExpression::Boolean { .. }
+        | MirExpression::String { .. }
         | MirExpression::Local { .. } => false,
     }
 }

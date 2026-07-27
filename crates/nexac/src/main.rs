@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use nexa_compiler::{check, run, CheckResult, RunResult, RuntimeError};
+use nexa_compiler::{check, run_with_args, CheckResult, RunResult, RuntimeError};
 use nexa_diagnostics::{Diagnostic, Severity};
 use nexa_parser::{parse_source, Parse};
 use nexa_source::SourceMap;
@@ -34,6 +34,9 @@ enum Command {
     Run {
         /// Source file to execute.
         file: PathBuf,
+        /// String arguments passed to `main`, following `--`.
+        #[arg(last = true)]
+        arguments: Vec<String>,
     },
 }
 
@@ -70,9 +73,9 @@ fn main() -> Result<()> {
 
             println!("ok");
         }
-        Command::Run { file } => {
+        Command::Run { file, arguments } => {
             let mut sources = SourceMap::default();
-            let result = run_file(&mut sources, &file)?;
+            let result = run_file(&mut sources, &file, &arguments)?;
 
             emit_diagnostics(&sources, result.diagnostics());
 
@@ -114,11 +117,11 @@ fn check_file(sources: &mut SourceMap, path: &Path) -> Result<CheckResult> {
     Ok(check(file, source))
 }
 
-fn run_file(sources: &mut SourceMap, path: &Path) -> Result<RunResult> {
+fn run_file(sources: &mut SourceMap, path: &Path, arguments: &[String]) -> Result<RunResult> {
     let file = register_source(sources, path)?;
     let source = source_text(sources, file)?;
 
-    Ok(run(file, source))
+    Ok(run_with_args(file, source, arguments))
 }
 
 fn register_source(sources: &mut SourceMap, path: &Path) -> Result<FileId> {

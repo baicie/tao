@@ -3,7 +3,7 @@
 
 use nexa_diagnostics::Diagnostic;
 use nexa_hir::{lower, type_check, TypedProgram};
-use nexa_mir::{lower as lower_mir, run as run_mir, Execution};
+use nexa_mir::{lower as lower_mir, run_with_args as run_mir_with_args, Execution};
 use nexa_parser::parse_source;
 use nexa_span::FileId;
 
@@ -47,7 +47,10 @@ impl RunResult {
     /// Returns lines emitted before execution completed or failed.
     #[must_use]
     pub fn output(&self) -> &[String] {
-        &self.output
+        match &self.execution {
+            Some(execution) => execution.output(),
+            None => &self.output,
+        }
     }
 
     /// Returns true when checking succeeded and the interpreter completed.
@@ -105,6 +108,12 @@ pub fn check(file: FileId, source: &str) -> CheckResult {
 /// Parses, checks, lowers, and executes one Nexa source file.
 #[must_use]
 pub fn run(file: FileId, source: &str) -> RunResult {
+    run_with_args(file, source, &[])
+}
+
+/// Parses, checks, lowers, and executes one Nexa source file with arguments.
+#[must_use]
+pub fn run_with_args(file: FileId, source: &str, arguments: &[String]) -> RunResult {
     let checked = check(file, source);
     let diagnostics = checked.diagnostics.clone();
     let Some(typed) = checked.typed() else {
@@ -128,22 +137,22 @@ pub fn run(file: FileId, source: &str) -> RunResult {
         }
     };
 
-    match run_mir(&program) {
-        Ok(execution) => {
-            let output = execution.output().to_vec();
+    match run_mir_with_args(&program, arguments) {
+        Ok(execution) => RunResult {
+            diagnostics,
+            execution: Some(execution),
+            runtime_error: None,
+            output: Vec::new(),
+        },
+        Err(failure) => {
+            let (runtime_error, output) = failure.into_parts();
             RunResult {
                 diagnostics,
-                execution: Some(execution),
-                runtime_error: None,
+                execution: None,
+                runtime_error: Some(runtime_error),
                 output,
             }
         }
-        Err(failure) => RunResult {
-            diagnostics,
-            execution: None,
-            runtime_error: Some(failure.error().clone()),
-            output: failure.output().to_vec(),
-        },
     }
 }
 

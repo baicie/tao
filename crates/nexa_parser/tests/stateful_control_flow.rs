@@ -105,6 +105,21 @@ fn parse_source_does_not_validate_loop_control_context() {
 }
 
 #[test]
+fn parse_source_treats_while_as_a_reserved_keyword() {
+    assert_parse_rejected("function while(): Unit {}", "expected function name");
+}
+
+#[test]
+fn parse_source_treats_break_as_a_reserved_keyword() {
+    assert_parse_rejected("function break(): Unit {}", "expected function name");
+}
+
+#[test]
+fn parse_source_treats_continue_as_a_reserved_keyword() {
+    assert_parse_rejected("function continue(): Unit {}", "expected function name");
+}
+
+#[test]
 fn parse_source_rejects_a_let_declaration_without_an_initializer() {
     assert_parse_rejected(
         "function main(): Unit { let value: Int; }",

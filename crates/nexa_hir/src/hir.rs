@@ -47,30 +47,36 @@ pub struct Name {
 /// A source-level type reference.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeReference {
-    /// The resolved built-in type name.
+    /// The resolved source type, including recursive array element types.
     pub kind: Type,
-    /// The exact range of the type token.
+    /// The complete source range of the type syntax.
     pub span: SourceSpan,
 }
 
 /// The closed set of Language Core value types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     /// A signed 64-bit integer.
     Int,
     /// A boolean value.
     Bool,
+    /// A UTF-8 string value.
+    String,
+    /// An immutable homogeneous array value.
+    Array(Box<Type>),
     /// The result type for expressions with no value.
     Unit,
 }
 
 impl std::fmt::Display for Type {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(match self {
-            Self::Int => "Int",
-            Self::Bool => "Bool",
-            Self::Unit => "Unit",
-        })
+        match self {
+            Self::Int => formatter.write_str("Int"),
+            Self::Bool => formatter.write_str("Bool"),
+            Self::String => formatter.write_str("String"),
+            Self::Array(element) => write!(formatter, "{element}[]"),
+            Self::Unit => formatter.write_str("Unit"),
+        }
     }
 }
 
@@ -216,6 +222,38 @@ pub enum Expression {
         /// The literal token range.
         span: SourceSpan,
     },
+    /// A decoded UTF-8 string literal.
+    String {
+        /// The literal value after escape decoding.
+        value: String,
+        /// The literal token range.
+        span: SourceSpan,
+    },
+    /// An immutable array literal.
+    Array {
+        /// Elements in source order.
+        elements: Vec<Expression>,
+        /// The full expression range.
+        span: SourceSpan,
+    },
+    /// An indexed array access.
+    Index {
+        /// The array-valued expression.
+        collection: Box<Expression>,
+        /// The integer index expression.
+        index: Box<Expression>,
+        /// The full expression range.
+        span: SourceSpan,
+    },
+    /// A named member access.
+    Member {
+        /// The expression whose member is read.
+        object: Box<Expression>,
+        /// The selected member name.
+        member: Name,
+        /// The full expression range.
+        span: SourceSpan,
+    },
     /// A reference to a named local value.
     Name(Name),
     /// A prefix operator application.
@@ -263,6 +301,10 @@ impl Expression {
         match self {
             Self::Integer { span, .. }
             | Self::Boolean { span, .. }
+            | Self::String { span, .. }
+            | Self::Array { span, .. }
+            | Self::Index { span, .. }
+            | Self::Member { span, .. }
             | Self::Unary { span, .. }
             | Self::Binary { span, .. }
             | Self::Call { span, .. }

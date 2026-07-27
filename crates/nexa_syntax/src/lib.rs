@@ -135,6 +135,26 @@ pub enum SyntaxKind {
     ArgumentList = 62,
     /// Tokens skipped during parser recovery.
     Error = 63,
+    /// A quoted string literal token with its original escape spelling.
+    String = 64,
+    /// The `String` type keyword.
+    StringKw = 65,
+    /// `[`.
+    LBracket = 66,
+    /// `]`
+    RBracket = 67,
+    /// `.`
+    Dot = 68,
+    /// A string literal expression.
+    StringLiteral = 69,
+    /// An array type such as `Int[]`.
+    ArrayType = 70,
+    /// An array literal expression.
+    ArrayExpression = 71,
+    /// An indexed access expression.
+    IndexExpression = 72,
+    /// A named member access expression.
+    MemberExpression = 73,
 }
 
 impl SyntaxKind {
@@ -210,6 +230,16 @@ impl SyntaxKind {
             61 => Self::ParenthesizedExpression,
             62 => Self::ArgumentList,
             63 => Self::Error,
+            64 => Self::String,
+            65 => Self::StringKw,
+            66 => Self::LBracket,
+            67 => Self::RBracket,
+            68 => Self::Dot,
+            69 => Self::StringLiteral,
+            70 => Self::ArrayType,
+            71 => Self::ArrayExpression,
+            72 => Self::IndexExpression,
+            73 => Self::MemberExpression,
             _ => unreachable!("invalid Nexa syntax kind: {raw}"),
         }
     }
@@ -306,6 +336,7 @@ pub fn tokenize(source: &str) -> Vec<Token> {
                 consume_while(&mut chars, |next| next.is_ascii_digit());
                 SyntaxKind::Int
             }
+            '"' => consume_string(&mut chars),
             '/' if matches!(chars.peek(), Some((_, '/'))) => {
                 let _ = chars.next();
                 consume_while(&mut chars, |next| next != '\n');
@@ -321,6 +352,8 @@ pub fn tokenize(source: &str) -> Vec<Token> {
             ')' => SyntaxKind::RParen,
             '{' => SyntaxKind::LBrace,
             '}' => SyntaxKind::RBrace,
+            '[' => SyntaxKind::LBracket,
+            ']' => SyntaxKind::RBracket,
             ',' => SyntaxKind::Comma,
             ';' => SyntaxKind::Semicolon,
             ':' => SyntaxKind::Colon,
@@ -328,6 +361,7 @@ pub fn tokenize(source: &str) -> Vec<Token> {
             '-' => SyntaxKind::Minus,
             '*' => SyntaxKind::Star,
             '/' => SyntaxKind::Slash,
+            '.' => SyntaxKind::Dot,
             _ => SyntaxKind::Unknown,
         };
 
@@ -359,9 +393,46 @@ fn keyword_kind(kind: SyntaxKind, text: &str) -> SyntaxKind {
         "false" => SyntaxKind::FalseKw,
         "Int" => SyntaxKind::IntKw,
         "Bool" => SyntaxKind::BoolKw,
+        "String" => SyntaxKind::StringKw,
         "Unit" => SyntaxKind::UnitKw,
         _ => SyntaxKind::Ident,
     }
+}
+
+fn consume_string(chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>) -> SyntaxKind {
+    let mut valid = true;
+
+    while let Some((_, character)) = chars.peek().copied() {
+        match character {
+            '"' => {
+                let _ = chars.next();
+                return if valid {
+                    SyntaxKind::String
+                } else {
+                    SyntaxKind::Unknown
+                };
+            }
+            '\n' | '\r' => return SyntaxKind::Unknown,
+            '\\' => {
+                let _ = chars.next();
+                match chars.peek().copied() {
+                    Some((_, '"' | '\\' | 'n' | 'r' | 't')) => {
+                        let _ = chars.next();
+                    }
+                    Some((_, '\n' | '\r')) | None => return SyntaxKind::Unknown,
+                    Some(_) => {
+                        valid = false;
+                        let _ = chars.next();
+                    }
+                }
+            }
+            _ => {
+                let _ = chars.next();
+            }
+        }
+    }
+
+    SyntaxKind::Unknown
 }
 
 fn consume_equals(chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>) -> SyntaxKind {
@@ -429,7 +500,7 @@ fn consume_while(
 
 #[cfg(test)]
 mod tests {
-    use super::{tokenize, SyntaxKind};
+    use super::{tokenize, SyntaxKind, TextRange};
 
     #[test]
     fn tokenizes_language_core_keywords_and_operators() {
@@ -535,6 +606,91 @@ mod tests {
     }
 
     #[test]
+    fn tokenizes_string_types_literals_and_array_punctuation() {
+        let tokens = tokenize(r#"String[] = ["line\n\"quote\"\\tail"].length"#);
+
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| (token.kind(), token.text()))
+                .collect::<Vec<_>>(),
+            [
+                (SyntaxKind::StringKw, "String"),
+                (SyntaxKind::LBracket, "["),
+                (SyntaxKind::RBracket, "]"),
+                (SyntaxKind::Whitespace, " "),
+                (SyntaxKind::Eq, "="),
+                (SyntaxKind::Whitespace, " "),
+                (SyntaxKind::LBracket, "["),
+                (SyntaxKind::String, r#""line\n\"quote\"\\tail""#),
+                (SyntaxKind::RBracket, "]"),
+                (SyntaxKind::Dot, "."),
+                (SyntaxKind::Ident, "length"),
+            ]
+        );
+    }
+
+    #[test]
+    fn unicode_string_literal_uses_a_byte_range_and_preserves_text() {
+        let source = "\"Nexa \u{4f60}\u{597d}\"";
+        let tokens = tokenize(source);
+
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| (token.kind(), token.range(), token.text()))
+                .collect::<Vec<_>>(),
+            [(SyntaxKind::String, TextRange::new(0, source.len()), source)]
+        );
+    }
+
+    #[test]
+    fn invalid_string_escape_is_one_lossless_unknown_token() {
+        let tokens = tokenize(r#""bad\q";"#);
+
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| (token.kind(), token.text()))
+                .collect::<Vec<_>>(),
+            [
+                (SyntaxKind::Unknown, r#""bad\q""#),
+                (SyntaxKind::Semicolon, ";"),
+            ]
+        );
+    }
+
+    #[test]
+    fn zero_string_escape_is_an_unknown_token() {
+        let tokens = tokenize(r#""bad\0""#);
+
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| (token.kind(), token.text()))
+                .collect::<Vec<_>>(),
+            [(SyntaxKind::Unknown, r#""bad\0""#)]
+        );
+    }
+
+    #[test]
+    fn unterminated_string_stops_before_the_next_line() {
+        let tokens = tokenize("\"unterminated\nnext");
+
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| (token.kind(), token.text()))
+                .collect::<Vec<_>>(),
+            [
+                (SyntaxKind::Unknown, "\"unterminated"),
+                (SyntaxKind::Whitespace, "\n"),
+                (SyntaxKind::Ident, "next"),
+            ]
+        );
+    }
+
+    #[test]
     fn syntax_kinds_round_trip_through_rowan() {
         let kinds = [
             SyntaxKind::Ident,
@@ -601,6 +757,16 @@ mod tests {
             SyntaxKind::ParenthesizedExpression,
             SyntaxKind::ArgumentList,
             SyntaxKind::Error,
+            SyntaxKind::String,
+            SyntaxKind::StringKw,
+            SyntaxKind::LBracket,
+            SyntaxKind::RBracket,
+            SyntaxKind::Dot,
+            SyntaxKind::StringLiteral,
+            SyntaxKind::ArrayType,
+            SyntaxKind::ArrayExpression,
+            SyntaxKind::IndexExpression,
+            SyntaxKind::MemberExpression,
         ];
 
         for kind in kinds {

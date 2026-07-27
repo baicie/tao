@@ -28,14 +28,26 @@ cargo test --workspace
 ## Try the CLI
 
 ```bash
-cargo run -p nexac -- check examples/stateful_control_flow.nexa
-cargo run -p nexac -- run examples/stateful_control_flow.nexa
-cargo run -p nexac -- parse examples/stateful_control_flow.nexa
+cargo run -p nexac -- check examples/immutable_data.nexa
+cargo run -p nexac -- run examples/immutable_data.nexa -- Nexa
+cargo run -p nexac -- parse examples/immutable_data.nexa
 ```
 
 `check` parses, resolves, and type-checks the program. `run` executes the
-checked program's `main` function through the MIR interpreter and prints `12`
-for the bundled example.
+checked program's `main` function through the MIR interpreter. The second `--`
+separates Nexa program arguments from compiler arguments. The bundled example
+prints:
+
+```text
+Hello, Nexa
+true
+2
+42
+```
+
+Language Core v0.3 adds immutable UTF-8 `String` values and immutable `T[]`
+arrays. A program may use either `main(): Unit` with no program arguments or
+`main(args: String[]): Unit` to receive the arguments after `--`.
 
 Nexa adopts familiar TypeScript-shaped syntax, but it is not a TypeScript or
 JavaScript compatibility layer. It deliberately has no JavaScript runtime

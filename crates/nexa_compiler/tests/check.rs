@@ -1,6 +1,6 @@
 //! Compiler-driver integration tests.
 
-use nexa_compiler::{check, run};
+use nexa_compiler::{check, run, run_with_args};
 use nexa_span::FileId;
 
 #[test]
@@ -64,4 +64,28 @@ fn run_preserves_output_before_a_runtime_failure() {
         result.runtime_error().map(|error| error.message()),
         Some("division by zero")
     );
+}
+
+#[test]
+fn run_with_args_executes_a_string_array_main_function() {
+    let arguments = ["Nexa".to_owned()];
+    let result = run_with_args(
+        FileId::new(0),
+        "function main(args: String[]): Unit { print(args[0]); }",
+        &arguments,
+    );
+
+    assert!(result.is_ok(), "diagnostics: {:?}", result.diagnostics());
+    assert_eq!(result.output(), ["Nexa"]);
+}
+
+#[test]
+fn run_passes_an_empty_array_to_an_argument_taking_main() {
+    let result = run(
+        FileId::new(0),
+        "function main(args: String[]): Unit { print(args.length); }",
+    );
+
+    assert!(result.is_ok(), "diagnostics: {:?}", result.diagnostics());
+    assert_eq!(result.output(), ["0"]);
 }

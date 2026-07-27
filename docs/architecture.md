@@ -1,6 +1,6 @@
 # Architecture
 
-Nexa is a small compiler workspace for Language Core v0.2. The workspace keeps
+Nexa is a small compiler workspace for Language Core v0.3. The workspace keeps
 each crate aligned to a compiler responsibility rather than a generic
 application layer.
 
@@ -13,8 +13,8 @@ application layer.
 | `nexa_diagnostics` | structured errors, warnings, and source labels |
 | `nexa_syntax` | tokens, `SyntaxKind`, and lossless CST support |
 | `nexa_parser` | parser entry points and recovery diagnostics |
-| `nexa_hir` | CST lowering, name resolution, and type checking |
-| `nexa_mir` | middle IR lowering and interpreter |
+| `nexa_hir` | CST lowering, name resolution, typed expressions, and type checking |
+| `nexa_mir` | CFG MIR lowering, immutable runtime values, and interpreter |
 | `nexa_compiler` | compiler-driver entry points for checking and running |
 | `nexac` | command-line interface and diagnostic rendering |
 
@@ -36,6 +36,10 @@ Rules:
 - Diagnostics are expressed in terms of stable source spans.
 - The compiler driver orchestrates parser, HIR, and MIR; the interpreter only
   consumes MIR.
+- String, array, member, and index types are resolved in typed HIR rather than
+  rediscovered by MIR lowering.
+- Array storage may be shared across immutable values, but storage identity is
+  never exposed as language behavior.
 - Language Core uses TypeScript-shaped syntax, not TypeScript or JavaScript
   compatibility. Do not add JavaScript runtime semantics solely for source
   compatibility.

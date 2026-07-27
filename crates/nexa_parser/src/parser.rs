@@ -17,6 +17,22 @@ const STATEMENT_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::ContinueKw,
     SyntaxKind::ReturnKw,
 ];
+const ARRAY_RECOVERY: &[SyntaxKind] = &[
+    SyntaxKind::Comma,
+    SyntaxKind::RBracket,
+    SyntaxKind::RParen,
+    SyntaxKind::Semicolon,
+    SyntaxKind::RBrace,
+    SyntaxKind::ElseKw,
+    SyntaxKind::FunctionKw,
+    SyntaxKind::ConstKw,
+    SyntaxKind::LetKw,
+    SyntaxKind::IfKw,
+    SyntaxKind::WhileKw,
+    SyntaxKind::BreakKw,
+    SyntaxKind::ContinueKw,
+    SyntaxKind::ReturnKw,
+];
 
 pub(super) fn parse_tokens(
     file: FileId,
@@ -142,19 +158,32 @@ impl Parser<'_> {
     }
 
     fn parse_type(&mut self) {
-        self.builder.start_node(SyntaxKind::Type.into());
         self.skip_trivia();
+        let checkpoint = self.builder.checkpoint();
+        self.builder.start_node(SyntaxKind::Type.into());
 
-        if matches!(
+        let parsed = if matches!(
             self.current(),
-            Some(SyntaxKind::IntKw | SyntaxKind::BoolKw | SyntaxKind::UnitKw)
+            Some(
+                SyntaxKind::IntKw | SyntaxKind::BoolKw | SyntaxKind::StringKw | SyntaxKind::UnitKw
+            )
         ) {
             self.bump();
+            true
         } else {
-            self.error_at_current("expected type `Int`, `Bool`, or `Unit`");
-        }
+            self.error_at_current("expected type `Int`, `Bool`, `String`, or `Unit`");
+            false
+        };
 
         self.builder.finish_node();
+
+        while parsed && self.nth_non_trivia(0) == Some(SyntaxKind::LBracket) {
+            self.builder
+                .start_node_at(checkpoint, SyntaxKind::ArrayType.into());
+            self.expect(SyntaxKind::LBracket, "expected `[` in array type");
+            self.expect(SyntaxKind::RBracket, "expected `]` after array type");
+            self.builder.finish_node();
+        }
     }
 
     fn parse_block(&mut self) {
@@ -410,11 +439,11 @@ impl Parser<'_> {
             self.builder.finish_node();
             true
         } else {
-            self.parse_call_expression()
+            self.parse_postfix_expression()
         }
     }
 
-    fn parse_call_expression(&mut self) -> bool {
+    fn parse_postfix_expression(&mut self) -> bool {
         self.skip_trivia();
         let checkpoint = self.builder.checkpoint();
         if !self.parse_primary_expression() {
@@ -423,16 +452,32 @@ impl Parser<'_> {
 
         loop {
             self.skip_trivia();
-            if !self.at(SyntaxKind::LParen) {
-                break;
+            match self.current() {
+                Some(SyntaxKind::LParen) => {
+                    self.builder
+                        .start_node_at(checkpoint, SyntaxKind::CallExpression.into());
+                    self.bump();
+                    self.parse_argument_list();
+                    self.expect(SyntaxKind::RParen, "expected `)` after arguments");
+                    self.builder.finish_node();
+                }
+                Some(SyntaxKind::LBracket) => {
+                    self.builder
+                        .start_node_at(checkpoint, SyntaxKind::IndexExpression.into());
+                    self.bump();
+                    let _ = self.parse_expression();
+                    self.expect(SyntaxKind::RBracket, "expected `]` after index expression");
+                    self.builder.finish_node();
+                }
+                Some(SyntaxKind::Dot) => {
+                    self.builder
+                        .start_node_at(checkpoint, SyntaxKind::MemberExpression.into());
+                    self.bump();
+                    self.expect(SyntaxKind::Ident, "expected member name after `.`");
+                    self.builder.finish_node();
+                }
+                _ => break,
             }
-
-            self.builder
-                .start_node_at(checkpoint, SyntaxKind::CallExpression.into());
-            self.bump();
-            self.parse_argument_list();
-            self.expect(SyntaxKind::RParen, "expected `)` after arguments");
-            self.builder.finish_node();
         }
 
         true
@@ -483,6 +528,16 @@ impl Parser<'_> {
                 self.builder.finish_node();
                 true
             }
+            Some(SyntaxKind::String) => {
+                self.builder.start_node(SyntaxKind::StringLiteral.into());
+                self.bump();
+                self.builder.finish_node();
+                true
+            }
+            Some(SyntaxKind::LBracket) => {
+                self.parse_array_expression();
+                true
+            }
             Some(SyntaxKind::LParen) => {
                 self.builder
                     .start_node(SyntaxKind::ParenthesizedExpression.into());
@@ -497,6 +552,54 @@ impl Parser<'_> {
                 false
             }
         }
+    }
+
+    fn parse_array_expression(&mut self) {
+        self.builder.start_node(SyntaxKind::ArrayExpression.into());
+        self.expect(SyntaxKind::LBracket, "expected `[` before array elements");
+        self.skip_trivia();
+
+        if self.at(SyntaxKind::RBracket) {
+            self.bump();
+            self.builder.finish_node();
+            return;
+        }
+
+        loop {
+            if !self.parse_expression() {
+                self.recover_to(ARRAY_RECOVERY);
+            }
+
+            self.skip_trivia();
+            if self.at(SyntaxKind::Comma) {
+                self.bump();
+                self.skip_trivia();
+                if self.at(SyntaxKind::RBracket) {
+                    self.error_at_current("expected expression after `,`");
+                    break;
+                }
+                continue;
+            }
+            if self.at(SyntaxKind::RBracket) {
+                break;
+            }
+
+            self.error_at_current("expected `,` or `]` after array element");
+            self.recover_to(ARRAY_RECOVERY);
+            if self.at(SyntaxKind::Comma) {
+                self.bump();
+                self.skip_trivia();
+                if self.at(SyntaxKind::RBracket) {
+                    self.error_at_current("expected expression after `,`");
+                    break;
+                }
+                continue;
+            }
+            break;
+        }
+
+        self.expect(SyntaxKind::RBracket, "expected `]` after array elements");
+        self.builder.finish_node();
     }
 
     fn binary_precedence(&self) -> Option<u8> {

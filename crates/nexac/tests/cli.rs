@@ -128,6 +128,46 @@ fn nexac_check_rejects_a_non_boolean_while_condition() -> Result<(), Box<dyn std
 }
 
 #[test]
+fn nexac_check_rejects_an_untyped_empty_array() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects("rejected/empty_array_without_context.nexa", "E3001")
+}
+
+#[test]
+fn nexac_check_rejects_mixed_array_elements() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects("rejected/mixed_array_elements.nexa", "E3001")
+}
+
+#[test]
+fn nexac_check_rejects_an_unknown_array_member() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects("rejected/unknown_member.nexa", "E2005")
+}
+
+#[test]
+fn nexac_check_rejects_an_invalid_string_escape() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects("rejected/invalid_string_escape.nexa", "E1001")
+}
+
+#[test]
+fn nexac_check_rejects_array_element_assignment() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects("rejected/array_element_assignment.nexa", "E1001")
+}
+
+#[test]
+fn nexac_check_rejects_a_non_integer_array_index() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects("rejected/non_integer_index.nexa", "E3001")
+}
+
+#[test]
+fn nexac_check_rejects_array_equality() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects("rejected/array_equality.nexa", "E3001")
+}
+
+#[test]
+fn nexac_check_rejects_an_invalid_main_argument_type() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects("rejected/invalid_main_arguments.nexa", "E3003")
+}
+
+#[test]
 fn nexac_run_executes_main_and_prints_its_output() -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
         .arg("run")
@@ -157,6 +197,89 @@ fn nexac_run_executes_stateful_control_flow() -> Result<(), Box<dyn std::error::
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(String::from_utf8_lossy(&output.stdout), "12\n");
+
+    Ok(())
+}
+
+#[test]
+fn nexac_run_executes_immutable_data_with_cli_arguments() -> Result<(), Box<dyn std::error::Error>>
+{
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("run")
+        .arg(fixture("accepted/immutable_data.nexa"))
+        .arg("--")
+        .arg("Nexa")
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "Nexa\n42\n");
+
+    Ok(())
+}
+
+#[test]
+fn nexac_run_preserves_multiple_cli_arguments_after_the_separator(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("run")
+        .arg(fixture("accepted/cli_arguments.nexa"))
+        .arg("--")
+        .arg("first")
+        .arg("two words")
+        .arg("--literal")
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "3\nfirst\ntwo words\n--literal\n"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn nexac_run_passes_an_empty_argument_array_to_main() -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("run")
+        .arg(fixture("accepted/cli_arguments.nexa"))
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "0\n");
+
+    Ok(())
+}
+
+#[test]
+fn nexac_run_rejects_arguments_for_a_parameterless_main() -> Result<(), Box<dyn std::error::Error>>
+{
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("run")
+        .arg(fixture("accepted/language_core.nexa"))
+        .arg("--")
+        .arg("unexpected")
+        .output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert!(
+        stderr.contains("parameterless `main` does not accept command-line arguments"),
+        "stderr: {stderr}"
+    );
 
     Ok(())
 }
@@ -216,6 +339,25 @@ fn nexac_run_reports_the_execution_step_limit_with_a_source_location(
         "stderr: {stderr}"
     );
     assert!(stderr.contains(":3:15"), "stderr: {stderr}");
+
+    Ok(())
+}
+
+#[test]
+fn nexac_run_reports_array_bounds_and_preserves_output() -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("run")
+        .arg(fixture("rejected/array_out_of_bounds.nexa"))
+        .output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "before\n");
+    assert!(
+        stderr.contains("runtime error: array index 1 out of bounds for length 1"),
+        "stderr: {stderr}"
+    );
+    assert!(stderr.contains(":4:9"), "stderr: {stderr}");
 
     Ok(())
 }

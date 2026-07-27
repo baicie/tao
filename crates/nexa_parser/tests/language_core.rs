@@ -238,7 +238,7 @@ fn parse_source_reports_a_missing_function_name() {
 fn parse_source_reports_a_missing_parameter_type() {
     assert_first_diagnostic(
         "function main(value: ): Unit { return; }",
-        "expected type `Int`, `Bool`, or `Unit`",
+        "expected type `Int`, `Bool`, `String`, or `Unit`",
         FileId::new(7),
         21,
         22,

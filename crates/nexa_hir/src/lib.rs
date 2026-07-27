@@ -9,7 +9,9 @@ mod check;
 mod hir;
 mod lower;
 
-pub use check::{type_check, Analysis, TypedProgram};
+pub use check::{
+    type_check, Analysis, Builtin, FunctionFacts, FunctionId, LocalId, NameResolution, TypedProgram,
+};
 pub use hir::{
     AssignmentStatement, BinaryOperator, Block, BreakStatement, ConstDeclaration,
     ContinueStatement, Expression, ExpressionStatement, Function, IfStatement, LetDeclaration,

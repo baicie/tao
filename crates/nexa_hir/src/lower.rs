@@ -96,7 +96,7 @@ fn lower_function(file: FileId, node: &SyntaxNode) -> Result<Function, LoweringE
         })
         .transpose()?
         .unwrap_or_default();
-    let return_type = lower_type(file, &required_child(file, node, SyntaxKind::Type)?)?;
+    let return_type = lower_type(file, &required_type_child(file, node)?)?;
     let body = lower_block(file, &required_child(file, node, SyntaxKind::Block)?)?;
 
     Ok(Function {
@@ -111,25 +111,37 @@ fn lower_function(file: FileId, node: &SyntaxNode) -> Result<Function, LoweringE
 fn lower_parameter(file: FileId, node: &SyntaxNode) -> Result<Parameter, LoweringError> {
     Ok(Parameter {
         name: lower_direct_name(file, node)?,
-        ty: lower_type(file, &required_child(file, node, SyntaxKind::Type)?)?,
+        ty: lower_type(file, &required_type_child(file, node)?)?,
         span: node_span(file, node),
     })
 }
 
 fn lower_type(file: FileId, node: &SyntaxNode) -> Result<TypeReference, LoweringError> {
+    if node.kind() == SyntaxKind::ArrayType {
+        let element = lower_type(file, &required_type_child(file, node)?)?;
+        return Ok(TypeReference {
+            kind: Type::Array(Box::new(element.kind)),
+            span: node_span(file, node),
+        });
+    }
+    if node.kind() != SyntaxKind::Type {
+        return Err(malformed(node_span(file, node)));
+    }
+
     let token = node
         .children_with_tokens()
         .filter_map(|element| element.into_token())
         .find(|token| {
             matches!(
                 token.kind(),
-                SyntaxKind::IntKw | SyntaxKind::BoolKw | SyntaxKind::UnitKw
+                SyntaxKind::IntKw | SyntaxKind::BoolKw | SyntaxKind::StringKw | SyntaxKind::UnitKw
             )
         })
         .ok_or_else(|| malformed(node_span(file, node)))?;
     let kind = match token.kind() {
         SyntaxKind::IntKw => Type::Int,
         SyntaxKind::BoolKw => Type::Bool,
+        SyntaxKind::StringKw => Type::String,
         SyntaxKind::UnitKw => Type::Unit,
         _ => return Err(malformed(token_span(file, &token))),
     };
@@ -175,7 +187,7 @@ fn lower_statement(file: FileId, node: &SyntaxNode) -> Result<Statement, Lowerin
 }
 
 fn lower_let(file: FileId, node: &SyntaxNode) -> Result<LetDeclaration, LoweringError> {
-    let annotation = child(node, SyntaxKind::Type)
+    let annotation = type_child(node)
         .map(|ty| lower_type(file, &ty))
         .transpose()?;
 
@@ -196,7 +208,7 @@ fn lower_assignment(file: FileId, node: &SyntaxNode) -> Result<AssignmentStateme
 }
 
 fn lower_const(file: FileId, node: &SyntaxNode) -> Result<ConstDeclaration, LoweringError> {
-    let annotation = child(node, SyntaxKind::Type)
+    let annotation = type_child(node)
         .map(|ty| lower_type(file, &ty))
         .transpose()?;
 
@@ -261,6 +273,10 @@ fn lower_expression(file: FileId, node: &SyntaxNode) -> Result<Expression, Lower
     match node.kind() {
         SyntaxKind::IntLiteral => lower_integer(file, node),
         SyntaxKind::BoolLiteral => lower_boolean(file, node),
+        SyntaxKind::StringLiteral => lower_string(file, node),
+        SyntaxKind::ArrayExpression => lower_array(file, node),
+        SyntaxKind::IndexExpression => lower_index(file, node),
+        SyntaxKind::MemberExpression => lower_member(file, node),
         SyntaxKind::NameReference => Ok(Expression::Name(lower_direct_name(file, node)?)),
         SyntaxKind::UnaryExpression => lower_unary(file, node),
         SyntaxKind::BinaryExpression => lower_binary(file, node),
@@ -291,6 +307,75 @@ fn lower_boolean(file: FileId, node: &SyntaxNode) -> Result<Expression, Lowering
     Ok(Expression::Boolean {
         value: token.kind() == SyntaxKind::TrueKw,
         span: token_span(file, &token),
+    })
+}
+
+fn lower_string(file: FileId, node: &SyntaxNode) -> Result<Expression, LoweringError> {
+    let token = required_direct_token(file, node, SyntaxKind::String)?;
+    let span = token_span(file, &token);
+    let text = token.text();
+    let contents = text
+        .strip_prefix('"')
+        .and_then(|text| text.strip_suffix('"'))
+        .ok_or_else(|| malformed(span))?;
+    let mut value = String::with_capacity(contents.len());
+    let mut characters = contents.chars();
+
+    while let Some(character) = characters.next() {
+        if character != '\\' {
+            value.push(character);
+            continue;
+        }
+
+        let escaped = characters.next().ok_or_else(|| malformed(span))?;
+        value.push(match escaped {
+            '"' => '"',
+            '\\' => '\\',
+            'n' => '\n',
+            'r' => '\r',
+            't' => '\t',
+            _ => return Err(malformed(span)),
+        });
+    }
+
+    Ok(Expression::String { value, span })
+}
+
+fn lower_array(file: FileId, node: &SyntaxNode) -> Result<Expression, LoweringError> {
+    let elements = expression_children(node)
+        .map(|element| lower_expression(file, &element))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(Expression::Array {
+        elements,
+        span: node_span(file, node),
+    })
+}
+
+fn lower_index(file: FileId, node: &SyntaxNode) -> Result<Expression, LoweringError> {
+    let mut expressions = expression_children(node);
+    let collection = expressions
+        .next()
+        .ok_or_else(|| malformed(node_span(file, node)))?;
+    let index = expressions
+        .next()
+        .ok_or_else(|| malformed(node_span(file, node)))?;
+
+    Ok(Expression::Index {
+        collection: Box::new(lower_expression(file, &collection)?),
+        index: Box::new(lower_expression(file, &index)?),
+        span: node_span(file, node),
+    })
+}
+
+fn lower_member(file: FileId, node: &SyntaxNode) -> Result<Expression, LoweringError> {
+    Ok(Expression::Member {
+        object: Box::new(lower_expression(
+            file,
+            &required_expression_child(file, node)?,
+        )?),
+        member: lower_direct_name(file, node)?,
+        span: node_span(file, node),
     })
 }
 
@@ -394,6 +479,15 @@ fn child(node: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
     node.children().find(|child| child.kind() == kind)
 }
 
+fn type_child(node: &SyntaxNode) -> Option<SyntaxNode> {
+    node.children()
+        .find(|child| matches!(child.kind(), SyntaxKind::Type | SyntaxKind::ArrayType))
+}
+
+fn required_type_child(file: FileId, node: &SyntaxNode) -> Result<SyntaxNode, LoweringError> {
+    type_child(node).ok_or_else(|| malformed(node_span(file, node)))
+}
+
 fn required_child(
     file: FileId,
     node: &SyntaxNode,
@@ -439,6 +533,10 @@ const fn is_expression_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::NameReference
             | SyntaxKind::IntLiteral
             | SyntaxKind::BoolLiteral
+            | SyntaxKind::StringLiteral
+            | SyntaxKind::ArrayExpression
+            | SyntaxKind::IndexExpression
+            | SyntaxKind::MemberExpression
             | SyntaxKind::ParenthesizedExpression
     )
 }

@@ -1,4 +1,5 @@
 use std::fmt::{Display, Formatter};
+use std::rc::Rc;
 
 use nexa_hir::{BinaryOperator, UnaryOperator};
 use nexa_span::SourceSpan;
@@ -15,6 +16,10 @@ pub enum Value {
     Int(i64),
     /// A boolean value.
     Bool(bool),
+    /// An immutable UTF-8 string.
+    String(Rc<str>),
+    /// An immutable, fixed-length array.
+    Array(Rc<[Value]>),
     /// The absence of a value.
     Unit,
 }
@@ -24,6 +29,8 @@ impl Display for Value {
         match self {
             Self::Int(value) => write!(formatter, "{value}"),
             Self::Bool(value) => write!(formatter, "{value}"),
+            Self::String(value) => formatter.write_str(value),
+            Self::Array(_) => formatter.write_str("<array>"),
             Self::Unit => formatter.write_str("Unit"),
         }
     }
@@ -68,6 +75,12 @@ impl RuntimeFailure {
     #[must_use]
     pub fn output(&self) -> &[String] {
         &self.output
+    }
+
+    /// Consumes the failure and returns its error and prior output.
+    #[must_use]
+    pub fn into_parts(self) -> (RuntimeError, Vec<String>) {
+        (self.error, self.output)
     }
 }
 
@@ -140,8 +153,22 @@ impl From<MirLoweringError> for RuntimeError {
 ///
 /// Returns [`RuntimeFailure`] when `main` is missing, execution exceeds the
 /// reference interpreter's call-depth or basic-block step limits, arithmetic
-/// overflows, division by zero occurs, or an internal MIR invariant fails.
+/// overflows, division by zero occurs, an array index is out of bounds, or an
+/// internal MIR invariant fails.
 pub fn run(program: &MirProgram) -> Result<Execution, RuntimeFailure> {
+    run_with_args(program, &[])
+}
+
+/// Executes the `main` entry point with command-line string arguments.
+///
+/// # Errors
+///
+/// Returns [`RuntimeFailure`] under the same conditions as [`run`], and when
+/// arguments are supplied to a parameterless `main` function.
+pub fn run_with_args(
+    program: &MirProgram,
+    arguments: &[String],
+) -> Result<Execution, RuntimeFailure> {
     let main = program
         .functions
         .iter()
@@ -149,13 +176,34 @@ pub fn run(program: &MirProgram) -> Result<Execution, RuntimeFailure> {
         .map(FunctionId)
         .ok_or_else(|| RuntimeError::new(program.span, "program has no `main` entry point"))
         .map_err(RuntimeFailure::from)?;
+    let main_arguments = match program.functions[main.0].parameters.len() {
+        0 if arguments.is_empty() => Vec::new(),
+        0 => {
+            return Err(RuntimeError::new(
+                program.span,
+                "parameterless `main` does not accept command-line arguments",
+            )
+            .into());
+        }
+        1 => vec![Value::Array(
+            arguments
+                .iter()
+                .map(|argument| Value::String(Rc::<str>::from(argument.as_str())))
+                .collect::<Vec<_>>()
+                .into(),
+        )],
+        _ => {
+            return Err(
+                RuntimeError::new(program.span, "`main` has an invalid runtime signature").into(),
+            );
+        }
+    };
     let mut interpreter = Interpreter {
-        program,
         output: Vec::new(),
         call_depth: 0,
         steps: 0,
     };
-    match interpreter.call(main, Vec::new(), program.span) {
+    match interpreter.call(program, main, main_arguments, program.span) {
         Ok(value) => Ok(Execution {
             value,
             output: interpreter.output,
@@ -170,16 +218,16 @@ pub fn run(program: &MirProgram) -> Result<Execution, RuntimeFailure> {
 const MAX_CALL_DEPTH: usize = 64;
 const MAX_EXECUTION_STEPS: usize = 100_000;
 
-struct Interpreter<'program> {
-    program: &'program MirProgram,
+struct Interpreter {
     output: Vec<String>,
     call_depth: usize,
     steps: usize,
 }
 
-impl Interpreter<'_> {
+impl Interpreter {
     fn call(
         &mut self,
+        program: &MirProgram,
         function_id: FunctionId,
         arguments: Vec<Value>,
         span: SourceSpan,
@@ -192,22 +240,21 @@ impl Interpreter<'_> {
         }
 
         self.call_depth += 1;
-        let result = self.call_active(function_id, arguments, span);
+        let result = self.call_active(program, function_id, arguments, span);
         self.call_depth -= 1;
         result
     }
 
     fn call_active(
         &mut self,
+        program: &MirProgram,
         function_id: FunctionId,
         arguments: Vec<Value>,
         span: SourceSpan,
     ) -> Result<Value, RuntimeError> {
-        let function = self
-            .program
+        let function = program
             .functions
             .get(function_id.0)
-            .cloned()
             .ok_or_else(|| RuntimeError::new(span, "call target does not exist"))?;
         if function.parameters.len() != arguments.len() {
             return Err(RuntimeError::new(
@@ -237,7 +284,7 @@ impl Interpreter<'_> {
             self.consume_step(block.span)?;
 
             for statement in &block.statements {
-                self.execute_statement(statement, &mut frame)?;
+                self.execute_statement(program, statement, &mut frame)?;
             }
 
             current = match &block.terminator {
@@ -247,7 +294,7 @@ impl Interpreter<'_> {
                     then_target,
                     else_target,
                     span,
-                } => match self.evaluate(condition, &frame)? {
+                } => match self.evaluate(program, condition, &frame)? {
                     Value::Bool(true) => *then_target,
                     Value::Bool(false) => *else_target,
                     value => {
@@ -263,7 +310,7 @@ impl Interpreter<'_> {
                 MirTerminator::Return { value, .. } => {
                     return value
                         .as_ref()
-                        .map(|value| self.evaluate(value, &frame))
+                        .map(|value| self.evaluate(program, value, &frame))
                         .transpose()
                         .map(|value| value.unwrap_or(Value::Unit));
                 }
@@ -284,16 +331,17 @@ impl Interpreter<'_> {
 
     fn execute_statement(
         &mut self,
+        program: &MirProgram,
         statement: &MirStatement,
         frame: &mut Frame,
     ) -> Result<(), RuntimeError> {
         match statement {
             MirStatement::Store { local, value, span } => {
-                let value = self.evaluate(value, frame)?;
+                let value = self.evaluate(program, value, frame)?;
                 frame.store(*local, value, *span)
             }
             MirStatement::Expression { expression, .. } => {
-                let _ = self.evaluate(expression, frame)?;
+                let _ = self.evaluate(program, expression, frame)?;
                 Ok(())
             }
         }
@@ -301,24 +349,46 @@ impl Interpreter<'_> {
 
     fn evaluate(
         &mut self,
+        program: &MirProgram,
         expression: &MirExpression,
         frame: &Frame,
     ) -> Result<Value, RuntimeError> {
         match expression {
             MirExpression::Integer { value, .. } => Ok(Value::Int(*value)),
             MirExpression::Boolean { value, .. } => Ok(Value::Bool(*value)),
+            MirExpression::String { value, .. } => {
+                Ok(Value::String(Rc::<str>::from(value.as_str())))
+            }
+            MirExpression::Array { elements, .. } => elements
+                .iter()
+                .map(|element| self.evaluate(program, element, frame))
+                .collect::<Result<Vec<_>, _>>()
+                .map(|values| Value::Array(values.into())),
+            MirExpression::Index {
+                target,
+                index,
+                span,
+            } => {
+                let target = self.evaluate(program, target, frame)?;
+                let index = self.evaluate(program, index, frame)?;
+                evaluate_index(target, index, *span)
+            }
+            MirExpression::Length { target, span } => {
+                let target = self.evaluate(program, target, frame)?;
+                evaluate_length(target, *span)
+            }
             MirExpression::Local { local, span } => frame.load(*local, *span),
             MirExpression::Unary {
                 operator,
                 expression,
                 span,
-            } => self.evaluate_unary(*operator, expression, *span, frame),
+            } => self.evaluate_unary(program, *operator, expression, *span, frame),
             MirExpression::Binary {
                 operator,
                 left,
                 right,
                 span,
-            } => self.evaluate_binary(*operator, left, right, *span, frame),
+            } => self.evaluate_binary(program, *operator, left, right, *span, frame),
             MirExpression::Call {
                 callee,
                 arguments,
@@ -326,21 +396,22 @@ impl Interpreter<'_> {
             } => {
                 let arguments = arguments
                     .iter()
-                    .map(|argument| self.evaluate(argument, frame))
+                    .map(|argument| self.evaluate(program, argument, frame))
                     .collect::<Result<Vec<_>, _>>()?;
-                self.evaluate_call(*callee, arguments, *span)
+                self.evaluate_call(program, *callee, arguments, *span)
             }
         }
     }
 
     fn evaluate_unary(
         &mut self,
+        program: &MirProgram,
         operator: UnaryOperator,
         expression: &MirExpression,
         span: SourceSpan,
         frame: &Frame,
     ) -> Result<Value, RuntimeError> {
-        let value = self.evaluate(expression, frame)?;
+        let value = self.evaluate(program, expression, frame)?;
         match (operator, value) {
             (UnaryOperator::Not, Value::Bool(value)) => Ok(Value::Bool(!value)),
             (UnaryOperator::Negate, Value::Int(value)) => value
@@ -360,6 +431,7 @@ impl Interpreter<'_> {
 
     fn evaluate_binary(
         &mut self,
+        program: &MirProgram,
         operator: BinaryOperator,
         left: &MirExpression,
         right: &MirExpression,
@@ -368,32 +440,30 @@ impl Interpreter<'_> {
     ) -> Result<Value, RuntimeError> {
         match operator {
             BinaryOperator::LogicalAnd => {
-                let left = boolean_operand(self.evaluate(left, frame)?, left.span())?;
+                let left = boolean_operand(self.evaluate(program, left, frame)?, left.span())?;
                 if !left {
                     return Ok(Value::Bool(false));
                 }
-                let right = boolean_operand(self.evaluate(right, frame)?, right.span())?;
+                let right = boolean_operand(self.evaluate(program, right, frame)?, right.span())?;
                 return Ok(Value::Bool(right));
             }
             BinaryOperator::LogicalOr => {
-                let left = boolean_operand(self.evaluate(left, frame)?, left.span())?;
+                let left = boolean_operand(self.evaluate(program, left, frame)?, left.span())?;
                 if left {
                     return Ok(Value::Bool(true));
                 }
-                let right = boolean_operand(self.evaluate(right, frame)?, right.span())?;
+                let right = boolean_operand(self.evaluate(program, right, frame)?, right.span())?;
                 return Ok(Value::Bool(right));
             }
             _ => {}
         }
 
-        let left = self.evaluate(left, frame)?;
-        let right = self.evaluate(right, frame)?;
+        let left = self.evaluate(program, left, frame)?;
+        let right = self.evaluate(program, right, frame)?;
 
         match operator {
-            BinaryOperator::Equal => Ok(Value::Bool(left == right)),
-            BinaryOperator::Add => {
-                checked_integer_operation(left, right, span, "addition", i64::checked_add)
-            }
+            BinaryOperator::Equal => equal_values(left, right, span),
+            BinaryOperator::Add => add_values(left, right, span),
             BinaryOperator::Subtract => {
                 checked_integer_operation(left, right, span, "subtraction", i64::checked_sub)
             }
@@ -420,19 +490,26 @@ impl Interpreter<'_> {
 
     fn evaluate_call(
         &mut self,
+        program: &MirProgram,
         callee: Callee,
         arguments: Vec<Value>,
         span: SourceSpan,
     ) -> Result<Value, RuntimeError> {
         match callee {
-            Callee::Function(function) => self.call(function, arguments, span),
+            Callee::Function(function) => self.call(program, function, arguments, span),
             Callee::Print => {
-                let [Value::Int(value)] = arguments.as_slice() else {
+                let [value] = arguments.as_slice() else {
                     return Err(RuntimeError::new(
                         span,
-                        "`print` requires one `Int` argument",
+                        "`print` requires one scalar argument",
                     ));
                 };
+                if matches!(value, Value::Array(_) | Value::Unit) {
+                    return Err(RuntimeError::new(
+                        span,
+                        format!("`print` cannot print `{}`", value_type(value)),
+                    ));
+                }
                 self.output.push(value.to_string());
                 Ok(Value::Unit)
             }
@@ -477,6 +554,99 @@ fn boolean_operand(value: Value, span: SourceSpan) -> Result<bool, RuntimeError>
             ),
         )),
     }
+}
+
+fn add_values(left: Value, right: Value, span: SourceSpan) -> Result<Value, RuntimeError> {
+    match (left, right) {
+        (Value::Int(left), Value::Int(right)) => left
+            .checked_add(right)
+            .map(Value::Int)
+            .ok_or_else(|| RuntimeError::new(span, "integer addition overflow")),
+        (Value::String(left), Value::String(right)) => {
+            let mut result = String::with_capacity(left.len() + right.len());
+            result.push_str(&left);
+            result.push_str(&right);
+            Ok(Value::String(result.into()))
+        }
+        (left, right) => Err(RuntimeError::new(
+            span,
+            format!(
+                "addition received `{}` and `{}`",
+                value_type(&left),
+                value_type(&right)
+            ),
+        )),
+    }
+}
+
+fn equal_values(left: Value, right: Value, span: SourceSpan) -> Result<Value, RuntimeError> {
+    let equal = match (left, right) {
+        (Value::Int(left), Value::Int(right)) => left == right,
+        (Value::Bool(left), Value::Bool(right)) => left == right,
+        (Value::String(left), Value::String(right)) => left == right,
+        (Value::Unit, Value::Unit) => true,
+        (left, right) => {
+            return Err(RuntimeError::new(
+                span,
+                format!(
+                    "equality received `{}` and `{}`",
+                    value_type(&left),
+                    value_type(&right)
+                ),
+            ));
+        }
+    };
+
+    Ok(Value::Bool(equal))
+}
+
+fn evaluate_index(target: Value, index: Value, span: SourceSpan) -> Result<Value, RuntimeError> {
+    let values = match target {
+        Value::Array(values) => values,
+        target => {
+            return Err(RuntimeError::new(
+                span,
+                format!("cannot index `{}`", value_type(&target)),
+            ));
+        }
+    };
+    let index = match index {
+        Value::Int(index) => index,
+        index => {
+            return Err(RuntimeError::new(
+                span,
+                format!("array index must be `Int`, found `{}`", value_type(&index)),
+            ));
+        }
+    };
+    let array_index = usize::try_from(index).ok();
+    array_index
+        .and_then(|index| values.get(index))
+        .cloned()
+        .ok_or_else(|| {
+            RuntimeError::new(
+                span,
+                format!(
+                    "array index {index} out of bounds for length {}",
+                    values.len()
+                ),
+            )
+        })
+}
+
+fn evaluate_length(target: Value, span: SourceSpan) -> Result<Value, RuntimeError> {
+    let values = match target {
+        Value::Array(values) => values,
+        target => {
+            return Err(RuntimeError::new(
+                span,
+                format!("cannot read `length` from `{}`", value_type(&target)),
+            ));
+        }
+    };
+    i64::try_from(values.len())
+        .map(Value::Int)
+        .map_err(|_| RuntimeError::new(span, "array length exceeds `Int` range"))
 }
 
 fn checked_integer_operation(
@@ -536,6 +706,8 @@ const fn value_type(value: &Value) -> &'static str {
     match value {
         Value::Int(_) => "Int",
         Value::Bool(_) => "Bool",
+        Value::String(_) => "String",
+        Value::Array(_) => "Array",
         Value::Unit => "Unit",
     }
 }

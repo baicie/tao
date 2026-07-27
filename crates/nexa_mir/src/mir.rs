@@ -49,8 +49,8 @@ impl MirFunction {
 
     /// Returns the declared return type.
     #[must_use]
-    pub const fn return_type(&self) -> Type {
-        self.return_type
+    pub const fn return_type(&self) -> &Type {
+        &self.return_type
     }
 
     /// Returns the entry block for this function.
@@ -204,6 +204,36 @@ pub enum MirExpression {
         /// The literal's source range.
         span: SourceSpan,
     },
+    /// An immutable UTF-8 string value.
+    String {
+        /// The decoded string contents.
+        value: String,
+        /// The literal's source range.
+        span: SourceSpan,
+    },
+    /// Constructs an immutable array in element evaluation order.
+    Array {
+        /// The element expressions in source order.
+        elements: Vec<MirExpression>,
+        /// The full array literal range.
+        span: SourceSpan,
+    },
+    /// Reads an element from an immutable array.
+    Index {
+        /// The evaluated array expression.
+        target: Box<MirExpression>,
+        /// The evaluated integer index.
+        index: Box<MirExpression>,
+        /// The full indexing expression range.
+        span: SourceSpan,
+    },
+    /// Reads the element count of an immutable array.
+    Length {
+        /// The evaluated array expression.
+        target: Box<MirExpression>,
+        /// The full member expression range.
+        span: SourceSpan,
+    },
     /// Reads a local slot.
     Local {
         /// The resolved local slot.
@@ -249,6 +279,10 @@ impl MirExpression {
         match self {
             Self::Integer { span, .. }
             | Self::Boolean { span, .. }
+            | Self::String { span, .. }
+            | Self::Array { span, .. }
+            | Self::Index { span, .. }
+            | Self::Length { span, .. }
             | Self::Local { span, .. }
             | Self::Unary { span, .. }
             | Self::Binary { span, .. }
@@ -262,6 +296,6 @@ impl MirExpression {
 pub enum Callee {
     /// A user-defined function.
     Function(FunctionId),
-    /// The built-in integer printing function.
+    /// The built-in scalar printing function.
     Print,
 }
