@@ -11,7 +11,6 @@ const STATEMENT_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::ConstKw,
     SyntaxKind::IfKw,
     SyntaxKind::ReturnKw,
-    SyntaxKind::FunctionKw,
 ];
 
 pub(super) fn parse_tokens(
@@ -175,7 +174,17 @@ impl Parser<'_> {
                     self.error_at_current("unexpected `else`");
                     self.bump();
                 }
-                Some(_) => self.parse_expression_statement(),
+                Some(_) => {
+                    let statement_position = self.position;
+                    self.parse_expression_statement();
+
+                    // A recovery boundary is valid only when another parser branch
+                    // can consume it. Do not let a new grammar token stall this loop.
+                    if self.position == statement_position {
+                        self.error_at_current("unable to recover from statement");
+                        self.bump();
+                    }
+                }
                 None => {
                     self.error_at_current("expected `}` to close block");
                     break;

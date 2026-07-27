@@ -170,6 +170,19 @@ function main(): Unit { return; }"#;
 }
 
 #[test]
+fn parse_source_recovers_from_a_function_declaration_inside_a_block() {
+    let source = "function main(): Unit { function nested(): Unit {} }";
+    let parse = parse_source(FileId::new(0), source);
+
+    assert!(!parse.is_ok());
+    assert_eq!(parse.syntax().to_string(), source);
+    assert_eq!(
+        count_nodes(&parse.syntax(), SyntaxKind::FunctionDeclaration),
+        1
+    );
+}
+
+#[test]
 fn parse_source_orders_lexical_and_parser_diagnostics_by_source_position() {
     let parse = parse_source(
         FileId::new(0),
