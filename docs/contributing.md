@@ -25,7 +25,7 @@ cargo install cargo-deny cargo-audit cargo-machete cargo-llvm-cov git-cliff
 Use Conventional Commits:
 
 ```text
-feat(parser): parse let statements
+feat(parser): parse const declarations
 fix(nexac): report check diagnostics on stderr
 docs: update compiler architecture notes
 ```

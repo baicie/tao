@@ -51,3 +51,17 @@ fn run_executes_a_checked_main_function() {
         Some("42")
     );
 }
+
+#[test]
+fn run_preserves_output_before_a_runtime_failure() {
+    let result = run(
+        FileId::new(0),
+        "function main(): Unit { print(1); print(1 / 0); }",
+    );
+
+    assert_eq!(result.output(), ["1"]);
+    assert_eq!(
+        result.runtime_error().map(|error| error.message()),
+        Some("division by zero")
+    );
+}

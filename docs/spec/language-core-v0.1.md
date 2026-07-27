@@ -73,6 +73,9 @@ digits, or `_`. Integers are ASCII decimal literals.
 - `main` is the only entry point for `nexac run`; it takes no parameters and
   returns `Unit`.
 - `print` is the sole v0.1 builtin. It accepts one `Int` and returns `Unit`.
+- The reference interpreter reports a runtime error after 64 active calls
+  rather than exhausting the host process stack. Lines printed before any
+  runtime error remain observable.
 
 ## Required Diagnostics
 

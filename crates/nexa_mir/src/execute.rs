@@ -50,6 +50,48 @@ impl Execution {
     }
 }
 
+/// A failed execution together with output emitted before the failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeFailure {
+    error: RuntimeError,
+    output: Vec<String>,
+}
+
+impl RuntimeFailure {
+    /// Returns the runtime error that stopped execution.
+    #[must_use]
+    pub const fn error(&self) -> &RuntimeError {
+        &self.error
+    }
+
+    /// Returns lines emitted by `print` before execution stopped.
+    #[must_use]
+    pub fn output(&self) -> &[String] {
+        &self.output
+    }
+}
+
+impl From<RuntimeError> for RuntimeFailure {
+    fn from(error: RuntimeError) -> Self {
+        Self {
+            error,
+            output: Vec::new(),
+        }
+    }
+}
+
+impl Display for RuntimeFailure {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(formatter)
+    }
+}
+
+impl std::error::Error for RuntimeFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
+    }
+}
+
 /// A source-spanned failure raised while interpreting MIR.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeError {
@@ -96,34 +138,63 @@ impl From<MirLoweringError> for RuntimeError {
 ///
 /// # Errors
 ///
-/// Returns [`RuntimeError`] when `main` is missing, arithmetic overflows, a
-/// division by zero occurs, or an internal MIR invariant is violated.
-pub fn run(program: &MirProgram) -> Result<Execution, RuntimeError> {
+/// Returns [`RuntimeFailure`] when `main` is missing, execution exceeds the
+/// reference interpreter's call-depth limit, arithmetic overflows, a division
+/// by zero occurs, or an internal MIR invariant is violated.
+pub fn run(program: &MirProgram) -> Result<Execution, RuntimeFailure> {
     let main = program
         .functions
         .iter()
         .position(|function| function.name == "main")
         .map(FunctionId)
-        .ok_or_else(|| RuntimeError::new(program.span, "program has no `main` entry point"))?;
+        .ok_or_else(|| RuntimeError::new(program.span, "program has no `main` entry point"))
+        .map_err(RuntimeFailure::from)?;
     let mut interpreter = Interpreter {
         program,
         output: Vec::new(),
+        call_depth: 0,
     };
-    let value = interpreter.call(main, Vec::new(), program.span)?;
-
-    Ok(Execution {
-        value,
-        output: interpreter.output,
-    })
+    match interpreter.call(main, Vec::new(), program.span) {
+        Ok(value) => Ok(Execution {
+            value,
+            output: interpreter.output,
+        }),
+        Err(error) => Err(RuntimeFailure {
+            error,
+            output: interpreter.output,
+        }),
+    }
 }
+
+const MAX_CALL_DEPTH: usize = 64;
 
 struct Interpreter<'program> {
     program: &'program MirProgram,
     output: Vec<String>,
+    call_depth: usize,
 }
 
 impl Interpreter<'_> {
     fn call(
+        &mut self,
+        function_id: FunctionId,
+        arguments: Vec<Value>,
+        span: SourceSpan,
+    ) -> Result<Value, RuntimeError> {
+        if self.call_depth >= MAX_CALL_DEPTH {
+            return Err(RuntimeError::new(
+                span,
+                format!("maximum call depth of {MAX_CALL_DEPTH} exceeded"),
+            ));
+        }
+
+        self.call_depth += 1;
+        let result = self.call_active(function_id, arguments, span);
+        self.call_depth -= 1;
+        result
+    }
+
+    fn call_active(
         &mut self,
         function_id: FunctionId,
         arguments: Vec<Value>,

@@ -22,6 +22,7 @@ pub struct RunResult {
     diagnostics: Vec<Diagnostic>,
     execution: Option<Execution>,
     runtime_error: Option<RuntimeError>,
+    output: Vec<String>,
 }
 
 impl RunResult {
@@ -41,6 +42,12 @@ impl RunResult {
     #[must_use]
     pub fn runtime_error(&self) -> Option<&RuntimeError> {
         self.runtime_error.as_ref()
+    }
+
+    /// Returns lines emitted before execution completed or failed.
+    #[must_use]
+    pub fn output(&self) -> &[String] {
+        &self.output
     }
 
     /// Returns true when checking succeeded and the interpreter completed.
@@ -105,22 +112,37 @@ pub fn run(file: FileId, source: &str) -> RunResult {
             diagnostics,
             execution: None,
             runtime_error: None,
+            output: Vec::new(),
         };
     };
 
-    match lower_mir(typed)
-        .map_err(RuntimeError::from)
-        .and_then(|program| run_mir(&program))
-    {
-        Ok(execution) => RunResult {
-            diagnostics,
-            execution: Some(execution),
-            runtime_error: None,
-        },
-        Err(runtime_error) => RunResult {
+    let program = match lower_mir(typed) {
+        Ok(program) => program,
+        Err(error) => {
+            return RunResult {
+                diagnostics,
+                execution: None,
+                runtime_error: Some(error.into()),
+                output: Vec::new(),
+            };
+        }
+    };
+
+    match run_mir(&program) {
+        Ok(execution) => {
+            let output = execution.output().to_vec();
+            RunResult {
+                diagnostics,
+                execution: Some(execution),
+                runtime_error: None,
+                output,
+            }
+        }
+        Err(failure) => RunResult {
             diagnostics,
             execution: None,
-            runtime_error: Some(runtime_error),
+            runtime_error: Some(failure.error().clone()),
+            output: failure.output().to_vec(),
         },
     }
 }

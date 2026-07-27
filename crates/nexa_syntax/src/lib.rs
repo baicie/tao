@@ -444,6 +444,16 @@ mod tests {
     }
 
     #[test]
+    fn tokenizes_let_as_an_identifier() {
+        let tokens = tokenize("let");
+
+        assert_eq!(
+            (tokens.len(), tokens[0].kind(), tokens[0].text()),
+            (1, SyntaxKind::Ident, "let")
+        );
+    }
+
+    #[test]
     fn syntax_kinds_round_trip_through_rowan() {
         let kinds = [
             SyntaxKind::Ident,

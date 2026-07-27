@@ -28,9 +28,20 @@ cargo test --workspace
 ## Try the CLI
 
 ```bash
-cargo run -p nexac -- check examples/basic.nexa
-cargo run -p nexac -- parse examples/basic.nexa
+cargo run -p nexac -- check examples/language_core.nexa
+cargo run -p nexac -- run examples/language_core.nexa
+cargo run -p nexac -- parse examples/language_core.nexa
 ```
+
+`check` parses, resolves, and type-checks the program. `run` executes the
+checked program's `main` function through the MIR interpreter and prints `42`
+for the bundled example.
+
+Nexa adopts familiar TypeScript-shaped syntax, but it is not a TypeScript or
+JavaScript compatibility layer. It deliberately has no JavaScript runtime
+semantics such as `any`, implicit `undefined`, truthiness, or implicit
+coercions. Any future TypeScript interop belongs in a separate adapter crate,
+not in the core parser or IRs.
 
 ## Next Steps
 

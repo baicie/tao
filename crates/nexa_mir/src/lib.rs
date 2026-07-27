@@ -9,7 +9,7 @@ mod execute;
 mod lower;
 mod mir;
 
-pub use execute::{run, Execution, RuntimeError, Value};
+pub use execute::{run, Execution, RuntimeError, RuntimeFailure, Value};
 pub use lower::{lower, MirLoweringError};
 pub use mir::{
     Callee, FunctionId, LocalId, MirBlock, MirExpression, MirFunction, MirProgram, MirStatement,

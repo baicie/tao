@@ -76,6 +76,10 @@ fn main() -> Result<()> {
 
             emit_diagnostics(&sources, result.diagnostics());
 
+            for line in result.output() {
+                println!("{line}");
+            }
+
             if let Some(runtime_error) = result.runtime_error() {
                 emit_runtime_error(&sources, runtime_error);
                 bail!("run failed: {runtime_error}");
@@ -85,12 +89,6 @@ fn main() -> Result<()> {
                     "run failed with {} error(s)",
                     error_count(result.diagnostics())
                 );
-            }
-
-            if let Some(execution) = result.execution() {
-                for line in execution.output() {
-                    println!("{line}");
-                }
             }
         }
     }

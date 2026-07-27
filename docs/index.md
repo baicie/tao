@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: "Nexa"
-  text: "Rust bootstrap compiler workspace"
-  tagline: A small first compiler front end: spans, diagnostics, syntax, parser, and nexac.
+  text: "Language Core v0.1"
+  tagline: "A TS-shaped language with independent static semantics and a MIR interpreter."
   actions:
     - theme: brand
       text: Get Started
@@ -18,8 +18,10 @@ features:
     details: Crates are organized by compiler phase boundaries instead of generic app layers.
   - title: Stable Source Spans
     details: Diagnostics and parser output share source ranges through nexa_span.
-  - title: Front-End Loop
-    details: nexac can parse and check source files while the grammar grows.
+  - title: Checked Execution
+    details: nexac parses, type-checks, lowers to MIR, and runs a single source file.
+  - title: Native Semantics
+    details: Familiar TypeScript-shaped syntax does not imply JavaScript runtime compatibility.
   - title: Rust Tooling
     details: fmt, clippy, tests, docs, xtask automation, CI, and security checks stay in place.
 ---

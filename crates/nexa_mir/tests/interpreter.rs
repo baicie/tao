@@ -59,10 +59,74 @@ fn interpreter_reports_division_by_zero_with_a_source_span(
         .err()
         .ok_or_else(|| std::io::Error::other("expected a division error"))?;
 
-    assert_eq!(error.message(), "division by zero");
-    assert_eq!(error.span().range().start(), 30);
+    assert_eq!(error.error().message(), "division by zero");
+    assert_eq!(error.error().span().range().start(), 30);
 
     Ok(())
+}
+
+#[test]
+fn interpreter_preserves_output_before_a_runtime_failure() -> Result<(), Box<dyn std::error::Error>>
+{
+    let program = compile("function main(): Unit { print(1); print(1 / 0); }")?;
+    let failure = run(&program)
+        .err()
+        .ok_or_else(|| std::io::Error::other("expected a division error"))?;
+
+    assert_eq!(failure.output(), ["1"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_allows_64_active_calls() -> Result<(), Box<dyn std::error::Error>> {
+    let source = call_chain_source(63);
+    let program = compile(&source)?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["1"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_reports_a_runtime_error_at_the_65th_active_call(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = call_chain_source(64);
+    let expected_span_start = source
+        .find("f64();")
+        .ok_or_else(|| std::io::Error::other("expected final call in generated source"))?;
+    let program = compile(&source)?;
+    let failure = run(&program)
+        .err()
+        .ok_or_else(|| std::io::Error::other("expected a call depth error"))?;
+
+    assert_eq!(
+        failure.error().message(),
+        "maximum call depth of 64 exceeded"
+    );
+    assert_eq!(failure.error().span().range().start(), expected_span_start);
+
+    Ok(())
+}
+
+fn call_chain_source(function_count: usize) -> String {
+    let mut source = String::new();
+
+    for index in 1..=function_count {
+        if index == function_count {
+            source.push_str(&format!("function f{index}(): Unit {{ print(1); }}\n"));
+        } else {
+            source.push_str(&format!(
+                "function f{index}(): Unit {{ f{}(); }}\n",
+                index + 1
+            ));
+        }
+    }
+
+    source.push_str("function main(): Unit { f1(); }");
+    source
 }
 
 fn compile(source: &str) -> Result<MirProgram, Box<dyn std::error::Error>> {

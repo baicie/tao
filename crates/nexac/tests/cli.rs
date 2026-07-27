@@ -61,6 +61,31 @@ fn nexac_check_rejects_invalid_semantics() -> Result<(), Box<dyn std::error::Err
 }
 
 #[test]
+fn nexac_check_rejects_an_undefined_name() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects("rejected/undefined_name.nexa", "E2001")
+}
+
+#[test]
+fn nexac_check_rejects_a_duplicate_binding() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects("rejected/duplicate_binding.nexa", "E2002")
+}
+
+#[test]
+fn nexac_check_rejects_an_incorrect_call_arity() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects("rejected/incorrect_call_arity.nexa", "E2003")
+}
+
+#[test]
+fn nexac_check_rejects_a_type_mismatch() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects("rejected/type_mismatch.nexa", "E3001")
+}
+
+#[test]
+fn nexac_check_rejects_an_invalid_return() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects("rejected/invalid_return.nexa", "E3003")
+}
+
+#[test]
 fn nexac_run_executes_main_and_prints_its_output() -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
         .arg("run")
@@ -93,6 +118,25 @@ fn nexac_run_reports_runtime_failures_with_a_source_location(
         "stderr: {stderr}"
     );
     assert!(stderr.contains(":2:9"), "stderr: {stderr}");
+
+    Ok(())
+}
+
+#[test]
+fn nexac_run_keeps_output_emitted_before_a_runtime_failure(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("run")
+        .arg(fixture("rejected/output_before_runtime_failure.nexa"))
+        .output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "1\n");
+    assert!(
+        stderr.contains("runtime error: division by zero"),
+        "stderr: {stderr}"
+    );
 
     Ok(())
 }
@@ -150,4 +194,21 @@ fn fixture(path: &str) -> PathBuf {
         .join("tests")
         .join("fixtures")
         .join(path)
+}
+
+fn assert_check_rejects(
+    fixture_path: &str,
+    diagnostic_code: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("check")
+        .arg(fixture(fixture_path))
+        .output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert!(stderr.contains(diagnostic_code), "stderr: {stderr}");
+
+    Ok(())
 }
