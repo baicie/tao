@@ -1,1 +1,3 @@
-let answer = 42;
+function main(): Unit {
+  print(42);
+}

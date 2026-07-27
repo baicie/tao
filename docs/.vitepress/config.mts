@@ -1,8 +1,8 @@
 import { defineConfig } from "vitepress";
 
 export default defineConfig({
-  title: "Rust Workspace Template",
-  description: "A production-ready Rust workspace template for multi-crate CLI/library projects",
+  title: "Nexa",
+  description: "A TS-shaped language with independent static semantics and a MIR interpreter",
   lang: "en-US",
   lastUpdated: true,
   cleanUrls: true,
@@ -17,10 +17,12 @@ export default defineConfig({
     nav: [
       { text: "Home", link: "/" },
       { text: "Guide", link: "/guide/getting-started" },
-      { text: "API Reference", link: "/api/overview" },
+      { text: "Architecture", link: "/architecture" },
+      { text: "Language Spec", link: "/spec/" },
       {
         text: "More",
         items: [
+          { text: "Roadmap", link: "/project/roadmap/language-core-v0.2" },
           { text: "Changelog", link: "/changelog" },
           { text: "Contributing", link: "/contributing" },
         ],
@@ -36,22 +38,6 @@ export default defineConfig({
             { text: "Getting Started", link: "/guide/getting-started" },
             { text: "Project Structure", link: "/guide/project-structure" },
             { text: "Development", link: "/guide/development" },
-            { text: "Release", link: "/guide/release" },
-            { text: "Publishing", link: "/guide/publishing" },
-          ],
-        },
-      ],
-      "/api/": [
-        {
-          text: "API Reference",
-          collapsed: false,
-          items: [
-            { text: "Overview", link: "/api/overview" },
-            { text: "CLI Crate", link: "/api/cli" },
-            { text: "Core Crate", link: "/api/core" },
-            { text: "Config Crate", link: "/api/config" },
-            { text: "Utils Crate", link: "/api/utils" },
-            { text: "Macros Crate", link: "/api/macros" },
           ],
         },
       ],
@@ -67,8 +53,6 @@ export default defineConfig({
             { text: "Getting Started", link: "/guide/getting-started" },
             { text: "Project Structure", link: "/guide/project-structure" },
             { text: "Development", link: "/guide/development" },
-            { text: "Release", link: "/guide/release" },
-            { text: "Publishing", link: "/guide/publishing" },
           ],
         },
         {
@@ -79,22 +63,18 @@ export default defineConfig({
           ],
         },
         {
-          text: "API Reference",
+          text: "Language Design",
           collapsed: false,
           items: [
-            { text: "Overview", link: "/api/overview" },
-            { text: "CLI Crate", link: "/api/cli" },
-            { text: "Core Crate", link: "/api/core" },
-            { text: "Config Crate", link: "/api/config" },
-            { text: "Utils Crate", link: "/api/utils" },
-            { text: "Macros Crate", link: "/api/macros" },
+            { text: "Language Core v0.2", link: "/spec/language-core-v0.2" },
+            { text: "Roadmap", link: "/project/roadmap/language-core-v0.2" },
           ],
         },
       ],
     },
 
     socialLinks: [
-      { icon: "github", link: "https://github.com/your-org/your-repo" },
+      { icon: "github", link: "https://github.com/baicie/nexa" },
     ],
 
     search: {
@@ -103,7 +83,7 @@ export default defineConfig({
 
     footer: {
       message: "Released under the MIT License.",
-      copyright: "Copyright © 2024-present",
+      copyright: "Copyright (c) 2024-present",
     },
 
     outline: {

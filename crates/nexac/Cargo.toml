@@ -16,7 +16,10 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+nexa_compiler.workspace = true
+nexa_diagnostics.workspace = true
 nexa_parser.workspace = true
+nexa_source.workspace = true
 nexa_span.workspace = true
 
 [lints]

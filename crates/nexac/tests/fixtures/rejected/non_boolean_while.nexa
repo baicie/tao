@@ -1,0 +1,5 @@
+function main(): Unit {
+  while (42) {
+    break;
+  }
+}

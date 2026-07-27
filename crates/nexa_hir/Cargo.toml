@@ -1,0 +1,21 @@
+[package]
+name = "nexa_hir"
+description = "HIR lowering and semantic checking for the Nexa compiler."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+
+[dependencies]
+nexa_diagnostics.workspace = true
+nexa_span.workspace = true
+nexa_syntax.workspace = true
+
+[dev-dependencies]
+nexa_parser.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,20 @@
+[package]
+name = "nexa_mir"
+description = "Middle IR lowering and interpretation for the Nexa compiler."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+
+[dependencies]
+nexa_hir.workspace = true
+nexa_span.workspace = true
+
+[dev-dependencies]
+nexa_parser.workspace = true
+
+[lints]
+workspace = true
