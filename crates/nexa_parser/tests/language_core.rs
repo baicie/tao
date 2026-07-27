@@ -35,6 +35,17 @@ fn parse_source_accepts_a_language_core_program() {
 }
 
 #[test]
+fn parse_source_accepts_let_as_an_identifier() {
+    let parse = parse_source(FileId::new(0), "function let(): Unit { return; }");
+
+    assert!(
+        parse.is_ok(),
+        "parser diagnostics: {:?}",
+        parse.diagnostics()
+    );
+}
+
+#[test]
 fn parse_source_accepts_an_empty_file() {
     let parse = parse_source(FileId::new(0), "");
 

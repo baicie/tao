@@ -31,90 +31,88 @@ pub enum SyntaxKind {
     Eq = 10,
     /// An unrecognized token.
     Unknown = 11,
-    /// The retired bootstrap `let` keyword.
-    LetKw = 12,
     /// The `function` keyword.
-    FunctionKw = 13,
+    FunctionKw = 12,
     /// The `const` keyword.
-    ConstKw = 14,
+    ConstKw = 13,
     /// The `if` keyword.
-    IfKw = 15,
+    IfKw = 14,
     /// The `else` keyword.
-    ElseKw = 16,
+    ElseKw = 15,
     /// The `return` keyword.
-    ReturnKw = 17,
+    ReturnKw = 16,
     /// The `true` keyword.
-    TrueKw = 18,
+    TrueKw = 17,
     /// The `false` keyword.
-    FalseKw = 19,
+    FalseKw = 18,
     /// The `Int` type keyword.
-    IntKw = 20,
+    IntKw = 19,
     /// The `Bool` type keyword.
-    BoolKw = 21,
+    BoolKw = 20,
     /// The `Unit` type keyword.
-    UnitKw = 22,
+    UnitKw = 21,
     /// `:`
-    Colon = 23,
+    Colon = 22,
     /// `+`
-    Plus = 24,
+    Plus = 23,
     /// `-`
-    Minus = 25,
+    Minus = 24,
     /// `*`
-    Star = 26,
+    Star = 25,
     /// `/`
-    Slash = 27,
+    Slash = 26,
     /// `!`
-    Bang = 28,
+    Bang = 27,
     /// `===`
-    EqEqEq = 29,
+    EqEqEq = 28,
     /// `<`
-    Lt = 30,
+    Lt = 29,
     /// `<=`
-    LtEq = 31,
+    LtEq = 30,
     /// `>`
-    Gt = 32,
+    Gt = 31,
     /// `>=`
-    GtEq = 33,
+    GtEq = 32,
     /// The root of a parsed source file.
-    SourceFile = 34,
+    SourceFile = 33,
     /// A top-level function declaration.
-    FunctionDeclaration = 35,
+    FunctionDeclaration = 34,
     /// A comma-separated parameter list.
-    ParameterList = 36,
+    ParameterList = 35,
     /// One named and typed function parameter.
-    Parameter = 37,
+    Parameter = 36,
     /// A type reference.
-    Type = 38,
+    Type = 37,
     /// A braced statement block.
-    Block = 39,
+    Block = 38,
     /// An immutable local declaration.
-    ConstDeclaration = 40,
+    ConstDeclaration = 39,
     /// A conditional statement.
-    IfStatement = 41,
+    IfStatement = 40,
     /// The optional `else` part of a conditional.
-    ElseClause = 42,
+    ElseClause = 41,
     /// An explicit function return.
-    ReturnStatement = 43,
+    ReturnStatement = 42,
     /// An expression terminated by a semicolon.
-    ExpressionStatement = 44,
+    ExpressionStatement = 43,
     /// A binary operator expression.
-    BinaryExpression = 45,
+    BinaryExpression = 44,
     /// A prefix unary operator expression.
-    UnaryExpression = 46,
+    UnaryExpression = 45,
     /// A function call expression.
-    CallExpression = 47,
+    CallExpression = 46,
     /// A reference to a named value.
-    NameReference = 48,
+    NameReference = 47,
     /// An integer literal expression.
-    IntLiteral = 49,
+    IntLiteral = 48,
     /// A boolean literal expression.
-    BoolLiteral = 50,
+    BoolLiteral = 49,
     /// A parenthesized expression.
-    ParenthesizedExpression = 51,
+    ParenthesizedExpression = 50,
     /// A comma-separated call argument list.
-    ArgumentList = 52,
+    ArgumentList = 51,
     /// Tokens skipped during parser recovery.
-    Error = 53,
+    Error = 52,
 }
 
 impl SyntaxKind {
@@ -138,48 +136,47 @@ impl SyntaxKind {
             9 => Self::Semicolon,
             10 => Self::Eq,
             11 => Self::Unknown,
-            12 => Self::LetKw,
-            13 => Self::FunctionKw,
-            14 => Self::ConstKw,
-            15 => Self::IfKw,
-            16 => Self::ElseKw,
-            17 => Self::ReturnKw,
-            18 => Self::TrueKw,
-            19 => Self::FalseKw,
-            20 => Self::IntKw,
-            21 => Self::BoolKw,
-            22 => Self::UnitKw,
-            23 => Self::Colon,
-            24 => Self::Plus,
-            25 => Self::Minus,
-            26 => Self::Star,
-            27 => Self::Slash,
-            28 => Self::Bang,
-            29 => Self::EqEqEq,
-            30 => Self::Lt,
-            31 => Self::LtEq,
-            32 => Self::Gt,
-            33 => Self::GtEq,
-            34 => Self::SourceFile,
-            35 => Self::FunctionDeclaration,
-            36 => Self::ParameterList,
-            37 => Self::Parameter,
-            38 => Self::Type,
-            39 => Self::Block,
-            40 => Self::ConstDeclaration,
-            41 => Self::IfStatement,
-            42 => Self::ElseClause,
-            43 => Self::ReturnStatement,
-            44 => Self::ExpressionStatement,
-            45 => Self::BinaryExpression,
-            46 => Self::UnaryExpression,
-            47 => Self::CallExpression,
-            48 => Self::NameReference,
-            49 => Self::IntLiteral,
-            50 => Self::BoolLiteral,
-            51 => Self::ParenthesizedExpression,
-            52 => Self::ArgumentList,
-            53 => Self::Error,
+            12 => Self::FunctionKw,
+            13 => Self::ConstKw,
+            14 => Self::IfKw,
+            15 => Self::ElseKw,
+            16 => Self::ReturnKw,
+            17 => Self::TrueKw,
+            18 => Self::FalseKw,
+            19 => Self::IntKw,
+            20 => Self::BoolKw,
+            21 => Self::UnitKw,
+            22 => Self::Colon,
+            23 => Self::Plus,
+            24 => Self::Minus,
+            25 => Self::Star,
+            26 => Self::Slash,
+            27 => Self::Bang,
+            28 => Self::EqEqEq,
+            29 => Self::Lt,
+            30 => Self::LtEq,
+            31 => Self::Gt,
+            32 => Self::GtEq,
+            33 => Self::SourceFile,
+            34 => Self::FunctionDeclaration,
+            35 => Self::ParameterList,
+            36 => Self::Parameter,
+            37 => Self::Type,
+            38 => Self::Block,
+            39 => Self::ConstDeclaration,
+            40 => Self::IfStatement,
+            41 => Self::ElseClause,
+            42 => Self::ReturnStatement,
+            43 => Self::ExpressionStatement,
+            44 => Self::BinaryExpression,
+            45 => Self::UnaryExpression,
+            46 => Self::CallExpression,
+            47 => Self::NameReference,
+            48 => Self::IntLiteral,
+            49 => Self::BoolLiteral,
+            50 => Self::ParenthesizedExpression,
+            51 => Self::ArgumentList,
+            52 => Self::Error,
             _ => unreachable!("invalid Nexa syntax kind: {raw}"),
         }
     }
@@ -314,7 +311,6 @@ fn keyword_kind(kind: SyntaxKind, text: &str) -> SyntaxKind {
     }
 
     match text {
-        "let" => SyntaxKind::LetKw,
         "function" => SyntaxKind::FunctionKw,
         "const" => SyntaxKind::ConstKw,
         "if" => SyntaxKind::IfKw,
@@ -462,7 +458,6 @@ mod tests {
             SyntaxKind::Semicolon,
             SyntaxKind::Eq,
             SyntaxKind::Unknown,
-            SyntaxKind::LetKw,
             SyntaxKind::FunctionKw,
             SyntaxKind::ConstKw,
             SyntaxKind::IfKw,
