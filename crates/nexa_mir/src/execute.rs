@@ -4,8 +4,8 @@ use nexa_hir::{BinaryOperator, UnaryOperator};
 use nexa_span::SourceSpan;
 
 use crate::{
-    Callee, FunctionId, LocalId, MirBlock, MirExpression, MirLoweringError, MirProgram,
-    MirStatement,
+    Callee, FunctionId, LocalId, MirExpression, MirLoweringError, MirProgram, MirStatement,
+    MirTerminator,
 };
 
 /// A runtime value produced by the reference interpreter.
@@ -139,8 +139,8 @@ impl From<MirLoweringError> for RuntimeError {
 /// # Errors
 ///
 /// Returns [`RuntimeFailure`] when `main` is missing, execution exceeds the
-/// reference interpreter's call-depth limit, arithmetic overflows, a division
-/// by zero occurs, or an internal MIR invariant is violated.
+/// reference interpreter's call-depth or basic-block step limits, arithmetic
+/// overflows, division by zero occurs, or an internal MIR invariant fails.
 pub fn run(program: &MirProgram) -> Result<Execution, RuntimeFailure> {
     let main = program
         .functions
@@ -153,6 +153,7 @@ pub fn run(program: &MirProgram) -> Result<Execution, RuntimeFailure> {
         program,
         output: Vec::new(),
         call_depth: 0,
+        steps: 0,
     };
     match interpreter.call(main, Vec::new(), program.span) {
         Ok(value) => Ok(Execution {
@@ -167,11 +168,13 @@ pub fn run(program: &MirProgram) -> Result<Execution, RuntimeFailure> {
 }
 
 const MAX_CALL_DEPTH: usize = 64;
+const MAX_EXECUTION_STEPS: usize = 100_000;
 
 struct Interpreter<'program> {
     program: &'program MirProgram,
     output: Vec<String>,
     call_depth: usize,
+    steps: usize,
 }
 
 impl Interpreter<'_> {
@@ -225,68 +228,73 @@ impl Interpreter<'_> {
             frame.store(local, argument, function.span)?;
         }
 
-        match self.execute_block(&function.body, &mut frame)? {
-            Control::Continue => Ok(Value::Unit),
-            Control::Return(value) => Ok(value),
+        let mut current = function.entry;
+        loop {
+            let block = function
+                .blocks
+                .get(current.0)
+                .ok_or_else(|| RuntimeError::new(function.span, "basic block does not exist"))?;
+            self.consume_step(block.span)?;
+
+            for statement in &block.statements {
+                self.execute_statement(statement, &mut frame)?;
+            }
+
+            current = match &block.terminator {
+                MirTerminator::Goto { target, .. } => *target,
+                MirTerminator::Branch {
+                    condition,
+                    then_target,
+                    else_target,
+                    span,
+                } => match self.evaluate(condition, &frame)? {
+                    Value::Bool(true) => *then_target,
+                    Value::Bool(false) => *else_target,
+                    value => {
+                        return Err(RuntimeError::new(
+                            *span,
+                            format!(
+                                "control-flow condition evaluated to `{}` instead of `Bool`",
+                                value_type(&value)
+                            ),
+                        ));
+                    }
+                },
+                MirTerminator::Return { value, .. } => {
+                    return value
+                        .as_ref()
+                        .map(|value| self.evaluate(value, &frame))
+                        .transpose()
+                        .map(|value| value.unwrap_or(Value::Unit));
+                }
+            };
         }
     }
 
-    fn execute_block(
-        &mut self,
-        block: &MirBlock,
-        frame: &mut Frame,
-    ) -> Result<Control, RuntimeError> {
-        for statement in &block.statements {
-            let control = self.execute_statement(statement, frame)?;
-            if let Control::Return(_) = control {
-                return Ok(control);
-            }
+    fn consume_step(&mut self, span: SourceSpan) -> Result<(), RuntimeError> {
+        if self.steps >= MAX_EXECUTION_STEPS {
+            return Err(RuntimeError::new(
+                span,
+                format!("execution step limit of {MAX_EXECUTION_STEPS} exceeded"),
+            ));
         }
-
-        Ok(Control::Continue)
+        self.steps += 1;
+        Ok(())
     }
 
     fn execute_statement(
         &mut self,
         statement: &MirStatement,
         frame: &mut Frame,
-    ) -> Result<Control, RuntimeError> {
+    ) -> Result<(), RuntimeError> {
         match statement {
-            MirStatement::Initialize { local, value, span } => {
+            MirStatement::Store { local, value, span } => {
                 let value = self.evaluate(value, frame)?;
-                frame.store(*local, value, *span)?;
-                Ok(Control::Continue)
+                frame.store(*local, value, *span)
             }
-            MirStatement::If {
-                condition,
-                then_branch,
-                else_branch,
-                span,
-            } => match self.evaluate(condition, frame)? {
-                Value::Bool(true) => self.execute_block(then_branch, frame),
-                Value::Bool(false) => else_branch
-                    .as_ref()
-                    .map_or(Ok(Control::Continue), |branch| {
-                        self.execute_block(branch, frame)
-                    }),
-                value => Err(RuntimeError::new(
-                    *span,
-                    format!(
-                        "if condition evaluated to `{}` instead of `Bool`",
-                        value_type(&value)
-                    ),
-                )),
-            },
-            MirStatement::Return { value, .. } => Ok(Control::Return(
-                value
-                    .as_ref()
-                    .map(|value| self.evaluate(value, frame))
-                    .transpose()?
-                    .unwrap_or(Value::Unit),
-            )),
             MirStatement::Expression { expression, .. } => {
                 let _ = self.evaluate(expression, frame)?;
-                Ok(Control::Continue)
+                Ok(())
             }
         }
     }
@@ -358,6 +366,26 @@ impl Interpreter<'_> {
         span: SourceSpan,
         frame: &Frame,
     ) -> Result<Value, RuntimeError> {
+        match operator {
+            BinaryOperator::LogicalAnd => {
+                let left = boolean_operand(self.evaluate(left, frame)?, left.span())?;
+                if !left {
+                    return Ok(Value::Bool(false));
+                }
+                let right = boolean_operand(self.evaluate(right, frame)?, right.span())?;
+                return Ok(Value::Bool(right));
+            }
+            BinaryOperator::LogicalOr => {
+                let left = boolean_operand(self.evaluate(left, frame)?, left.span())?;
+                if left {
+                    return Ok(Value::Bool(true));
+                }
+                let right = boolean_operand(self.evaluate(right, frame)?, right.span())?;
+                return Ok(Value::Bool(right));
+            }
+            _ => {}
+        }
+
         let left = self.evaluate(left, frame)?;
         let right = self.evaluate(right, frame)?;
 
@@ -383,6 +411,10 @@ impl Interpreter<'_> {
             BinaryOperator::GreaterEqual => {
                 compare_integers(left, right, span, |left, right| left >= right)
             }
+            BinaryOperator::LogicalAnd | BinaryOperator::LogicalOr => Err(RuntimeError::new(
+                span,
+                "logical operator reached eager MIR evaluation",
+            )),
         }
     }
 
@@ -408,12 +440,6 @@ impl Interpreter<'_> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Control {
-    Continue,
-    Return(Value),
-}
-
 struct Frame {
     locals: Vec<Value>,
 }
@@ -437,6 +463,19 @@ impl Frame {
         };
         *slot = value;
         Ok(())
+    }
+}
+
+fn boolean_operand(value: Value, span: SourceSpan) -> Result<bool, RuntimeError> {
+    match value {
+        Value::Bool(value) => Ok(value),
+        value => Err(RuntimeError::new(
+            span,
+            format!(
+                "logical operation received `{}` instead of `Bool`",
+                value_type(&value)
+            ),
+        )),
     }
 }
 

@@ -5,9 +5,10 @@ use nexa_span::{FileId, SourceSpan, TextRange};
 use nexa_syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
 use crate::{
-    BinaryOperator, Block, ConstDeclaration, Expression, ExpressionStatement, Function,
-    IfStatement, Name, Parameter, Program, ReturnStatement, Statement, Type, TypeReference,
-    UnaryOperator,
+    AssignmentStatement, BinaryOperator, Block, BreakStatement, ConstDeclaration,
+    ContinueStatement, Expression, ExpressionStatement, Function, IfStatement, LetDeclaration,
+    Name, Parameter, Program, ReturnStatement, Statement, Type, TypeReference, UnaryOperator,
+    WhileStatement,
 };
 
 const SYNTAX_ERROR: DiagnosticCode = DiagnosticCode::new("E1001");
@@ -155,13 +156,43 @@ fn lower_block(file: FileId, node: &SyntaxNode) -> Result<Block, LoweringError> 
 fn lower_statement(file: FileId, node: &SyntaxNode) -> Result<Statement, LoweringError> {
     match node.kind() {
         SyntaxKind::ConstDeclaration => Ok(Statement::Const(lower_const(file, node)?)),
+        SyntaxKind::LetDeclaration => Ok(Statement::Let(lower_let(file, node)?)),
+        SyntaxKind::AssignmentStatement => Ok(Statement::Assignment(lower_assignment(file, node)?)),
         SyntaxKind::IfStatement => Ok(Statement::If(lower_if(file, node)?)),
+        SyntaxKind::WhileStatement => Ok(Statement::While(lower_while(file, node)?)),
+        SyntaxKind::BreakStatement => Ok(Statement::Break(BreakStatement {
+            span: node_span(file, node),
+        })),
+        SyntaxKind::ContinueStatement => Ok(Statement::Continue(ContinueStatement {
+            span: node_span(file, node),
+        })),
         SyntaxKind::ReturnStatement => Ok(Statement::Return(lower_return(file, node)?)),
         SyntaxKind::ExpressionStatement => Ok(Statement::Expression(lower_expression_statement(
             file, node,
         )?)),
         _ => Err(malformed(node_span(file, node))),
     }
+}
+
+fn lower_let(file: FileId, node: &SyntaxNode) -> Result<LetDeclaration, LoweringError> {
+    let annotation = child(node, SyntaxKind::Type)
+        .map(|ty| lower_type(file, &ty))
+        .transpose()?;
+
+    Ok(LetDeclaration {
+        name: lower_direct_name(file, node)?,
+        annotation,
+        initializer: lower_expression(file, &required_expression_child(file, node)?)?,
+        span: node_span(file, node),
+    })
+}
+
+fn lower_assignment(file: FileId, node: &SyntaxNode) -> Result<AssignmentStatement, LoweringError> {
+    Ok(AssignmentStatement {
+        target: lower_direct_name(file, node)?,
+        value: lower_expression(file, &required_expression_child(file, node)?)?,
+        span: node_span(file, node),
+    })
 }
 
 fn lower_const(file: FileId, node: &SyntaxNode) -> Result<ConstDeclaration, LoweringError> {
@@ -193,6 +224,14 @@ fn lower_if(file: FileId, node: &SyntaxNode) -> Result<IfStatement, LoweringErro
         condition,
         then_branch,
         else_branch,
+        span: node_span(file, node),
+    })
+}
+
+fn lower_while(file: FileId, node: &SyntaxNode) -> Result<WhileStatement, LoweringError> {
+    Ok(WhileStatement {
+        condition: lower_expression(file, &required_expression_child(file, node)?)?,
+        body: lower_block(file, &required_child(file, node, SyntaxKind::Block)?)?,
         span: node_span(file, node),
     })
 }
@@ -345,6 +384,8 @@ fn binary_operator(node: &SyntaxNode) -> Option<BinaryOperator> {
             SyntaxKind::LtEq => Some(BinaryOperator::LessEqual),
             SyntaxKind::Gt => Some(BinaryOperator::Greater),
             SyntaxKind::GtEq => Some(BinaryOperator::GreaterEqual),
+            SyntaxKind::AmpAmp => Some(BinaryOperator::LogicalAnd),
+            SyntaxKind::PipePipe => Some(BinaryOperator::LogicalOr),
             _ => None,
         })
 }
@@ -378,7 +419,12 @@ const fn is_statement_kind(kind: SyntaxKind) -> bool {
     matches!(
         kind,
         SyntaxKind::ConstDeclaration
+            | SyntaxKind::LetDeclaration
+            | SyntaxKind::AssignmentStatement
             | SyntaxKind::IfStatement
+            | SyntaxKind::WhileStatement
+            | SyntaxKind::BreakStatement
+            | SyntaxKind::ContinueStatement
             | SyntaxKind::ReturnStatement
             | SyntaxKind::ExpressionStatement
     )

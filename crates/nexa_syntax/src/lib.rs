@@ -35,84 +35,106 @@ pub enum SyntaxKind {
     FunctionKw = 12,
     /// The `const` keyword.
     ConstKw = 13,
+    /// The `let` keyword.
+    LetKw = 14,
     /// The `if` keyword.
-    IfKw = 14,
+    IfKw = 15,
     /// The `else` keyword.
-    ElseKw = 15,
+    ElseKw = 16,
+    /// The `while` keyword.
+    WhileKw = 17,
+    /// The `break` keyword.
+    BreakKw = 18,
+    /// The `continue` keyword.
+    ContinueKw = 19,
     /// The `return` keyword.
-    ReturnKw = 16,
+    ReturnKw = 20,
     /// The `true` keyword.
-    TrueKw = 17,
+    TrueKw = 21,
     /// The `false` keyword.
-    FalseKw = 18,
+    FalseKw = 22,
     /// The `Int` type keyword.
-    IntKw = 19,
+    IntKw = 23,
     /// The `Bool` type keyword.
-    BoolKw = 20,
+    BoolKw = 24,
     /// The `Unit` type keyword.
-    UnitKw = 21,
+    UnitKw = 25,
     /// `:`
-    Colon = 22,
+    Colon = 26,
     /// `+`
-    Plus = 23,
+    Plus = 27,
     /// `-`
-    Minus = 24,
+    Minus = 28,
     /// `*`
-    Star = 25,
+    Star = 29,
     /// `/`
-    Slash = 26,
+    Slash = 30,
     /// `!`
-    Bang = 27,
+    Bang = 31,
+    /// `&&`
+    AmpAmp = 32,
+    /// `||`
+    PipePipe = 33,
     /// `===`
-    EqEqEq = 28,
+    EqEqEq = 34,
     /// `<`
-    Lt = 29,
+    Lt = 35,
     /// `<=`
-    LtEq = 30,
+    LtEq = 36,
     /// `>`
-    Gt = 31,
+    Gt = 37,
     /// `>=`
-    GtEq = 32,
+    GtEq = 38,
     /// The root of a parsed source file.
-    SourceFile = 33,
+    SourceFile = 39,
     /// A top-level function declaration.
-    FunctionDeclaration = 34,
+    FunctionDeclaration = 40,
     /// A comma-separated parameter list.
-    ParameterList = 35,
+    ParameterList = 41,
     /// One named and typed function parameter.
-    Parameter = 36,
+    Parameter = 42,
     /// A type reference.
-    Type = 37,
+    Type = 43,
     /// A braced statement block.
-    Block = 38,
+    Block = 44,
     /// An immutable local declaration.
-    ConstDeclaration = 39,
+    ConstDeclaration = 45,
+    /// A mutable local declaration.
+    LetDeclaration = 46,
+    /// An assignment to a named local.
+    AssignmentStatement = 47,
     /// A conditional statement.
-    IfStatement = 40,
+    IfStatement = 48,
     /// The optional `else` part of a conditional.
-    ElseClause = 41,
+    ElseClause = 49,
+    /// A conditional loop.
+    WhileStatement = 50,
+    /// An exit from the nearest enclosing loop.
+    BreakStatement = 51,
+    /// A jump to the next iteration of the nearest enclosing loop.
+    ContinueStatement = 52,
     /// An explicit function return.
-    ReturnStatement = 42,
+    ReturnStatement = 53,
     /// An expression terminated by a semicolon.
-    ExpressionStatement = 43,
+    ExpressionStatement = 54,
     /// A binary operator expression.
-    BinaryExpression = 44,
+    BinaryExpression = 55,
     /// A prefix unary operator expression.
-    UnaryExpression = 45,
+    UnaryExpression = 56,
     /// A function call expression.
-    CallExpression = 46,
+    CallExpression = 57,
     /// A reference to a named value.
-    NameReference = 47,
+    NameReference = 58,
     /// An integer literal expression.
-    IntLiteral = 48,
+    IntLiteral = 59,
     /// A boolean literal expression.
-    BoolLiteral = 49,
+    BoolLiteral = 60,
     /// A parenthesized expression.
-    ParenthesizedExpression = 50,
+    ParenthesizedExpression = 61,
     /// A comma-separated call argument list.
-    ArgumentList = 51,
+    ArgumentList = 62,
     /// Tokens skipped during parser recovery.
-    Error = 52,
+    Error = 63,
 }
 
 impl SyntaxKind {
@@ -138,45 +160,56 @@ impl SyntaxKind {
             11 => Self::Unknown,
             12 => Self::FunctionKw,
             13 => Self::ConstKw,
-            14 => Self::IfKw,
-            15 => Self::ElseKw,
-            16 => Self::ReturnKw,
-            17 => Self::TrueKw,
-            18 => Self::FalseKw,
-            19 => Self::IntKw,
-            20 => Self::BoolKw,
-            21 => Self::UnitKw,
-            22 => Self::Colon,
-            23 => Self::Plus,
-            24 => Self::Minus,
-            25 => Self::Star,
-            26 => Self::Slash,
-            27 => Self::Bang,
-            28 => Self::EqEqEq,
-            29 => Self::Lt,
-            30 => Self::LtEq,
-            31 => Self::Gt,
-            32 => Self::GtEq,
-            33 => Self::SourceFile,
-            34 => Self::FunctionDeclaration,
-            35 => Self::ParameterList,
-            36 => Self::Parameter,
-            37 => Self::Type,
-            38 => Self::Block,
-            39 => Self::ConstDeclaration,
-            40 => Self::IfStatement,
-            41 => Self::ElseClause,
-            42 => Self::ReturnStatement,
-            43 => Self::ExpressionStatement,
-            44 => Self::BinaryExpression,
-            45 => Self::UnaryExpression,
-            46 => Self::CallExpression,
-            47 => Self::NameReference,
-            48 => Self::IntLiteral,
-            49 => Self::BoolLiteral,
-            50 => Self::ParenthesizedExpression,
-            51 => Self::ArgumentList,
-            52 => Self::Error,
+            14 => Self::LetKw,
+            15 => Self::IfKw,
+            16 => Self::ElseKw,
+            17 => Self::WhileKw,
+            18 => Self::BreakKw,
+            19 => Self::ContinueKw,
+            20 => Self::ReturnKw,
+            21 => Self::TrueKw,
+            22 => Self::FalseKw,
+            23 => Self::IntKw,
+            24 => Self::BoolKw,
+            25 => Self::UnitKw,
+            26 => Self::Colon,
+            27 => Self::Plus,
+            28 => Self::Minus,
+            29 => Self::Star,
+            30 => Self::Slash,
+            31 => Self::Bang,
+            32 => Self::AmpAmp,
+            33 => Self::PipePipe,
+            34 => Self::EqEqEq,
+            35 => Self::Lt,
+            36 => Self::LtEq,
+            37 => Self::Gt,
+            38 => Self::GtEq,
+            39 => Self::SourceFile,
+            40 => Self::FunctionDeclaration,
+            41 => Self::ParameterList,
+            42 => Self::Parameter,
+            43 => Self::Type,
+            44 => Self::Block,
+            45 => Self::ConstDeclaration,
+            46 => Self::LetDeclaration,
+            47 => Self::AssignmentStatement,
+            48 => Self::IfStatement,
+            49 => Self::ElseClause,
+            50 => Self::WhileStatement,
+            51 => Self::BreakStatement,
+            52 => Self::ContinueStatement,
+            53 => Self::ReturnStatement,
+            54 => Self::ExpressionStatement,
+            55 => Self::BinaryExpression,
+            56 => Self::UnaryExpression,
+            57 => Self::CallExpression,
+            58 => Self::NameReference,
+            59 => Self::IntLiteral,
+            60 => Self::BoolLiteral,
+            61 => Self::ParenthesizedExpression,
+            62 => Self::ArgumentList,
+            63 => Self::Error,
             _ => unreachable!("invalid Nexa syntax kind: {raw}"),
         }
     }
@@ -280,6 +313,8 @@ pub fn tokenize(source: &str) -> Vec<Token> {
             }
             '=' => consume_equals(&mut chars),
             '!' => consume_bang(&mut chars),
+            '&' => consume_required_pair(&mut chars, '&', SyntaxKind::AmpAmp),
+            '|' => consume_required_pair(&mut chars, '|', SyntaxKind::PipePipe),
             '<' => consume_optional_equals(&mut chars, SyntaxKind::Lt, SyntaxKind::LtEq),
             '>' => consume_optional_equals(&mut chars, SyntaxKind::Gt, SyntaxKind::GtEq),
             '(' => SyntaxKind::LParen,
@@ -313,8 +348,12 @@ fn keyword_kind(kind: SyntaxKind, text: &str) -> SyntaxKind {
     match text {
         "function" => SyntaxKind::FunctionKw,
         "const" => SyntaxKind::ConstKw,
+        "let" => SyntaxKind::LetKw,
         "if" => SyntaxKind::IfKw,
         "else" => SyntaxKind::ElseKw,
+        "while" => SyntaxKind::WhileKw,
+        "break" => SyntaxKind::BreakKw,
+        "continue" => SyntaxKind::ContinueKw,
         "return" => SyntaxKind::ReturnKw,
         "true" => SyntaxKind::TrueKw,
         "false" => SyntaxKind::FalseKw,
@@ -355,6 +394,18 @@ fn consume_optional_equals(
         combined
     } else {
         single
+    }
+}
+
+fn consume_required_pair(
+    chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>,
+    expected: char,
+    combined: SyntaxKind,
+) -> SyntaxKind {
+    if consume_if(chars, expected) {
+        combined
+    } else {
+        SyntaxKind::Unknown
     }
 }
 
@@ -444,12 +495,42 @@ mod tests {
     }
 
     #[test]
-    fn tokenizes_let_as_an_identifier() {
-        let tokens = tokenize("let");
+    fn tokenizes_stateful_control_flow_keywords_and_logical_operators() {
+        let tokens = tokenize("let while break continue && ||");
+        let kinds: Vec<_> = tokens.iter().map(|token| token.kind()).collect();
 
         assert_eq!(
-            (tokens.len(), tokens[0].kind(), tokens[0].text()),
-            (1, SyntaxKind::Ident, "let")
+            kinds,
+            [
+                SyntaxKind::LetKw,
+                SyntaxKind::Whitespace,
+                SyntaxKind::WhileKw,
+                SyntaxKind::Whitespace,
+                SyntaxKind::BreakKw,
+                SyntaxKind::Whitespace,
+                SyntaxKind::ContinueKw,
+                SyntaxKind::Whitespace,
+                SyntaxKind::AmpAmp,
+                SyntaxKind::Whitespace,
+                SyntaxKind::PipePipe,
+            ]
+        );
+    }
+
+    #[test]
+    fn single_logical_operator_characters_are_unknown_tokens() {
+        let tokens = tokenize("& |");
+
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| (token.kind(), token.text()))
+                .collect::<Vec<_>>(),
+            [
+                (SyntaxKind::Unknown, "&"),
+                (SyntaxKind::Whitespace, " "),
+                (SyntaxKind::Unknown, "|"),
+            ]
         );
     }
 
@@ -470,8 +551,12 @@ mod tests {
             SyntaxKind::Unknown,
             SyntaxKind::FunctionKw,
             SyntaxKind::ConstKw,
+            SyntaxKind::LetKw,
             SyntaxKind::IfKw,
             SyntaxKind::ElseKw,
+            SyntaxKind::WhileKw,
+            SyntaxKind::BreakKw,
+            SyntaxKind::ContinueKw,
             SyntaxKind::ReturnKw,
             SyntaxKind::TrueKw,
             SyntaxKind::FalseKw,
@@ -484,6 +569,8 @@ mod tests {
             SyntaxKind::Star,
             SyntaxKind::Slash,
             SyntaxKind::Bang,
+            SyntaxKind::AmpAmp,
+            SyntaxKind::PipePipe,
             SyntaxKind::EqEqEq,
             SyntaxKind::Lt,
             SyntaxKind::LtEq,
@@ -496,8 +583,13 @@ mod tests {
             SyntaxKind::Type,
             SyntaxKind::Block,
             SyntaxKind::ConstDeclaration,
+            SyntaxKind::LetDeclaration,
+            SyntaxKind::AssignmentStatement,
             SyntaxKind::IfStatement,
             SyntaxKind::ElseClause,
+            SyntaxKind::WhileStatement,
+            SyntaxKind::BreakStatement,
+            SyntaxKind::ContinueStatement,
             SyntaxKind::ReturnStatement,
             SyntaxKind::ExpressionStatement,
             SyntaxKind::BinaryExpression,

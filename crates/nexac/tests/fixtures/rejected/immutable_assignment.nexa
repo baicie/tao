@@ -1,0 +1,8 @@
+function update(value: Int): Unit {
+  value = 1;
+}
+
+function main(): Unit {
+  const answer: Int = 42;
+  answer = 0;
+}

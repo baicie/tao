@@ -21,6 +21,23 @@ fn nexac_check_accepts_a_language_core_program() -> Result<(), Box<dyn std::erro
 }
 
 #[test]
+fn nexac_check_accepts_stateful_control_flow() -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("check")
+        .arg(fixture("accepted/stateful_control_flow.nexa"))
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "nexac check failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "ok\n");
+
+    Ok(())
+}
+
+#[test]
 fn nexac_check_rejects_invalid_syntax() -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
         .arg("check")
@@ -86,6 +103,31 @@ fn nexac_check_rejects_an_invalid_return() -> Result<(), Box<dyn std::error::Err
 }
 
 #[test]
+fn nexac_check_rejects_immutable_assignments() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/immutable_assignment.nexa", "E2004", ":2:3:")
+}
+
+#[test]
+fn nexac_check_rejects_break_outside_a_loop() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/break_outside_loop.nexa", "E3004", ":2:3:")
+}
+
+#[test]
+fn nexac_check_rejects_continue_outside_a_loop() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/continue_outside_loop.nexa", "E3004", ":2:3:")
+}
+
+#[test]
+fn nexac_check_rejects_an_assignment_type_mismatch() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects("rejected/assignment_type_mismatch.nexa", "E3001")
+}
+
+#[test]
+fn nexac_check_rejects_a_non_boolean_while_condition() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects("rejected/non_boolean_while.nexa", "E3002")
+}
+
+#[test]
 fn nexac_run_executes_main_and_prints_its_output() -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
         .arg("run")
@@ -98,6 +140,23 @@ fn nexac_run_executes_main_and_prints_its_output() -> Result<(), Box<dyn std::er
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n");
+
+    Ok(())
+}
+
+#[test]
+fn nexac_run_executes_stateful_control_flow() -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("run")
+        .arg(fixture("accepted/stateful_control_flow.nexa"))
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "12\n");
 
     Ok(())
 }
@@ -137,6 +196,26 @@ fn nexac_run_keeps_output_emitted_before_a_runtime_failure(
         stderr.contains("runtime error: division by zero"),
         "stderr: {stderr}"
     );
+
+    Ok(())
+}
+
+#[test]
+fn nexac_run_reports_the_execution_step_limit_with_a_source_location(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("run")
+        .arg(fixture("rejected/execution_step_limit.nexa"))
+        .output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "1\n");
+    assert!(
+        stderr.contains("runtime error: execution step limit of 100000 exceeded"),
+        "stderr: {stderr}"
+    );
+    assert!(stderr.contains(":3:15"), "stderr: {stderr}");
 
     Ok(())
 }
@@ -200,6 +279,22 @@ fn assert_check_rejects(
     fixture_path: &str,
     diagnostic_code: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_with_location(fixture_path, diagnostic_code, None)
+}
+
+fn assert_check_rejects_at(
+    fixture_path: &str,
+    diagnostic_code: &str,
+    source_location: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_with_location(fixture_path, diagnostic_code, Some(source_location))
+}
+
+fn assert_check_rejects_with_location(
+    fixture_path: &str,
+    diagnostic_code: &str,
+    source_location: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
         .arg("check")
         .arg(fixture(fixture_path))
@@ -209,6 +304,9 @@ fn assert_check_rejects(
     assert!(!output.status.success());
     assert_eq!(String::from_utf8_lossy(&output.stdout), "");
     assert!(stderr.contains(diagnostic_code), "stderr: {stderr}");
+    if let Some(source_location) = source_location {
+        assert!(stderr.contains(source_location), "stderr: {stderr}");
+    }
 
     Ok(())
 }

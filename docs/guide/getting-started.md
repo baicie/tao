@@ -28,13 +28,13 @@ cargo test --workspace
 ## Try the CLI
 
 ```bash
-cargo run -p nexac -- check examples/language_core.nexa
-cargo run -p nexac -- run examples/language_core.nexa
-cargo run -p nexac -- parse examples/language_core.nexa
+cargo run -p nexac -- check examples/stateful_control_flow.nexa
+cargo run -p nexac -- run examples/stateful_control_flow.nexa
+cargo run -p nexac -- parse examples/stateful_control_flow.nexa
 ```
 
 `check` parses, resolves, and type-checks the program. `run` executes the
-checked program's `main` function through the MIR interpreter and prints `42`
+checked program's `main` function through the MIR interpreter and prints `12`
 for the bundled example.
 
 Nexa adopts familiar TypeScript-shaped syntax, but it is not a TypeScript or

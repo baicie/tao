@@ -3,7 +3,7 @@ layout: home
 
 hero:
   name: "Nexa"
-  text: "Language Core v0.1"
+  text: "Language Core v0.2"
   tagline: "A TS-shaped language with independent static semantics and a MIR interpreter."
   actions:
     - theme: brand

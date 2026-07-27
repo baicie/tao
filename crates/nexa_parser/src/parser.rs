@@ -8,8 +8,13 @@ const STATEMENT_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::Semicolon,
     SyntaxKind::RBrace,
     SyntaxKind::ElseKw,
+    SyntaxKind::FunctionKw,
     SyntaxKind::ConstKw,
+    SyntaxKind::LetKw,
     SyntaxKind::IfKw,
+    SyntaxKind::WhileKw,
+    SyntaxKind::BreakKw,
+    SyntaxKind::ContinueKw,
     SyntaxKind::ReturnKw,
 ];
 
@@ -168,7 +173,11 @@ impl Parser<'_> {
                     break;
                 }
                 Some(SyntaxKind::ConstKw) => self.parse_const_declaration(),
+                Some(SyntaxKind::LetKw) => self.parse_let_declaration(),
                 Some(SyntaxKind::IfKw) => self.parse_if_statement(),
+                Some(SyntaxKind::WhileKw) => self.parse_while_statement(),
+                Some(SyntaxKind::BreakKw) => self.parse_break_statement(),
+                Some(SyntaxKind::ContinueKw) => self.parse_continue_statement(),
                 Some(SyntaxKind::ReturnKw) => self.parse_return_statement(),
                 Some(SyntaxKind::ElseKw) => {
                     self.error_at_current("unexpected `else`");
@@ -177,6 +186,9 @@ impl Parser<'_> {
                 Some(SyntaxKind::FunctionKw) => {
                     self.error_at_current("expected `}` to close block");
                     break;
+                }
+                Some(SyntaxKind::Ident) if self.at_assignment_statement() => {
+                    self.parse_assignment_statement();
                 }
                 Some(_) => {
                     let statement_position = self.position;
@@ -200,8 +212,29 @@ impl Parser<'_> {
     }
 
     fn parse_const_declaration(&mut self) {
-        self.builder.start_node(SyntaxKind::ConstDeclaration.into());
-        self.expect(SyntaxKind::ConstKw, "expected `const`");
+        self.parse_binding_declaration(
+            SyntaxKind::ConstDeclaration,
+            SyntaxKind::ConstKw,
+            "expected `const`",
+        );
+    }
+
+    fn parse_let_declaration(&mut self) {
+        self.parse_binding_declaration(
+            SyntaxKind::LetDeclaration,
+            SyntaxKind::LetKw,
+            "expected `let`",
+        );
+    }
+
+    fn parse_binding_declaration(
+        &mut self,
+        declaration_kind: SyntaxKind,
+        keyword_kind: SyntaxKind,
+        keyword_message: &'static str,
+    ) {
+        self.builder.start_node(declaration_kind.into());
+        self.expect(keyword_kind, keyword_message);
         self.expect(SyntaxKind::Ident, "expected binding name");
         self.skip_trivia();
 
@@ -223,6 +256,24 @@ impl Parser<'_> {
         self.builder.finish_node();
     }
 
+    fn parse_assignment_statement(&mut self) {
+        self.builder
+            .start_node(SyntaxKind::AssignmentStatement.into());
+        self.expect(SyntaxKind::Ident, "expected assignment target");
+        self.expect(SyntaxKind::Eq, "expected `=` after assignment target");
+
+        if !self.parse_expression() {
+            self.recover_statement();
+            self.builder.finish_node();
+            return;
+        }
+
+        if !self.expect(SyntaxKind::Semicolon, "expected `;` after assignment") {
+            self.recover_statement();
+        }
+        self.builder.finish_node();
+    }
+
     fn parse_if_statement(&mut self) {
         self.builder.start_node(SyntaxKind::IfStatement.into());
         self.expect(SyntaxKind::IfKw, "expected `if`");
@@ -239,6 +290,49 @@ impl Parser<'_> {
             self.builder.finish_node();
         }
 
+        self.builder.finish_node();
+    }
+
+    fn parse_while_statement(&mut self) {
+        self.builder.start_node(SyntaxKind::WhileStatement.into());
+        self.expect(SyntaxKind::WhileKw, "expected `while`");
+        self.expect(SyntaxKind::LParen, "expected `(` after `while`");
+        let _ = self.parse_expression();
+        self.expect(SyntaxKind::RParen, "expected `)` after condition");
+        self.parse_block();
+        self.builder.finish_node();
+    }
+
+    fn parse_break_statement(&mut self) {
+        self.parse_terminated_keyword_statement(
+            SyntaxKind::BreakStatement,
+            SyntaxKind::BreakKw,
+            "expected `break`",
+            "expected `;` after `break`",
+        );
+    }
+
+    fn parse_continue_statement(&mut self) {
+        self.parse_terminated_keyword_statement(
+            SyntaxKind::ContinueStatement,
+            SyntaxKind::ContinueKw,
+            "expected `continue`",
+            "expected `;` after `continue`",
+        );
+    }
+
+    fn parse_terminated_keyword_statement(
+        &mut self,
+        statement_kind: SyntaxKind,
+        keyword_kind: SyntaxKind,
+        keyword_message: &'static str,
+        semicolon_message: &'static str,
+    ) {
+        self.builder.start_node(statement_kind.into());
+        self.expect(keyword_kind, keyword_message);
+        if !self.expect(SyntaxKind::Semicolon, semicolon_message) {
+            self.recover_statement();
+        }
         self.builder.finish_node();
     }
 
@@ -407,10 +501,12 @@ impl Parser<'_> {
 
     fn binary_precedence(&self) -> Option<u8> {
         match self.current() {
-            Some(SyntaxKind::EqEqEq) => Some(1),
-            Some(SyntaxKind::Lt | SyntaxKind::LtEq | SyntaxKind::Gt | SyntaxKind::GtEq) => Some(2),
-            Some(SyntaxKind::Plus | SyntaxKind::Minus) => Some(3),
-            Some(SyntaxKind::Star | SyntaxKind::Slash) => Some(4),
+            Some(SyntaxKind::PipePipe) => Some(1),
+            Some(SyntaxKind::AmpAmp) => Some(2),
+            Some(SyntaxKind::EqEqEq) => Some(3),
+            Some(SyntaxKind::Lt | SyntaxKind::LtEq | SyntaxKind::Gt | SyntaxKind::GtEq) => Some(4),
+            Some(SyntaxKind::Plus | SyntaxKind::Minus) => Some(5),
+            Some(SyntaxKind::Star | SyntaxKind::Slash) => Some(6),
             _ => None,
         }
     }
@@ -492,6 +588,19 @@ impl Parser<'_> {
 
     fn at(&self, kind: SyntaxKind) -> bool {
         self.current() == Some(kind)
+    }
+
+    fn at_assignment_statement(&self) -> bool {
+        self.nth_non_trivia(0) == Some(SyntaxKind::Ident)
+            && self.nth_non_trivia(1) == Some(SyntaxKind::Eq)
+    }
+
+    fn nth_non_trivia(&self, offset: usize) -> Option<SyntaxKind> {
+        self.tokens[self.position..]
+            .iter()
+            .filter(|token| !token.kind().is_trivia())
+            .nth(offset)
+            .map(Token::kind)
     }
 
     fn bump(&mut self) {

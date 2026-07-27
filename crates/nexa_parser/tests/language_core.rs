@@ -35,14 +35,8 @@ fn parse_source_accepts_a_language_core_program() {
 }
 
 #[test]
-fn parse_source_accepts_let_as_an_identifier() {
-    let parse = parse_source(FileId::new(0), "function let(): Unit { return; }");
-
-    assert!(
-        parse.is_ok(),
-        "parser diagnostics: {:?}",
-        parse.diagnostics()
-    );
+fn parse_source_treats_let_as_a_reserved_keyword() {
+    assert_rejected_with_diagnostic("function let(): Unit { return; }", "expected function name");
 }
 
 #[test]

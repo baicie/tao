@@ -11,8 +11,9 @@ mod lower;
 
 pub use check::{type_check, Analysis, TypedProgram};
 pub use hir::{
-    BinaryOperator, Block, ConstDeclaration, Expression, ExpressionStatement, Function,
-    IfStatement, Name, Parameter, Program, ReturnStatement, Statement, Type, TypeReference,
-    UnaryOperator,
+    AssignmentStatement, BinaryOperator, Block, BreakStatement, ConstDeclaration,
+    ContinueStatement, Expression, ExpressionStatement, Function, IfStatement, LetDeclaration,
+    Name, Parameter, Program, ReturnStatement, Statement, Type, TypeReference, UnaryOperator,
+    WhileStatement,
 };
 pub use lower::{lower, LoweringError};

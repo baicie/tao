@@ -1,6 +1,6 @@
 # Nexa
 
-Nexa is a Rust bootstrap compiler workspace for Language Core v0.1: a
+Nexa is a Rust bootstrap compiler workspace for Language Core v0.2: a
 TypeScript-shaped language with independently specified native semantics.
 
 ## Layout
@@ -37,13 +37,14 @@ nexac -> nexa_source -> nexa_span
 
 ```bash
 cargo xtask check
-cargo run -p nexac -- check examples/language_core.nexa
-cargo run -p nexac -- run examples/language_core.nexa
-cargo run -p nexac -- parse examples/language_core.nexa
+cargo run -p nexac -- check examples/stateful_control_flow.nexa
+cargo run -p nexac -- run examples/stateful_control_flow.nexa
+cargo run -p nexac -- parse examples/stateful_control_flow.nexa
 ```
 
-Language Core v0.1 parses a lossless CST, lowers it through HIR and MIR, checks
-names and types, and interprets a single source file. It intentionally borrows
+[Language Core v0.2](docs/spec/language-core-v0.2.md) builds on the first
+checked and interpreted language slice with initialized mutable bindings,
+assignment, loops, and short-circuit control flow. Nexa intentionally borrows
 familiar TypeScript surface syntax without accepting TypeScript or JavaScript
 compatibility as a goal. A future TypeScript interop layer, if needed, belongs
 in an isolated adapter crate and must lower into Nexa HIR without leaking a

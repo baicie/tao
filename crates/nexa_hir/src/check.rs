@@ -4,16 +4,19 @@ use nexa_diagnostics::{Diagnostic, DiagnosticCode, Label};
 use nexa_span::SourceSpan;
 
 use crate::{
-    BinaryOperator, Block, ConstDeclaration, Expression, Function, IfStatement, Name, Program,
-    ReturnStatement, Statement, Type, UnaryOperator,
+    AssignmentStatement, BinaryOperator, Block, ConstDeclaration, Expression, Function,
+    IfStatement, LetDeclaration, Name, Program, ReturnStatement, Statement, Type, TypeReference,
+    UnaryOperator, WhileStatement,
 };
 
 const UNDEFINED_NAME: DiagnosticCode = DiagnosticCode::new("E2001");
 const DUPLICATE_NAME: DiagnosticCode = DiagnosticCode::new("E2002");
 const CALL_ARITY: DiagnosticCode = DiagnosticCode::new("E2003");
+const IMMUTABLE_ASSIGNMENT: DiagnosticCode = DiagnosticCode::new("E2004");
 const TYPE_MISMATCH: DiagnosticCode = DiagnosticCode::new("E3001");
 const NON_BOOLEAN_CONDITION: DiagnosticCode = DiagnosticCode::new("E3002");
 const INVALID_RETURN: DiagnosticCode = DiagnosticCode::new("E3003");
+const INVALID_LOOP_CONTROL: DiagnosticCode = DiagnosticCode::new("E3004");
 
 /// The semantic result of type checking a lowered program.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,7 +45,7 @@ impl Analysis {
     }
 }
 
-/// A HIR program proven to satisfy the Language Core v0.1 type rules.
+/// A HIR program proven to satisfy the Language Core static type rules.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypedProgram {
     program: Program,
@@ -56,7 +59,7 @@ impl TypedProgram {
     }
 }
 
-/// Resolves names and validates v0.1 static semantics for a lowered program.
+/// Resolves names and validates static semantics for a lowered program.
 #[must_use]
 pub fn type_check(program: &Program) -> Analysis {
     let mut diagnostics = Vec::new();
@@ -138,10 +141,11 @@ fn check_function(
         diagnostics,
         scopes: vec![HashMap::new()],
         return_type: function.return_type.kind,
+        loop_depth: 0,
     };
 
     for parameter in &function.parameters {
-        checker.bind(&parameter.name, parameter.ty.kind);
+        checker.bind(&parameter.name, Some(parameter.ty.kind), false);
     }
 
     let always_returns = checker.check_block(&function.body, false);
@@ -174,12 +178,14 @@ struct FunctionChecker<'a> {
     diagnostics: &'a mut Vec<Diagnostic>,
     scopes: Vec<HashMap<String, Binding>>,
     return_type: Type,
+    loop_depth: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
 struct Binding {
-    ty: Type,
+    ty: Option<Type>,
     span: SourceSpan,
+    mutable: bool,
 }
 
 impl FunctionChecker<'_> {
@@ -206,7 +212,27 @@ impl FunctionChecker<'_> {
                 self.check_const(declaration);
                 false
             }
+            Statement::Let(declaration) => {
+                self.check_let(declaration);
+                false
+            }
+            Statement::Assignment(statement) => {
+                self.check_assignment(statement);
+                false
+            }
             Statement::If(statement) => self.check_if(statement),
+            Statement::While(statement) => {
+                self.check_while(statement);
+                false
+            }
+            Statement::Break(statement) => {
+                self.check_loop_control(statement.span, "break");
+                false
+            }
+            Statement::Continue(statement) => {
+                self.check_loop_control(statement.span, "continue");
+                false
+            }
             Statement::Return(statement) => {
                 self.check_return(statement);
                 true
@@ -219,20 +245,75 @@ impl FunctionChecker<'_> {
     }
 
     fn check_const(&mut self, declaration: &ConstDeclaration) {
-        let initializer_type = self.check_expression(&declaration.initializer);
-        let declared_type = declaration
-            .annotation
-            .as_ref()
-            .map(|annotation| annotation.kind);
+        self.check_binding(
+            &declaration.name,
+            declaration.annotation.as_ref(),
+            &declaration.initializer,
+            false,
+        );
+    }
+
+    fn check_let(&mut self, declaration: &LetDeclaration) {
+        self.check_binding(
+            &declaration.name,
+            declaration.annotation.as_ref(),
+            &declaration.initializer,
+            true,
+        );
+    }
+
+    fn check_binding(
+        &mut self,
+        name: &Name,
+        annotation: Option<&TypeReference>,
+        initializer: &Expression,
+        mutable: bool,
+    ) {
+        let initializer_type = self.check_expression(initializer);
+        let declared_type = annotation.map(|annotation| annotation.kind);
 
         if let (Some(expected), Some(actual)) = (declared_type, initializer_type) {
             if expected != actual {
-                self.type_mismatch(declaration.initializer.span(), expected, actual);
+                self.type_mismatch(initializer.span(), expected, actual);
             }
         }
 
-        if let Some(ty) = declared_type.or(initializer_type) {
-            self.bind(&declaration.name, ty);
+        self.bind(name, declared_type.or(initializer_type), mutable);
+    }
+
+    fn check_assignment(&mut self, statement: &AssignmentStatement) {
+        let value_type = self.check_expression(&statement.value);
+        let Some(binding) = self.lookup_binding(&statement.target) else {
+            self.error(
+                UNDEFINED_NAME,
+                statement.target.span,
+                format!("undefined value `{}`", statement.target.text),
+                "not found in this scope",
+            );
+            return;
+        };
+
+        if !binding.mutable {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    IMMUTABLE_ASSIGNMENT,
+                    format!(
+                        "cannot assign to immutable binding `{}`",
+                        statement.target.text
+                    ),
+                )
+                .with_label(Label::primary(
+                    statement.target.span,
+                    "immutable assignment",
+                ))
+                .with_label(Label::secondary(binding.span, "binding declared here")),
+            );
+        }
+
+        if let (Some(expected), Some(actual)) = (binding.ty, value_type) {
+            if actual != expected {
+                self.type_mismatch(statement.value.span(), expected, actual);
+            }
         }
     }
 
@@ -255,6 +336,34 @@ impl FunctionChecker<'_> {
             .is_some_and(|branch| self.check_block(branch, true));
 
         then_returns && else_returns
+    }
+
+    fn check_while(&mut self, statement: &WhileStatement) {
+        if let Some(actual) = self.check_expression(&statement.condition) {
+            if actual != Type::Bool {
+                self.error(
+                    NON_BOOLEAN_CONDITION,
+                    statement.condition.span(),
+                    format!("while condition must have type `Bool`, found `{actual}`"),
+                    "expected `Bool` condition",
+                );
+            }
+        }
+
+        self.loop_depth += 1;
+        let _ = self.check_block(&statement.body, true);
+        self.loop_depth -= 1;
+    }
+
+    fn check_loop_control(&mut self, span: SourceSpan, keyword: &str) {
+        if self.loop_depth == 0 {
+            self.error(
+                INVALID_LOOP_CONTROL,
+                span,
+                format!("`{keyword}` is only valid inside a loop"),
+                "not inside a loop",
+            );
+        }
     }
 
     fn check_return(&mut self, statement: &ReturnStatement) {
@@ -294,15 +403,18 @@ impl FunctionChecker<'_> {
         match expression {
             Expression::Integer { .. } => Some(Type::Int),
             Expression::Boolean { .. } => Some(Type::Bool),
-            Expression::Name(name) => self.lookup(name).or_else(|| {
-                self.error(
-                    UNDEFINED_NAME,
-                    name.span,
-                    format!("undefined value `{}`", name.text),
-                    "not found in this scope",
-                );
-                None
-            }),
+            Expression::Name(name) => match self.lookup_binding(name) {
+                Some(binding) => binding.ty,
+                None => {
+                    self.error(
+                        UNDEFINED_NAME,
+                        name.span,
+                        format!("undefined value `{}`", name.text),
+                        "not found in this scope",
+                    );
+                    None
+                }
+            },
             Expression::Unary {
                 operator,
                 expression,
@@ -344,11 +456,21 @@ impl FunctionChecker<'_> {
     ) -> Option<Type> {
         let left_type = self.check_expression(left);
         let right_type = self.check_expression(right);
+        if matches!(
+            operator,
+            BinaryOperator::LogicalAnd | BinaryOperator::LogicalOr
+        ) {
+            return self.require_binary_bools(left, right, left_type, right_type);
+        }
+
         let (Some(left_type), Some(right_type)) = (left_type, right_type) else {
             return None;
         };
 
         match operator {
+            BinaryOperator::LogicalAnd | BinaryOperator::LogicalOr => {
+                self.require_binary_bools(left, right, Some(left_type), Some(right_type))
+            }
             BinaryOperator::Equal => {
                 if left_type != right_type {
                     self.error(
@@ -375,6 +497,27 @@ impl FunctionChecker<'_> {
                 self.require_binary_ints(left, right, left_type, right_type, Type::Int)
             }
         }
+    }
+
+    fn require_binary_bools(
+        &mut self,
+        left: &Expression,
+        right: &Expression,
+        left_type: Option<Type>,
+        right_type: Option<Type>,
+    ) -> Option<Type> {
+        if let Some(left_type) = left_type {
+            if left_type != Type::Bool {
+                self.type_mismatch(left.span(), Type::Bool, left_type);
+            }
+        }
+        if let Some(right_type) = right_type {
+            if right_type != Type::Bool {
+                self.type_mismatch(right.span(), Type::Bool, right_type);
+            }
+        }
+
+        (left_type == Some(Type::Bool) && right_type == Some(Type::Bool)).then_some(Type::Bool)
     }
 
     fn require_binary_ints(
@@ -412,11 +555,14 @@ impl FunctionChecker<'_> {
             return None;
         };
 
-        if let Some(binding) = self.lookup(name) {
+        if let Some(binding) = self.lookup_binding(name) {
+            let binding_description = binding
+                .ty
+                .map_or_else(|| "value".to_owned(), |ty| format!("`{ty}` value"));
             self.error(
                 TYPE_MISMATCH,
                 name.span,
-                format!("cannot call a `{binding}` value"),
+                format!("cannot call a {binding_description}"),
                 "not a function",
             );
             return None;
@@ -461,7 +607,7 @@ impl FunctionChecker<'_> {
         Some(signature.return_type)
     }
 
-    fn bind(&mut self, name: &Name, ty: Type) {
+    fn bind(&mut self, name: &Name, ty: Option<Type>, mutable: bool) {
         let Some(scope) = self.scopes.last_mut() else {
             return;
         };
@@ -478,16 +624,17 @@ impl FunctionChecker<'_> {
                 Binding {
                     ty,
                     span: name.span,
+                    mutable,
                 },
             );
         }
     }
 
-    fn lookup(&self, name: &Name) -> Option<Type> {
+    fn lookup_binding(&self, name: &Name) -> Option<Binding> {
         self.scopes
             .iter()
             .rev()
-            .find_map(|scope| scope.get(&name.text).map(|binding| binding.ty))
+            .find_map(|scope| scope.get(&name.text).copied())
     }
 
     fn type_mismatch(&mut self, span: SourceSpan, expected: Type, actual: Type) {

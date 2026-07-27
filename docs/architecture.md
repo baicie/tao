@@ -1,6 +1,6 @@
 # Architecture
 
-Nexa is a small compiler workspace for Language Core v0.1. The workspace keeps
+Nexa is a small compiler workspace for Language Core v0.2. The workspace keeps
 each crate aligned to a compiler responsibility rather than a generic
 application layer.
 

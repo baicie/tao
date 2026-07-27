@@ -29,7 +29,8 @@ pub struct MirFunction {
     pub(crate) parameters: Vec<LocalId>,
     pub(crate) local_count: usize,
     pub(crate) return_type: Type,
-    pub(crate) body: MirBlock,
+    pub(crate) entry: BasicBlockId,
+    pub(crate) blocks: Vec<MirBasicBlock>,
     pub(crate) span: SourceSpan,
 }
 
@@ -50,6 +51,18 @@ impl MirFunction {
     #[must_use]
     pub const fn return_type(&self) -> Type {
         self.return_type
+    }
+
+    /// Returns the entry block for this function.
+    #[must_use]
+    pub const fn entry_block(&self) -> BasicBlockId {
+        self.entry
+    }
+
+    /// Returns the function's control-flow graph in stable block order.
+    #[must_use]
+    pub fn blocks(&self) -> &[MirBasicBlock] {
+        &self.blocks
     }
 
     /// Returns the function's source range.
@@ -83,21 +96,40 @@ impl FunctionId {
     }
 }
 
-/// A braced sequence of MIR statements.
+/// A stable identifier for one basic block in a function control-flow graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BasicBlockId(pub(crate) usize);
+
+impl BasicBlockId {
+    /// Returns the block's zero-based index within its function.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.0
+    }
+}
+
+/// A linear statement sequence ending in exactly one control-flow terminator.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MirBlock {
+pub struct MirBasicBlock {
     pub(crate) statements: Vec<MirStatement>,
+    pub(crate) terminator: MirTerminator,
     pub(crate) span: SourceSpan,
 }
 
-impl MirBlock {
+impl MirBasicBlock {
     /// Returns statements in execution order.
     #[must_use]
     pub fn statements(&self) -> &[MirStatement] {
         &self.statements
     }
 
-    /// Returns the source range of the original block.
+    /// Returns the control-flow operation that ends this block.
+    #[must_use]
+    pub const fn terminator(&self) -> &MirTerminator {
+        &self.terminator
+    }
+
+    /// Returns the source range associated with this block.
     #[must_use]
     pub const fn span(&self) -> SourceSpan {
         self.span
@@ -107,31 +139,13 @@ impl MirBlock {
 /// A statement in resolved MIR.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MirStatement {
-    /// Initializes an immutable local slot.
-    Initialize {
+    /// Stores a value in a resolved local slot.
+    Store {
         /// The destination local slot.
         local: LocalId,
-        /// The initializer expression.
+        /// The expression evaluated before storing.
         value: MirExpression,
-        /// The declaration's source range.
-        span: SourceSpan,
-    },
-    /// Selects one of two blocks based on a condition.
-    If {
-        /// The boolean condition expression.
-        condition: MirExpression,
-        /// The branch for a true condition.
-        then_branch: MirBlock,
-        /// The optional branch for a false condition.
-        else_branch: Option<MirBlock>,
-        /// The statement's source range.
-        span: SourceSpan,
-    },
-    /// Returns from the current function.
-    Return {
-        /// The optional returned value.
-        value: Option<MirExpression>,
-        /// The statement's source range.
+        /// The source range for the operation that produced the stored value.
         span: SourceSpan,
     },
     /// Evaluates an expression for its side effect.
@@ -139,6 +153,36 @@ pub enum MirStatement {
         /// The evaluated expression.
         expression: MirExpression,
         /// The statement's source range.
+        span: SourceSpan,
+    },
+}
+
+/// The control-flow operation that ends a MIR basic block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MirTerminator {
+    /// Transfers control unconditionally.
+    Goto {
+        /// The destination block.
+        target: BasicBlockId,
+        /// The source construct responsible for the edge.
+        span: SourceSpan,
+    },
+    /// Selects one of two blocks using a boolean expression.
+    Branch {
+        /// The validated boolean condition.
+        condition: MirExpression,
+        /// The destination selected by `true`.
+        then_target: BasicBlockId,
+        /// The destination selected by `false`.
+        else_target: BasicBlockId,
+        /// The source range of the control-flow statement.
+        span: SourceSpan,
+    },
+    /// Returns from the current function.
+    Return {
+        /// The optional returned value.
+        value: Option<MirExpression>,
+        /// The return statement or function-body range.
         span: SourceSpan,
     },
 }

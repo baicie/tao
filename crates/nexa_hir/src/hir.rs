@@ -53,7 +53,7 @@ pub struct TypeReference {
     pub span: SourceSpan,
 }
 
-/// The closed set of v0.1 value types.
+/// The closed set of Language Core value types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Type {
     /// A signed 64-bit integer.
@@ -88,8 +88,18 @@ pub struct Block {
 pub enum Statement {
     /// An immutable local binding.
     Const(ConstDeclaration),
+    /// A mutable local binding.
+    Let(LetDeclaration),
+    /// An assignment to a mutable local binding.
+    Assignment(AssignmentStatement),
     /// A conditional branch.
     If(IfStatement),
+    /// A conditional loop.
+    While(WhileStatement),
+    /// An exit from the nearest enclosing loop.
+    Break(BreakStatement),
+    /// A jump to the next iteration of the nearest enclosing loop.
+    Continue(ContinueStatement),
     /// A function return.
     Return(ReturnStatement),
     /// An expression evaluated for its side effect.
@@ -109,6 +119,30 @@ pub struct ConstDeclaration {
     pub span: SourceSpan,
 }
 
+/// A mutable local binding declaration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LetDeclaration {
+    /// The declared local name.
+    pub name: Name,
+    /// An optional explicit binding type.
+    pub annotation: Option<TypeReference>,
+    /// The initializer expression.
+    pub initializer: Expression,
+    /// The declaration's full source range.
+    pub span: SourceSpan,
+}
+
+/// An assignment to a named local binding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssignmentStatement {
+    /// The binding receiving the value.
+    pub target: Name,
+    /// The value assigned to the binding.
+    pub value: Expression,
+    /// The statement's full source range.
+    pub span: SourceSpan,
+}
+
 /// A conditional statement with an optional alternative branch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IfStatement {
@@ -118,6 +152,31 @@ pub struct IfStatement {
     pub then_branch: Block,
     /// The optional branch evaluated when the condition is false.
     pub else_branch: Option<Block>,
+    /// The statement's full source range.
+    pub span: SourceSpan,
+}
+
+/// A loop that repeats while its condition is true.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WhileStatement {
+    /// The condition evaluated before every iteration.
+    pub condition: Expression,
+    /// The repeated statement body.
+    pub body: Block,
+    /// The statement's full source range.
+    pub span: SourceSpan,
+}
+
+/// An exit from the nearest enclosing loop.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BreakStatement {
+    /// The statement's full source range.
+    pub span: SourceSpan,
+}
+
+/// A jump to the next iteration of the nearest enclosing loop.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContinueStatement {
     /// The statement's full source range.
     pub span: SourceSpan,
 }
@@ -140,7 +199,7 @@ pub struct ExpressionStatement {
     pub span: SourceSpan,
 }
 
-/// A v0.1 expression.
+/// A source expression after syntax lowering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expression {
     /// A decimal integer literal.
@@ -225,6 +284,10 @@ pub enum UnaryOperator {
 /// An infix operator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOperator {
+    /// Short-circuiting boolean conjunction.
+    LogicalAnd,
+    /// Short-circuiting boolean disjunction.
+    LogicalOr,
     /// Integer addition.
     Add,
     /// Integer subtraction.
