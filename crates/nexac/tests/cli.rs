@@ -61,6 +61,43 @@ fn nexac_check_rejects_invalid_semantics() -> Result<(), Box<dyn std::error::Err
 }
 
 #[test]
+fn nexac_run_executes_main_and_prints_its_output() -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("run")
+        .arg(fixture("accepted/language_core.nexa"))
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n");
+
+    Ok(())
+}
+
+#[test]
+fn nexac_run_reports_runtime_failures_with_a_source_location(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("run")
+        .arg(fixture("rejected/division_by_zero.nexa"))
+        .output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert!(
+        stderr.contains("runtime error: division by zero"),
+        "stderr: {stderr}"
+    );
+    assert!(stderr.contains(":2:9"), "stderr: {stderr}");
+
+    Ok(())
+}
+
+#[test]
 fn nexac_parse_prints_the_concrete_syntax_tree() -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
         .arg("parse")

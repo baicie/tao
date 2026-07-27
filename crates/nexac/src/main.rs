@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use nexa_compiler::{check, CheckResult};
+use nexa_compiler::{check, run, CheckResult, RunResult, RuntimeError};
 use nexa_diagnostics::{Diagnostic, Severity};
 use nexa_parser::{parse_source, Parse};
 use nexa_source::SourceMap;
@@ -28,6 +28,11 @@ enum Command {
     /// Check a source file for front-end diagnostics.
     Check {
         /// Source file to check.
+        file: PathBuf,
+    },
+    /// Check and execute a source file's `main` function.
+    Run {
+        /// Source file to execute.
         file: PathBuf,
     },
 }
@@ -65,6 +70,29 @@ fn main() -> Result<()> {
 
             println!("ok");
         }
+        Command::Run { file } => {
+            let mut sources = SourceMap::default();
+            let result = run_file(&mut sources, &file)?;
+
+            emit_diagnostics(&sources, result.diagnostics());
+
+            if let Some(runtime_error) = result.runtime_error() {
+                emit_runtime_error(&sources, runtime_error);
+                bail!("run failed: {runtime_error}");
+            }
+            if !result.is_ok() {
+                bail!(
+                    "run failed with {} error(s)",
+                    error_count(result.diagnostics())
+                );
+            }
+
+            if let Some(execution) = result.execution() {
+                for line in execution.output() {
+                    println!("{line}");
+                }
+            }
+        }
     }
 
     Ok(())
@@ -86,6 +114,13 @@ fn check_file(sources: &mut SourceMap, path: &Path) -> Result<CheckResult> {
     let source = source_text(sources, file)?;
 
     Ok(check(file, source))
+}
+
+fn run_file(sources: &mut SourceMap, path: &Path) -> Result<RunResult> {
+    let file = register_source(sources, path)?;
+    let source = source_text(sources, file)?;
+
+    Ok(run(file, source))
 }
 
 fn register_source(sources: &mut SourceMap, path: &Path) -> Result<FileId> {
@@ -138,4 +173,19 @@ fn error_count(diagnostics: &[Diagnostic]) -> usize {
         .iter()
         .filter(|diagnostic| diagnostic.severity() == Severity::Error)
         .count()
+}
+
+fn emit_runtime_error(sources: &SourceMap, error: &RuntimeError) {
+    eprintln!("runtime error: {}", error.message());
+    if let Some((file, location)) = sources.location(error.span()) {
+        eprintln!(
+            "  --> {}:{}:{}",
+            file.path().display(),
+            location.line(),
+            location.column()
+        );
+    } else {
+        let range = error.span().range();
+        eprintln!("  --> <unknown>:{}..{}", range.start(), range.end());
+    }
 }

@@ -134,6 +134,7 @@ version = "0.1.0"
 dependencies = [
  "nexa_diagnostics",
  "nexa_hir",
+ "nexa_mir",
  "nexa_parser",
  "nexa_span",
 ]
@@ -153,6 +154,15 @@ dependencies = [
  "nexa_parser",
  "nexa_span",
  "nexa_syntax",
+]
+
+[[package]]
+name = "nexa_mir"
+version = "0.1.0"
+dependencies = [
+ "nexa_hir",
+ "nexa_parser",
+ "nexa_span",
 ]
 
 [[package]]

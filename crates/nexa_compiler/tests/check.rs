@@ -1,6 +1,6 @@
 //! Compiler-driver integration tests.
 
-use nexa_compiler::check;
+use nexa_compiler::{check, run};
 use nexa_span::FileId;
 
 #[test]
@@ -33,4 +33,21 @@ fn check_does_not_lower_malformed_syntax() {
         .diagnostics()
         .iter()
         .any(|diagnostic| diagnostic.code().as_str() == "E1001"));
+}
+
+#[test]
+fn run_executes_a_checked_main_function() {
+    let result = run(
+        FileId::new(0),
+        "function main(): Unit { const answer = 42; print(answer); }",
+    );
+
+    assert!(result.is_ok(), "diagnostics: {:?}", result.diagnostics());
+    assert_eq!(
+        result
+            .execution()
+            .and_then(|execution| execution.output().first())
+            .map(String::as_str),
+        Some("42")
+    );
 }

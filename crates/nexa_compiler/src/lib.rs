@@ -3,14 +3,51 @@
 
 use nexa_diagnostics::Diagnostic;
 use nexa_hir::{lower, type_check, TypedProgram};
+use nexa_mir::{lower as lower_mir, run as run_mir, Execution};
 use nexa_parser::parse_source;
 use nexa_span::FileId;
+
+pub use nexa_mir::RuntimeError;
 
 /// The result of checking one Nexa source file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckResult {
     typed: Option<TypedProgram>,
     diagnostics: Vec<Diagnostic>,
+}
+
+/// The result of checking and executing one Nexa source file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunResult {
+    diagnostics: Vec<Diagnostic>,
+    execution: Option<Execution>,
+    runtime_error: Option<RuntimeError>,
+}
+
+impl RunResult {
+    /// Returns parser and semantic diagnostics in source order.
+    #[must_use]
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
+    }
+
+    /// Returns the successful execution result, when available.
+    #[must_use]
+    pub fn execution(&self) -> Option<&Execution> {
+        self.execution.as_ref()
+    }
+
+    /// Returns a runtime error after successful semantic analysis, when present.
+    #[must_use]
+    pub fn runtime_error(&self) -> Option<&RuntimeError> {
+        self.runtime_error.as_ref()
+    }
+
+    /// Returns true when checking succeeded and the interpreter completed.
+    #[must_use]
+    pub fn is_ok(&self) -> bool {
+        self.execution.is_some()
+    }
 }
 
 impl CheckResult {
@@ -56,6 +93,36 @@ pub fn check(file: FileId, source: &str) -> CheckResult {
 
     diagnostics.sort_by_key(diagnostic_position);
     CheckResult { typed, diagnostics }
+}
+
+/// Parses, checks, lowers, and executes one Nexa source file.
+#[must_use]
+pub fn run(file: FileId, source: &str) -> RunResult {
+    let checked = check(file, source);
+    let diagnostics = checked.diagnostics.clone();
+    let Some(typed) = checked.typed() else {
+        return RunResult {
+            diagnostics,
+            execution: None,
+            runtime_error: None,
+        };
+    };
+
+    match lower_mir(typed)
+        .map_err(RuntimeError::from)
+        .and_then(|program| run_mir(&program))
+    {
+        Ok(execution) => RunResult {
+            diagnostics,
+            execution: Some(execution),
+            runtime_error: None,
+        },
+        Err(runtime_error) => RunResult {
+            diagnostics,
+            execution: None,
+            runtime_error: Some(runtime_error),
+        },
+    }
 }
 
 fn diagnostic_position(diagnostic: &Diagnostic) -> (usize, usize) {
