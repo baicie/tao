@@ -3,6 +3,12 @@
 Nexa is a Rust bootstrap compiler workspace for Language Core v0.3: a
 TypeScript-shaped language with independently specified native semantics.
 
+Language Core v0.3 is delivered. Development now targets the
+[Nexa Language 1.0 Reference Core](docs/spec/language-1.0.md): a statically
+checked, multi-file command-line language executed by the CFG MIR reference
+interpreter. The [1.0 roadmap](docs/project/roadmap/language-1.0.md) divides
+that work into independently testable language milestones.
+
 ## Layout
 
 ```txt
@@ -49,3 +55,8 @@ TypeScript surface syntax without accepting TypeScript or JavaScript
 compatibility as a goal. A future TypeScript interop layer, if needed, belongs
 in an isolated adapter crate and must lower into Nexa HIR without leaking a
 third-party AST or JavaScript runtime semantics into the core compiler.
+
+The 1.0 target deliberately excludes native AOT, UI, package management,
+closures, exceptions, and full TypeScript compatibility. Those concerns do not
+block a coherent reference language and may be evaluated after the grammar,
+type system, module model, and interpreter are stable.

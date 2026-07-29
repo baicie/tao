@@ -9,6 +9,13 @@ immutable homogeneous arrays, indexing and `.length`, widened `print`, and
 command-line arguments. Nexa remains a TypeScript-shaped language with its own
 native semantics, not a TypeScript implementation or compatibility layer.
 
+The active target is the
+[Nexa Language 1.0 Reference Core](language-1.0.md). It adds nominal records,
+tagged unions with exhaustive matching, explicit multi-file modules, bounded
+generics, error values, and a practical immutable-data core through versioned
+milestones. The target document does not describe already-delivered behavior;
+each feature becomes normative only when its milestone is delivered.
+
 OXC and SWC are not part of the core language implementation. If TypeScript
 interop is added later, it must be isolated in an adapter crate that lowers
 into Nexa HIR and does not make JavaScript runtime semantics or third-party

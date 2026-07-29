@@ -4,6 +4,10 @@ Nexa is a small compiler workspace for Language Core v0.3. The workspace keeps
 each crate aligned to a compiler responsibility rather than a generic
 application layer.
 
+The active 1.0 target preserves these phase boundaries while extending the
+single-file driver into a source session and module graph. v0.3 remains the
+delivered architecture until those milestones land.
+
 ## Crate Responsibilities
 
 | Crate | Responsibility |
@@ -46,6 +50,19 @@ Rules:
 - Future TypeScript interop may use OXC or SWC only behind an isolated adapter
   crate that lowers into Nexa HIR; their AST types must not enter core crates.
 - Placeholder crates are avoided until a phase boundary has real behavior.
+
+## 1.0 Architecture Target
+
+```text
+source files -> lossless CST -> module HIR -> typed HIR -> CFG MIR -> interpreter
+CLI/provider -> SourceMap -> module graph -> resolved definitions
+```
+
+Definition, type, field, and variant identities are established before MIR.
+The CLI or a future source provider reads files; the compiler session owns
+registered sources and module ordering; parsers remain pure consumers of one
+source text. This makes cross-file diagnostics possible without coupling syntax
+or semantic crates to the host file system.
 
 ## Unsafe Code Policy
 
