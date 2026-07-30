@@ -185,6 +185,24 @@ fn nexac_check_accepts_nominal_records() -> Result<(), Box<dyn std::error::Error
 }
 
 #[test]
+fn nexac_check_accepts_recursive_tagged_unions_and_exhaustive_match(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("check")
+        .arg(fixture("accepted/tagged_unions.nexa"))
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "ok\n");
+
+    Ok(())
+}
+
+#[test]
 fn nexac_check_rejects_a_missing_record_field() -> Result<(), Box<dyn std::error::Error>> {
     assert_check_rejects_at("rejected/missing_record_field.nexa", "E2006", ":3:22:")
 }
@@ -207,6 +225,90 @@ fn nexac_check_rejects_record_field_assignment() -> Result<(), Box<dyn std::erro
 #[test]
 fn nexac_check_rejects_type_as_a_v0_3_identifier() -> Result<(), Box<dyn std::error::Error>> {
     assert_check_rejects_at("rejected/reserved_type_identifier.nexa", "E1001", ":1:10:")
+}
+
+#[test]
+fn nexac_check_rejects_an_unknown_union_variant() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/unknown_union_variant.nexa", "E2005", ":3:24:")
+}
+
+#[test]
+fn nexac_check_rejects_an_unknown_union_qualifier() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/unknown_union_qualifier.nexa", "E2001", ":2:17:")
+}
+
+#[test]
+fn nexac_check_rejects_an_unknown_pattern_variant() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/unknown_pattern_variant.nexa", "E2005", ":4:17:")
+}
+
+#[test]
+fn nexac_check_rejects_an_incorrect_constructor_arity() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at(
+        "rejected/incorrect_constructor_arity.nexa",
+        "E2003",
+        ":3:21:",
+    )
+}
+
+#[test]
+fn nexac_check_rejects_an_incorrect_pattern_arity() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/incorrect_pattern_arity.nexa", "E2003", ":4:15:")
+}
+
+#[test]
+fn nexac_check_rejects_a_non_exhaustive_match() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/non_exhaustive_match.nexa", "E3006", ":3:10:")
+}
+
+#[test]
+fn nexac_check_rejects_a_duplicate_variant_case() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/duplicate_variant_case.nexa", "E2002", ":5:15:")
+}
+
+#[test]
+fn nexac_check_rejects_a_default_after_complete_match_coverage(
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/unreachable_match_default.nexa", "E3007", ":6:5:")
+}
+
+#[test]
+fn nexac_check_rejects_a_case_after_a_match_default() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/unreachable_match_case.nexa", "E3007", ":5:5:")
+}
+
+#[test]
+fn nexac_check_rejects_a_foreign_union_case() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/foreign_union_case.nexa", "E3001", ":5:10:")
+}
+
+#[test]
+fn nexac_check_rejects_a_non_union_match_scrutinee() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/non_union_match.nexa", "E3001", ":2:25:")
+}
+
+#[test]
+fn nexac_check_rejects_a_missing_match_arrow() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/malformed_match_arrow.nexa", "E1001", ":5:21:")
+}
+
+#[test]
+fn nexac_check_rejects_match_as_an_identifier() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/reserved_match_identifier.nexa", "E1001", ":1:10:")
+}
+
+#[test]
+fn nexac_check_rejects_case_as_an_identifier() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/reserved_case_identifier.nexa", "E1001", ":1:10:")
+}
+
+#[test]
+fn nexac_check_rejects_default_as_an_identifier() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at(
+        "rejected/reserved_default_identifier.nexa",
+        "E1001",
+        ":1:10:",
+    )
 }
 
 #[test]
@@ -276,6 +378,24 @@ fn nexac_run_executes_nominal_records() -> Result<(), Box<dyn std::error::Error>
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(String::from_utf8_lossy(&output.stdout), "Ada\n42\n");
+
+    Ok(())
+}
+
+#[test]
+fn nexac_run_executes_recursive_tagged_unions_and_exhaustive_match(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("run")
+        .arg(fixture("accepted/tagged_unions.nexa"))
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n");
 
     Ok(())
 }

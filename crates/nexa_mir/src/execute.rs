@@ -1,12 +1,12 @@
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
 
-use nexa_hir::{BinaryOperator, FieldId, RecordId, UnaryOperator};
+use nexa_hir::{BinaryOperator, FieldId, PayloadId, RecordId, UnaryOperator, UnionId, VariantId};
 use nexa_span::SourceSpan;
 
 use crate::{
-    Callee, FunctionId, LocalId, MirExpression, MirLoweringError, MirProgram, MirStatement,
-    MirTerminator,
+    BasicBlockId, Callee, FunctionId, LocalId, MirExpression, MirLoweringError, MirProgram,
+    MirStatement, MirTerminator, MirUnion, MirVariant,
 };
 
 /// A runtime value produced by the reference interpreter.
@@ -27,6 +27,17 @@ pub enum Value {
         /// Field values in declaration order.
         fields: Rc<[Value]>,
     },
+    /// An immutable nominal tagged union value.
+    Union {
+        /// The union's resolved nominal identity.
+        union: UnionId,
+        /// The selected owner-scoped variant identity.
+        variant: VariantId,
+        /// Positional payload values in declaration order.
+        payloads: Rc<[Value]>,
+        /// Cached recursive union depth, including this value.
+        depth: usize,
+    },
     /// The absence of a value.
     Unit,
 }
@@ -39,6 +50,12 @@ impl Display for Value {
             Self::String(value) => formatter.write_str(value),
             Self::Array(_) => formatter.write_str("<array>"),
             Self::Record { record, .. } => write!(formatter, "<record#{}>", record.index()),
+            Self::Union { union, variant, .. } => write!(
+                formatter,
+                "<union#{}::variant#{}>",
+                union.index(),
+                variant.index()
+            ),
             Self::Unit => formatter.write_str("Unit"),
         }
     }
@@ -161,8 +178,9 @@ impl From<MirLoweringError> for RuntimeError {
 ///
 /// Returns [`RuntimeFailure`] when `main` is missing, execution exceeds the
 /// reference interpreter's call-depth or basic-block step limits, arithmetic
-/// overflows, division by zero occurs, an array index is out of bounds, or an
-/// internal MIR invariant fails.
+/// overflows, division by zero occurs, an array index is out of bounds,
+/// recursive union nesting exceeds its limit, or an internal MIR invariant
+/// fails.
 pub fn run(program: &MirProgram) -> Result<Execution, RuntimeFailure> {
     run_with_args(program, &[])
 }
@@ -225,6 +243,7 @@ pub fn run_with_args(
 
 const MAX_CALL_DEPTH: usize = 64;
 const MAX_EXECUTION_STEPS: usize = 100_000;
+const MAX_RECURSIVE_UNION_DEPTH: usize = 1024;
 
 struct Interpreter {
     output: Vec<String>,
@@ -315,6 +334,15 @@ impl Interpreter {
                         ));
                     }
                 },
+                MirTerminator::SwitchVariant {
+                    scrutinee,
+                    union,
+                    targets,
+                    span,
+                } => {
+                    let value = frame.load(*scrutinee, *span)?;
+                    select_variant_target(program, value, *union, targets, *span)?
+                }
                 MirTerminator::Return { value, .. } => {
                     return value
                         .as_ref()
@@ -377,6 +405,12 @@ impl Interpreter {
                 fields,
                 span,
             } => self.evaluate_record(program, *record, fields, *span, frame),
+            MirExpression::Variant {
+                union,
+                variant,
+                payloads,
+                span,
+            } => self.evaluate_variant(program, *union, *variant, payloads, *span, frame),
             MirExpression::Index {
                 target,
                 index,
@@ -400,6 +434,20 @@ impl Interpreter {
                 validate_field_layout(program, *record, *field, *span)?;
                 evaluate_field(target, *record, *field, *span)
             }
+            MirExpression::VariantPayload {
+                source,
+                union,
+                variant,
+                payload,
+                span,
+            } => evaluate_variant_payload(
+                program,
+                frame.load(*source, *span)?,
+                *union,
+                *variant,
+                *payload,
+                *span,
+            ),
             MirExpression::Local { local, span } => frame.load(*local, *span),
             MirExpression::Unary {
                 operator,
@@ -458,6 +506,48 @@ impl Interpreter {
                 record,
                 fields: fields.into(),
             })
+    }
+
+    fn evaluate_variant(
+        &mut self,
+        program: &MirProgram,
+        union: UnionId,
+        variant: VariantId,
+        payloads: &[MirExpression],
+        span: SourceSpan,
+        frame: &Frame,
+    ) -> Result<Value, RuntimeError> {
+        let layout = variant_layout(program, union, variant, span)?;
+        if payloads.len() != layout.payloads.len() {
+            return Err(RuntimeError::new(
+                span,
+                format!(
+                    "variant construction expected {} payload(s), found {}",
+                    layout.payloads.len(),
+                    payloads.len()
+                ),
+            ));
+        }
+
+        let mut values = Vec::with_capacity(payloads.len());
+        for payload in payloads {
+            values.push(self.evaluate(program, payload, frame)?);
+        }
+        let nested_depth = values.iter().map(recursive_union_depth).max().unwrap_or(0);
+        let depth = nested_depth.saturating_add(1);
+        if depth > MAX_RECURSIVE_UNION_DEPTH {
+            return Err(RuntimeError::new(
+                span,
+                format!("recursive union nesting limit of {MAX_RECURSIVE_UNION_DEPTH} exceeded"),
+            ));
+        }
+
+        Ok(Value::Union {
+            union,
+            variant,
+            payloads: values.into(),
+            depth,
+        })
     }
 
     fn evaluate_unary(
@@ -561,7 +651,10 @@ impl Interpreter {
                         "`print` requires one scalar argument",
                     ));
                 };
-                if matches!(value, Value::Array(_) | Value::Record { .. } | Value::Unit) {
+                if matches!(
+                    value,
+                    Value::Array(_) | Value::Record { .. } | Value::Union { .. } | Value::Unit
+                ) {
                     return Err(RuntimeError::new(
                         span,
                         format!("`print` cannot print `{}`", value_type(value)),
@@ -571,6 +664,202 @@ impl Interpreter {
                 Ok(Value::Unit)
             }
         }
+    }
+}
+
+fn union_layout(
+    program: &MirProgram,
+    union: UnionId,
+    span: SourceSpan,
+) -> Result<&MirUnion, RuntimeError> {
+    let layout = program
+        .unions
+        .get(union.index())
+        .filter(|layout| layout.id == union)
+        .ok_or_else(|| RuntimeError::new(span, "union layout does not exist"))?;
+    for (variant_index, variant) in layout.variants.iter().enumerate() {
+        let expected_variant = VariantId::new(union, variant_index);
+        if variant.id != expected_variant {
+            return Err(RuntimeError::new(
+                span,
+                "union variant layout identity is inconsistent",
+            ));
+        }
+        for (payload_index, payload) in variant.payloads.iter().enumerate() {
+            if payload.id != PayloadId::new(expected_variant, payload_index) {
+                return Err(RuntimeError::new(
+                    span,
+                    "variant payload layout identity is inconsistent",
+                ));
+            }
+        }
+    }
+
+    Ok(layout)
+}
+
+fn variant_layout(
+    program: &MirProgram,
+    union: UnionId,
+    variant: VariantId,
+    span: SourceSpan,
+) -> Result<&MirVariant, RuntimeError> {
+    if variant.union() != union {
+        return Err(RuntimeError::new(
+            span,
+            "variant identity does not belong to the expected union",
+        ));
+    }
+
+    union_layout(program, union, span)?
+        .variants
+        .get(variant.index())
+        .filter(|layout| layout.id == variant)
+        .ok_or_else(|| RuntimeError::new(span, "variant layout does not exist"))
+}
+
+fn validate_payload_layout(
+    program: &MirProgram,
+    union: UnionId,
+    variant: VariantId,
+    payload: PayloadId,
+    span: SourceSpan,
+) -> Result<usize, RuntimeError> {
+    if payload.variant() != variant {
+        return Err(RuntimeError::new(
+            span,
+            "payload identity does not belong to the expected variant",
+        ));
+    }
+    let variant = variant_layout(program, union, variant, span)?;
+    variant
+        .payloads
+        .get(payload.index())
+        .filter(|layout| layout.id == payload)
+        .map(|_| variant.payloads.len())
+        .ok_or_else(|| RuntimeError::new(span, "payload layout does not exist"))
+}
+
+fn select_variant_target(
+    program: &MirProgram,
+    value: Value,
+    expected_union: UnionId,
+    targets: &[BasicBlockId],
+    span: SourceSpan,
+) -> Result<BasicBlockId, RuntimeError> {
+    let union_layout = union_layout(program, expected_union, span)?;
+    if targets.len() != union_layout.variants.len() {
+        return Err(RuntimeError::new(
+            span,
+            format!(
+                "variant switch expected {} target(s), found {}",
+                union_layout.variants.len(),
+                targets.len()
+            ),
+        ));
+    }
+    let Value::Union {
+        union,
+        variant,
+        payloads,
+        ..
+    } = value
+    else {
+        return Err(RuntimeError::new(
+            span,
+            format!(
+                "variant switch expected `Union`, found `{}`",
+                value_type(&value)
+            ),
+        ));
+    };
+    if union != expected_union {
+        return Err(RuntimeError::new(
+            span,
+            format!(
+                "variant switch expected union#{}, found union#{}",
+                expected_union.index(),
+                union.index()
+            ),
+        ));
+    }
+    let layout = variant_layout(program, expected_union, variant, span)?;
+    if payloads.len() != layout.payloads.len() {
+        return Err(RuntimeError::new(
+            span,
+            format!(
+                "runtime variant expected {} payload(s), found {}",
+                layout.payloads.len(),
+                payloads.len()
+            ),
+        ));
+    }
+
+    targets
+        .get(variant.index())
+        .copied()
+        .ok_or_else(|| RuntimeError::new(span, "variant tag is outside the switch table"))
+}
+
+fn evaluate_variant_payload(
+    program: &MirProgram,
+    value: Value,
+    expected_union: UnionId,
+    expected_variant: VariantId,
+    payload: PayloadId,
+    span: SourceSpan,
+) -> Result<Value, RuntimeError> {
+    let expected_payload_count =
+        validate_payload_layout(program, expected_union, expected_variant, payload, span)?;
+    let Value::Union {
+        union,
+        variant,
+        payloads,
+        ..
+    } = value
+    else {
+        return Err(RuntimeError::new(
+            span,
+            format!(
+                "payload projection expected `Union`, found `{}`",
+                value_type(&value)
+            ),
+        ));
+    };
+    if union != expected_union {
+        return Err(RuntimeError::new(
+            span,
+            "payload projection received a different nominal union",
+        ));
+    }
+    if variant != expected_variant {
+        return Err(RuntimeError::new(
+            span,
+            "payload projection received a different variant tag",
+        ));
+    }
+    if payloads.len() != expected_payload_count {
+        return Err(RuntimeError::new(
+            span,
+            format!(
+                "runtime variant expected {expected_payload_count} payload(s), found {}",
+                payloads.len()
+            ),
+        ));
+    }
+
+    payloads
+        .get(payload.index())
+        .cloned()
+        .ok_or_else(|| RuntimeError::new(span, "payload index is outside the runtime value"))
+}
+
+fn recursive_union_depth(value: &Value) -> usize {
+    match value {
+        Value::Union { depth, .. } => *depth,
+        Value::Array(values) => values.iter().map(recursive_union_depth).max().unwrap_or(0),
+        Value::Record { fields, .. } => fields.iter().map(recursive_union_depth).max().unwrap_or(0),
+        Value::Int(_) | Value::Bool(_) | Value::String(_) | Value::Unit => 0,
     }
 }
 
@@ -836,17 +1125,23 @@ const fn value_type(value: &Value) -> &'static str {
         Value::String(_) => "String",
         Value::Array(_) => "Array",
         Value::Record { .. } => "Record",
+        Value::Union { .. } => "Union",
         Value::Unit => "Unit",
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use nexa_hir::Type;
+    use nexa_hir::{PayloadId, Type, UnionId, VariantId};
     use nexa_span::{FileId, TextRange};
 
-    use super::{evaluate_field, validate_field_layout, FieldId, RecordId, SourceSpan, Value};
-    use crate::{MirProgram, MirRecord, MirRecordField};
+    use super::{
+        evaluate_field, evaluate_variant_payload, select_variant_target, validate_field_layout,
+        validate_payload_layout, variant_layout, FieldId, RecordId, SourceSpan, Value,
+    };
+    use crate::{
+        BasicBlockId, MirPayload, MirProgram, MirRecord, MirRecordField, MirUnion, MirVariant,
+    };
 
     #[test]
     fn field_projection_reports_a_nominal_tag_mismatch_at_the_access_span(
@@ -911,6 +1206,7 @@ mod tests {
                 }],
                 span,
             }],
+            unions: Vec::new(),
             functions: Vec::new(),
             span,
         };
@@ -928,5 +1224,151 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn variant_layout_validation_rejects_a_variant_owned_by_another_union(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let span = SourceSpan::new(FileId::new(9), TextRange::new(70, 80));
+        let program = union_program(span);
+        let expected = UnionId::new(0);
+        let forged = VariantId::new(UnionId::new(1), 0);
+
+        let error = variant_layout(&program, expected, forged, span)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected a variant owner error"))?;
+
+        assert_eq!(
+            (error.message(), error.span()),
+            (
+                "variant identity does not belong to the expected union",
+                span
+            )
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn variant_switch_rejects_a_forged_runtime_tag_index() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let span = SourceSpan::new(FileId::new(9), TextRange::new(90, 100));
+        let program = union_program(span);
+        let union = UnionId::new(0);
+        let value = Value::Union {
+            union,
+            variant: VariantId::new(union, 1),
+            payloads: Vec::new().into(),
+            depth: 1,
+        };
+
+        let error = select_variant_target(&program, value, union, &[BasicBlockId(0)], span)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected a runtime variant tag error"))?;
+
+        assert_eq!(
+            (error.message(), error.span()),
+            ("variant layout does not exist", span)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn payload_layout_validation_rejects_a_payload_owned_by_another_variant(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let span = SourceSpan::new(FileId::new(9), TextRange::new(110, 120));
+        let program = union_program(span);
+        let union = UnionId::new(0);
+        let variant = VariantId::new(union, 0);
+        let forged = PayloadId::new(VariantId::new(union, 1), 0);
+
+        let error = validate_payload_layout(&program, union, variant, forged, span)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected a payload owner error"))?;
+
+        assert_eq!(
+            (error.message(), error.span()),
+            (
+                "payload identity does not belong to the expected variant",
+                span
+            )
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn union_layout_validation_rejects_a_forged_payload_position(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let span = SourceSpan::new(FileId::new(9), TextRange::new(125, 130));
+        let mut program = union_program(span);
+        let union = UnionId::new(0);
+        let variant = VariantId::new(union, 0);
+        program.unions[0].variants[0].payloads[0].id = PayloadId::new(variant, 1);
+
+        let error = variant_layout(&program, union, variant, span)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected a payload layout position error"))?;
+
+        assert_eq!(
+            (error.message(), error.span()),
+            ("variant payload layout identity is inconsistent", span)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn payload_projection_rejects_a_missing_runtime_payload_position(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let span = SourceSpan::new(FileId::new(9), TextRange::new(130, 140));
+        let program = union_program(span);
+        let union = UnionId::new(0);
+        let variant = VariantId::new(union, 0);
+        let payload = PayloadId::new(variant, 0);
+        let value = Value::Union {
+            union,
+            variant,
+            payloads: Vec::new().into(),
+            depth: 1,
+        };
+
+        let error = evaluate_variant_payload(&program, value, union, variant, payload, span)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected a runtime payload index error"))?;
+
+        assert_eq!(
+            (error.message(), error.span()),
+            ("runtime variant expected 1 payload(s), found 0", span)
+        );
+
+        Ok(())
+    }
+
+    fn union_program(span: SourceSpan) -> MirProgram {
+        let union = UnionId::new(0);
+        let variant = VariantId::new(union, 0);
+        MirProgram {
+            records: Vec::new(),
+            unions: vec![MirUnion {
+                id: union,
+                name: "Value".to_owned(),
+                variants: vec![MirVariant {
+                    id: variant,
+                    name: "Integer".to_owned(),
+                    payloads: vec![MirPayload {
+                        id: PayloadId::new(variant, 0),
+                        name: "value".to_owned(),
+                        ty: Type::Int,
+                        span,
+                    }],
+                    span,
+                }],
+                span,
+            }],
+            functions: Vec::new(),
+            span,
+        }
     }
 }

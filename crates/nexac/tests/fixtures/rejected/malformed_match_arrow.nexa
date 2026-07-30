@@ -1,0 +1,8 @@
+type Flag = | Off() | On();
+function main(): Unit {
+  const flag = Flag.Off();
+  const value = match (flag) {
+    case Flag.Off() 0;
+    case Flag.On() => 1;
+  };
+}

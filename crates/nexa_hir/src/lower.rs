@@ -7,8 +7,10 @@ use nexa_syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 use crate::{
     AssignmentStatement, BinaryOperator, Block, BreakStatement, ConstDeclaration,
     ContinueStatement, Expression, ExpressionStatement, Function, IfStatement, LetDeclaration,
-    Name, Parameter, Program, RecordDeclaration, RecordFieldDeclaration, RecordFieldInitializer,
-    ReturnStatement, Statement, TypeReference, TypeReferenceKind, UnaryOperator, WhileStatement,
+    MatchArm, MatchPattern, Name, Parameter, Program, RecordDeclaration, RecordFieldDeclaration,
+    RecordFieldInitializer, ReturnStatement, Statement, TypeReference, TypeReferenceKind,
+    UnaryOperator, UnionDeclaration, UnionVariantDeclaration, VariantPayloadDeclaration,
+    WhileStatement,
 };
 
 const SYNTAX_ERROR: DiagnosticCode = DiagnosticCode::new("E1001");
@@ -77,6 +79,11 @@ pub fn lower(file: FileId, syntax: &SyntaxNode) -> Result<Program, LoweringError
         .filter(|node| node.kind() == SyntaxKind::RecordDeclaration)
         .map(|node| lower_record(file, &node))
         .collect::<Result<Vec<_>, _>>()?;
+    let unions = syntax
+        .children()
+        .filter(|node| node.kind() == SyntaxKind::UnionDeclaration)
+        .map(|node| lower_union(file, &node))
+        .collect::<Result<Vec<_>, _>>()?;
     let functions = syntax
         .children()
         .filter(|node| node.kind() == SyntaxKind::FunctionDeclaration)
@@ -85,8 +92,64 @@ pub fn lower(file: FileId, syntax: &SyntaxNode) -> Result<Program, LoweringError
 
     Ok(Program {
         records,
+        unions,
         functions,
         span: node_span(file, syntax),
+    })
+}
+
+fn lower_union(file: FileId, node: &SyntaxNode) -> Result<UnionDeclaration, LoweringError> {
+    let variants = node
+        .children()
+        .filter(|variant| variant.kind() == SyntaxKind::UnionVariant)
+        .map(|variant| lower_union_variant(file, &variant))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(UnionDeclaration {
+        name: lower_direct_name(file, node)?,
+        variants,
+        span: node_span(file, node),
+    })
+}
+
+fn lower_union_variant(
+    file: FileId,
+    node: &SyntaxNode,
+) -> Result<UnionVariantDeclaration, LoweringError> {
+    let payload = required_child(file, node, SyntaxKind::VariantPayload)?;
+    let names = payload
+        .children_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter(|token| token.kind() == SyntaxKind::Ident)
+        .collect::<Vec<_>>();
+    let types = payload
+        .children()
+        .filter(|child| matches!(child.kind(), SyntaxKind::Type | SyntaxKind::ArrayType))
+        .collect::<Vec<_>>();
+    if names.len() != types.len() {
+        return Err(malformed(node_span(file, &payload)));
+    }
+    let payloads = names
+        .into_iter()
+        .zip(types)
+        .map(|(name, ty)| {
+            let name = Name {
+                text: name.text().to_owned(),
+                span: token_span(file, &name),
+            };
+            let ty = lower_type(file, &ty)?;
+            let span = SourceSpan::new(
+                file,
+                TextRange::new(name.span.range().start(), ty.span.range().end()),
+            );
+            Ok(VariantPayloadDeclaration { name, ty, span })
+        })
+        .collect::<Result<Vec<_>, LoweringError>>()?;
+
+    Ok(UnionVariantDeclaration {
+        name: lower_direct_name(file, node)?,
+        payloads,
+        span: node_span(file, node),
     })
 }
 
@@ -316,6 +379,7 @@ fn lower_expression(file: FileId, node: &SyntaxNode) -> Result<Expression, Lower
         SyntaxKind::StringLiteral => lower_string(file, node),
         SyntaxKind::ArrayExpression => lower_array(file, node),
         SyntaxKind::RecordExpression => lower_record_expression(file, node),
+        SyntaxKind::MatchExpression => lower_match(file, node),
         SyntaxKind::IndexExpression => lower_index(file, node),
         SyntaxKind::MemberExpression => lower_member(file, node),
         SyntaxKind::NameReference => Ok(Expression::Name(lower_direct_name(file, node)?)),
@@ -325,6 +389,71 @@ fn lower_expression(file: FileId, node: &SyntaxNode) -> Result<Expression, Lower
         SyntaxKind::ParenthesizedExpression => lower_parenthesized(file, node),
         _ => Err(malformed(node_span(file, node))),
     }
+}
+
+fn lower_match(file: FileId, node: &SyntaxNode) -> Result<Expression, LoweringError> {
+    let scrutinee = lower_expression(file, &required_expression_child(file, node)?)?;
+    let arms = node
+        .children()
+        .filter(|arm| arm.kind() == SyntaxKind::MatchArm)
+        .map(|arm| lower_match_arm(file, &arm))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(Expression::Match {
+        scrutinee: Box::new(scrutinee),
+        arms,
+        span: node_span(file, node),
+    })
+}
+
+fn lower_match_arm(file: FileId, node: &SyntaxNode) -> Result<MatchArm, LoweringError> {
+    let pattern = if let Some(pattern) = child(node, SyntaxKind::VariantPattern) {
+        lower_variant_pattern(file, &pattern)?
+    } else {
+        let token = required_direct_token(file, node, SyntaxKind::DefaultKw)?;
+        MatchPattern::Default {
+            span: token_span(file, &token),
+        }
+    };
+
+    Ok(MatchArm {
+        pattern,
+        value: lower_expression(file, &required_expression_child(file, node)?)?,
+        span: node_span(file, node),
+    })
+}
+
+fn lower_variant_pattern(file: FileId, node: &SyntaxNode) -> Result<MatchPattern, LoweringError> {
+    let names = node
+        .children_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter(|token| token.kind() == SyntaxKind::Ident)
+        .collect::<Vec<_>>();
+    let [qualifier, variant] = names.as_slice() else {
+        return Err(malformed(node_span(file, node)));
+    };
+    let bindings = required_child(file, node, SyntaxKind::PatternBindingList)?
+        .children_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter(|token| token.kind() == SyntaxKind::Ident)
+        .map(|token| Name {
+            text: token.text().to_owned(),
+            span: token_span(file, &token),
+        })
+        .collect();
+
+    Ok(MatchPattern::Variant {
+        union: Name {
+            text: qualifier.text().to_string(),
+            span: token_span(file, qualifier),
+        },
+        variant: Name {
+            text: variant.text().to_string(),
+            span: token_span(file, variant),
+        },
+        bindings,
+        span: node_span(file, node),
+    })
 }
 
 fn lower_integer(file: FileId, node: &SyntaxNode) -> Result<Expression, LoweringError> {
@@ -601,6 +730,7 @@ const fn is_expression_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::StringLiteral
             | SyntaxKind::ArrayExpression
             | SyntaxKind::RecordExpression
+            | SyntaxKind::MatchExpression
             | SyntaxKind::IndexExpression
             | SyntaxKind::MemberExpression
             | SyntaxKind::ParenthesizedExpression

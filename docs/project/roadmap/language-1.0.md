@@ -6,10 +6,10 @@ Deliver the [Nexa Language 1.0 Reference Core](../../spec/language-1.0.md): a
 statically checked, multi-file command-line language executed by the CFG MIR
 reference interpreter.
 
-Language Core v0.4 is fully delivered. It establishes nominal immutable
-records and module-ready record and field identities across CST, typed HIR,
-CFG MIR, and the interpreter. v0.5, tagged unions and exhaustive matching, is
-the active implementation milestone.
+Language Core v0.5 is fully delivered. It establishes nominal records, tagged
+unions, exhaustive matching, guarded recursive data, and module-ready resolved
+identities across CST, typed HIR, CFG MIR, and the interpreter. v0.6,
+multi-file modules, is the active implementation milestone.
 
 ## Delivery Milestones
 
@@ -23,7 +23,7 @@ the active implementation milestone.
   extended with module identity.
 - Lower fields to MIR by resolved IDs rather than source strings.
 
-### v0.5: Tagged Unions And Matching (Active)
+### v0.5: Tagged Unions And Matching (Delivered)
 
 - Add nominal tagged unions whose variants may carry typed payloads.
 - Add exhaustive `match` expressions with stable pattern spans.
@@ -31,7 +31,7 @@ the active implementation milestone.
 - Define and test the accepted recursive-type shapes.
 - Evaluate only the selected match arm.
 
-### v0.6: Multi-File Modules
+### v0.6: Multi-File Modules (Active)
 
 - Add explicit named imports and exports using relative source paths.
 - Make the compiler session own the source map, module graph, and stable
@@ -105,7 +105,7 @@ source files -> lossless CST -> module HIR -> typed HIR -> CFG MIR -> interprete
 CLI/provider -> SourceMap -> module graph
 ```
 
-v0.4 establishes module-ready identities without prematurely implementing a
+v0.5 establishes module-ready identities without prematurely implementing a
 loader. v0.6 extends those identities with module ownership and changes the
 compiler driver from a single `(FileId, &str)` entry point to a source-session
 entry point.

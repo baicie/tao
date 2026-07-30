@@ -1,0 +1,8 @@
+type Left = | Value(value: Int);
+type Right = | Value(value: Int);
+function read(value: Left): Int {
+  return match (value) {
+    case Right.Value(inner) => inner;
+    default => 0;
+  };
+}

@@ -13,5 +13,6 @@ pub use execute::{run, run_with_args, Execution, RuntimeError, RuntimeFailure, V
 pub use lower::{lower, MirLoweringError};
 pub use mir::{
     BasicBlockId, Callee, FunctionId, LocalId, MirBasicBlock, MirExpression, MirFunction,
-    MirProgram, MirRecord, MirRecordField, MirStatement, MirTerminator,
+    MirPayload, MirProgram, MirRecord, MirRecordField, MirStatement, MirTerminator, MirUnion,
+    MirVariant,
 };

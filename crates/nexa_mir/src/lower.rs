@@ -2,14 +2,16 @@ use std::fmt::{Display, Formatter};
 
 use nexa_hir::{
     BinaryOperator, Block, Builtin, Expression, FieldId, Function, FunctionId as HirFunctionId,
-    IfStatement, Name, NameResolution, RecordFacts, RecordFieldInitializer, RecordId,
-    ReturnStatement, Statement, Type, TypedProgram, WhileStatement,
+    IfStatement, MatchArm, MatchArmFacts, MatchPattern, Name, NameResolution, PayloadId,
+    RecordFacts, RecordFieldInitializer, RecordId, ReturnStatement, Statement, Type, TypedProgram,
+    UnionFacts, UnionId, VariantId, WhileStatement,
 };
 use nexa_span::SourceSpan;
 
 use crate::{
     BasicBlockId, Callee, FunctionId, LocalId, MirBasicBlock, MirExpression, MirFunction,
-    MirProgram, MirRecord, MirRecordField, MirStatement, MirTerminator,
+    MirPayload, MirProgram, MirRecord, MirRecordField, MirStatement, MirTerminator, MirUnion,
+    MirVariant,
 };
 
 /// An invariant violation while lowering validated HIR to MIR.
@@ -55,6 +57,12 @@ pub fn lower(typed: &TypedProgram) -> Result<MirProgram, MirLoweringError> {
         .enumerate()
         .map(|(index, record)| lower_record_layout(RecordId::new(index), record))
         .collect::<Result<Vec<_>, _>>()?;
+    let unions = typed
+        .unions()
+        .iter()
+        .enumerate()
+        .map(|(index, union)| lower_union_layout(UnionId::new(index), union))
+        .collect::<Result<Vec<_>, _>>()?;
     let functions = program
         .functions
         .iter()
@@ -64,6 +72,7 @@ pub fn lower(typed: &TypedProgram) -> Result<MirProgram, MirLoweringError> {
 
     Ok(MirProgram {
         records,
+        unions,
         functions,
         span: program.span,
     })
@@ -113,6 +122,78 @@ fn lower_record_layout(
         name: record.name().to_owned(),
         fields,
         span: record.span(),
+    })
+}
+
+fn lower_union_layout(
+    expected_id: UnionId,
+    union: &UnionFacts,
+) -> Result<MirUnion, MirLoweringError> {
+    if union.id() != expected_id {
+        return Err(error(
+            union.span(),
+            format!(
+                "union `{}` has inconsistent typed HIR source-order identity",
+                union.name()
+            ),
+        ));
+    }
+
+    let variants = union
+        .variants()
+        .iter()
+        .enumerate()
+        .map(|(variant_index, variant)| {
+            let expected_variant = VariantId::new(expected_id, variant_index);
+            if variant.id() != expected_variant {
+                return Err(error(
+                    variant.span(),
+                    format!(
+                        "variant `{}` has inconsistent typed HIR declaration-order identity",
+                        variant.name()
+                    ),
+                ));
+            }
+
+            let payloads = variant
+                .payloads()
+                .iter()
+                .enumerate()
+                .map(|(payload_index, payload)| {
+                    let expected_payload = PayloadId::new(expected_variant, payload_index);
+                    if payload.id() != expected_payload {
+                        return Err(error(
+                            payload.span(),
+                            format!(
+                                "payload `{}` has inconsistent typed HIR positional identity",
+                                payload.name()
+                            ),
+                        ));
+                    }
+
+                    Ok(MirPayload {
+                        id: expected_payload,
+                        name: payload.name().to_owned(),
+                        ty: payload.ty().clone(),
+                        span: payload.span(),
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            Ok(MirVariant {
+                id: expected_variant,
+                name: variant.name().to_owned(),
+                payloads,
+                span: variant.span(),
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(MirUnion {
+        id: expected_id,
+        name: union.name().to_owned(),
+        variants,
+        span: union.span(),
     })
 }
 
@@ -176,6 +257,7 @@ fn lower_function(
             .iter()
             .map(|local| LocalId(local.index()))
             .collect(),
+        hir_local_count: facts.local_count(),
         next_local: facts.local_count(),
         blocks: Vec::new(),
         loop_targets: Vec::new(),
@@ -228,6 +310,7 @@ struct PendingBlock {
 struct FunctionLowerer<'typed> {
     typed: &'typed TypedProgram,
     parameters: Vec<LocalId>,
+    hir_local_count: usize,
     next_local: usize,
     blocks: Vec<PendingBlock>,
     loop_targets: Vec<LoopTargets>,
@@ -522,6 +605,11 @@ impl FunctionLowerer<'_> {
                 )
             }
             Expression::Record { fields, span } => self.lower_record(fields, *span, current),
+            Expression::Match {
+                scrutinee,
+                arms,
+                span,
+            } => self.lower_match(scrutinee, arms, *span, current),
             Expression::Index {
                 collection,
                 index,
@@ -760,6 +848,232 @@ impl FunctionLowerer<'_> {
         )
     }
 
+    fn lower_match(
+        &mut self,
+        scrutinee: &Expression,
+        arms: &[MatchArm],
+        span: SourceSpan,
+        current: BasicBlockId,
+    ) -> Result<(BasicBlockId, MirExpression), MirLoweringError> {
+        let facts = self
+            .typed
+            .match_facts(span)
+            .cloned()
+            .ok_or_else(|| error(span, "match expression has no typed HIR dispatch facts"))?;
+        let union = facts.union();
+        if self.typed.expression_type(scrutinee.span()) != Some(&Type::Union(union)) {
+            return Err(error(
+                scrutinee.span(),
+                "match scrutinee type does not agree with its typed HIR dispatch facts",
+            ));
+        }
+        if arms.len() != facts.arms().len() {
+            return Err(error(
+                span,
+                "match expression has inconsistent typed HIR arm facts",
+            ));
+        }
+
+        let variant_payloads = self
+            .typed
+            .union_facts(union)
+            .ok_or_else(|| error(span, "match expression references a missing union layout"))?
+            .variants()
+            .iter()
+            .map(|variant| {
+                (
+                    variant.id(),
+                    variant
+                        .payloads()
+                        .iter()
+                        .map(|payload| payload.id())
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>();
+        if variant_payloads.is_empty() {
+            return Err(error(span, "match union has no variants"));
+        }
+
+        let (scrutinee_end, scrutinee_value) = self.lower_expression(scrutinee, current)?;
+        let scrutinee_local = self.allocate_local();
+        self.push_statement(
+            scrutinee_end,
+            MirStatement::Store {
+                local: scrutinee_local,
+                value: scrutinee_value,
+                span: scrutinee.span(),
+            },
+        )?;
+
+        let result = self.allocate_local();
+        let join = self.new_block(span);
+        let mut targets = vec![None; variant_payloads.len()];
+        let mut default_target = None;
+
+        for (arm, arm_facts) in arms.iter().zip(facts.arms()) {
+            let arm_start = self.new_block(arm.span);
+            match (&arm.pattern, arm_facts) {
+                (
+                    MatchPattern::Variant {
+                        union: qualifier,
+                        variant: variant_name,
+                        bindings,
+                        ..
+                    },
+                    MatchArmFacts::Variant {
+                        variant,
+                        bindings: binding_facts,
+                    },
+                ) => {
+                    if variant.union() != union {
+                        return Err(error(
+                            variant_name.span,
+                            "match variant belongs to a different union",
+                        ));
+                    }
+                    if self.typed.name_resolution(qualifier.span)
+                        != Some(NameResolution::Union(union))
+                        || self.typed.name_resolution(variant_name.span)
+                            != Some(NameResolution::Variant(*variant))
+                    {
+                        return Err(error(
+                            arm.pattern.span(),
+                            "match pattern does not agree with its typed HIR name resolutions",
+                        ));
+                    }
+                    let Some((expected_variant, payloads)) = variant_payloads.get(variant.index())
+                    else {
+                        return Err(error(
+                            variant_name.span,
+                            "match variant index is outside its union layout",
+                        ));
+                    };
+                    if expected_variant != variant {
+                        return Err(error(
+                            variant_name.span,
+                            "match variant identity does not agree with its union layout",
+                        ));
+                    }
+                    let Some(target) = targets.get_mut(variant.index()) else {
+                        return Err(error(
+                            variant_name.span,
+                            "match target index is outside its dispatch table",
+                        ));
+                    };
+                    if target.replace(arm_start).is_some() {
+                        return Err(error(
+                            variant_name.span,
+                            "duplicate variant case reached MIR lowering",
+                        ));
+                    }
+                    if bindings.len() != binding_facts.len() || bindings.len() != payloads.len() {
+                        return Err(error(
+                            arm.pattern.span(),
+                            "match pattern has inconsistent typed HIR payload bindings",
+                        ));
+                    }
+
+                    for ((binding, binding_facts), expected_payload) in
+                        bindings.iter().zip(binding_facts).zip(payloads)
+                    {
+                        if binding_facts.payload() != *expected_payload
+                            || self.typed.name_resolution(binding.span)
+                                != Some(NameResolution::Local(binding_facts.local()))
+                        {
+                            return Err(error(
+                                binding.span,
+                                "match payload binding does not agree with its typed HIR facts",
+                            ));
+                        }
+                        let local = LocalId(binding_facts.local().index());
+                        if local.index() >= self.hir_local_count {
+                            return Err(error(
+                                binding.span,
+                                "match payload binding local is outside the function frame",
+                            ));
+                        }
+                        self.push_statement(
+                            arm_start,
+                            MirStatement::Store {
+                                local,
+                                value: MirExpression::VariantPayload {
+                                    source: scrutinee_local,
+                                    union,
+                                    variant: *variant,
+                                    payload: *expected_payload,
+                                    span: binding.span,
+                                },
+                                span: binding.span,
+                            },
+                        )?;
+                    }
+                }
+                (MatchPattern::Default { .. }, MatchArmFacts::Default) => {
+                    if default_target.replace(arm_start).is_some() {
+                        return Err(error(
+                            arm.pattern.span(),
+                            "duplicate default arm reached MIR lowering",
+                        ));
+                    }
+                }
+                _ => {
+                    return Err(error(
+                        arm.pattern.span(),
+                        "match arm shape does not agree with its typed HIR facts",
+                    ));
+                }
+            }
+
+            let (arm_end, value) = self.lower_expression(&arm.value, arm_start)?;
+            self.push_statement(
+                arm_end,
+                MirStatement::Store {
+                    local: result,
+                    value,
+                    span: arm.value.span(),
+                },
+            )?;
+            self.terminate(
+                arm_end,
+                MirTerminator::Goto {
+                    target: join,
+                    span: arm.span,
+                },
+            )?;
+        }
+
+        let targets = targets
+            .into_iter()
+            .enumerate()
+            .map(|(index, target)| {
+                target.or(default_target).ok_or_else(|| {
+                    error(
+                        span,
+                        format!("match expression has no target for variant index {index}"),
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.terminate(
+            scrutinee_end,
+            MirTerminator::SwitchVariant {
+                scrutinee: scrutinee_local,
+                union,
+                targets,
+                span,
+            },
+        )?;
+
+        Ok((
+            join,
+            MirExpression::Local {
+                local: result,
+                span,
+            },
+        ))
+    }
+
     fn lower_logical(
         &mut self,
         operator: BinaryOperator,
@@ -833,6 +1147,17 @@ impl FunctionLowerer<'_> {
         span: SourceSpan,
         mut current: BasicBlockId,
     ) -> Result<(BasicBlockId, MirExpression), MirLoweringError> {
+        if let Some(construction) = self.typed.variant_construction(span).copied() {
+            return self.lower_variant_construction(
+                callee,
+                arguments,
+                construction.union(),
+                construction.variant(),
+                span,
+                current,
+            );
+        }
+
         let Expression::Name(name) = callee else {
             return Err(error(callee.span(), "non-name call reached MIR lowering"));
         };
@@ -847,7 +1172,13 @@ impl FunctionLowerer<'_> {
                     format!("local `{}` called as a function in MIR lowering", name.text),
                 ));
             }
-            Some(NameResolution::Record(_) | NameResolution::Field(_)) => {
+            Some(
+                NameResolution::Record(_)
+                | NameResolution::Field(_)
+                | NameResolution::Union(_)
+                | NameResolution::Variant(_)
+                | NameResolution::Payload(_),
+            ) => {
                 return Err(error(
                     name.span,
                     format!(
@@ -881,6 +1212,73 @@ impl FunctionLowerer<'_> {
             MirExpression::Call {
                 callee,
                 arguments: lowered_arguments,
+                span,
+            },
+        )
+    }
+
+    fn lower_variant_construction(
+        &mut self,
+        callee: &Expression,
+        arguments: &[Expression],
+        union: UnionId,
+        variant: VariantId,
+        span: SourceSpan,
+        mut current: BasicBlockId,
+    ) -> Result<(BasicBlockId, MirExpression), MirLoweringError> {
+        let Expression::Member {
+            object,
+            member: variant_name,
+            ..
+        } = callee
+        else {
+            return Err(error(
+                callee.span(),
+                "variant construction has a non-member callee",
+            ));
+        };
+        let Expression::Name(qualifier) = object.as_ref() else {
+            return Err(error(
+                object.span(),
+                "variant construction has a non-name union qualifier",
+            ));
+        };
+        if variant.union() != union
+            || self.typed.name_resolution(qualifier.span) != Some(NameResolution::Union(union))
+            || self.typed.name_resolution(variant_name.span)
+                != Some(NameResolution::Variant(variant))
+        {
+            return Err(error(
+                callee.span(),
+                "variant construction does not agree with its typed HIR resolution",
+            ));
+        }
+
+        let layout = self
+            .typed
+            .union_facts(union)
+            .and_then(|layout| layout.variants().get(variant.index()))
+            .ok_or_else(|| error(span, "variant construction references a missing layout"))?;
+        if layout.id() != variant || arguments.len() != layout.payloads().len() {
+            return Err(error(
+                span,
+                "variant construction has inconsistent typed HIR layout facts",
+            ));
+        }
+
+        let mut payloads = Vec::with_capacity(arguments.len());
+        for argument in arguments {
+            let (next, payload) = self.lower_expression(argument, current)?;
+            current = next;
+            payloads.push(payload);
+        }
+
+        self.materialize(
+            current,
+            MirExpression::Variant {
+                union,
+                variant,
+                payloads,
                 span,
             },
         )
@@ -949,7 +1347,16 @@ impl FunctionLowerer<'_> {
 
     fn resolve_local(&self, name: &Name, role: &str) -> Result<LocalId, MirLoweringError> {
         match self.typed.name_resolution(name.span) {
-            Some(NameResolution::Local(local)) => Ok(LocalId(local.index())),
+            Some(NameResolution::Local(local)) if local.index() < self.hir_local_count => {
+                Ok(LocalId(local.index()))
+            }
+            Some(NameResolution::Local(_)) => Err(error(
+                name.span,
+                format!(
+                    "{role} `{}` resolves outside the HIR local frame",
+                    name.text
+                ),
+            )),
             Some(resolution) => Err(error(
                 name.span,
                 format!(
@@ -1011,6 +1418,7 @@ const fn terminator_span(terminator: &MirTerminator) -> SourceSpan {
     match terminator {
         MirTerminator::Goto { span, .. }
         | MirTerminator::Branch { span, .. }
+        | MirTerminator::SwitchVariant { span, .. }
         | MirTerminator::Return { span, .. } => *span,
     }
 }

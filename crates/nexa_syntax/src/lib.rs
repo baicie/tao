@@ -167,6 +167,30 @@ pub enum SyntaxKind {
     RecordExpression = 78,
     /// One named field initializer in a record literal.
     RecordFieldInitializer = 79,
+    /// The `match` keyword.
+    MatchKw = 80,
+    /// The `case` keyword.
+    CaseKw = 81,
+    /// The `default` keyword.
+    DefaultKw = 82,
+    /// `|`
+    Pipe = 83,
+    /// `=>`
+    FatArrow = 84,
+    /// A top-level tagged union declaration.
+    UnionDeclaration = 85,
+    /// One constructor variant in a tagged union declaration.
+    UnionVariant = 86,
+    /// The named fields carried by a union variant.
+    VariantPayload = 87,
+    /// A value-producing exhaustive branch expression.
+    MatchExpression = 88,
+    /// One `case` or `default` branch in a match expression.
+    MatchArm = 89,
+    /// A qualified union variant pattern.
+    VariantPattern = 90,
+    /// The bindings introduced by a union variant pattern.
+    PatternBindingList = 91,
 }
 
 impl SyntaxKind {
@@ -258,6 +282,18 @@ impl SyntaxKind {
             77 => Self::RecordFieldDeclaration,
             78 => Self::RecordExpression,
             79 => Self::RecordFieldInitializer,
+            80 => Self::MatchKw,
+            81 => Self::CaseKw,
+            82 => Self::DefaultKw,
+            83 => Self::Pipe,
+            84 => Self::FatArrow,
+            85 => Self::UnionDeclaration,
+            86 => Self::UnionVariant,
+            87 => Self::VariantPayload,
+            88 => Self::MatchExpression,
+            89 => Self::MatchArm,
+            90 => Self::VariantPattern,
+            91 => Self::PatternBindingList,
             _ => unreachable!("invalid Nexa syntax kind: {raw}"),
         }
     }
@@ -363,7 +399,7 @@ pub fn tokenize(source: &str) -> Vec<Token> {
             '=' => consume_equals(&mut chars),
             '!' => consume_bang(&mut chars),
             '&' => consume_required_pair(&mut chars, '&', SyntaxKind::AmpAmp),
-            '|' => consume_required_pair(&mut chars, '|', SyntaxKind::PipePipe),
+            '|' => consume_optional_pair(&mut chars, '|', SyntaxKind::Pipe, SyntaxKind::PipePipe),
             '<' => consume_optional_equals(&mut chars, SyntaxKind::Lt, SyntaxKind::LtEq),
             '>' => consume_optional_equals(&mut chars, SyntaxKind::Gt, SyntaxKind::GtEq),
             '(' => SyntaxKind::LParen,
@@ -414,6 +450,9 @@ fn keyword_kind(kind: SyntaxKind, text: &str) -> SyntaxKind {
         "String" => SyntaxKind::StringKw,
         "Unit" => SyntaxKind::UnitKw,
         "type" => SyntaxKind::TypeKw,
+        "match" => SyntaxKind::MatchKw,
+        "case" => SyntaxKind::CaseKw,
+        "default" => SyntaxKind::DefaultKw,
         _ => SyntaxKind::Ident,
     }
 }
@@ -455,6 +494,10 @@ fn consume_string(chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>) ->
 }
 
 fn consume_equals(chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>) -> SyntaxKind {
+    if consume_if(chars, '>') {
+        return SyntaxKind::FatArrow;
+    }
+
     if !consume_if(chars, '=') {
         return SyntaxKind::Eq;
     }
@@ -496,6 +539,19 @@ fn consume_required_pair(
         combined
     } else {
         SyntaxKind::Unknown
+    }
+}
+
+fn consume_optional_pair(
+    chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>,
+    expected: char,
+    single: SyntaxKind,
+    combined: SyntaxKind,
+) -> SyntaxKind {
+    if consume_if(chars, expected) {
+        combined
+    } else {
+        single
     }
 }
 
@@ -608,7 +664,7 @@ mod tests {
     }
 
     #[test]
-    fn single_logical_operator_characters_are_unknown_tokens() {
+    fn single_ampersand_is_unknown_and_single_pipe_is_a_union_separator() {
         let tokens = tokenize("& |");
 
         assert_eq!(
@@ -619,7 +675,36 @@ mod tests {
             [
                 (SyntaxKind::Unknown, "&"),
                 (SyntaxKind::Whitespace, " "),
-                (SyntaxKind::Unknown, "|"),
+                (SyntaxKind::Pipe, "|"),
+            ]
+        );
+    }
+
+    #[test]
+    fn tokenizes_tagged_union_and_match_keywords_without_breaking_logical_or() {
+        let tokens = tokenize("type Choice = | None(); match case default => | ||");
+
+        assert_eq!(
+            tokens
+                .iter()
+                .filter(|token| !token.kind().is_trivia())
+                .map(|token| (token.kind(), token.text()))
+                .collect::<Vec<_>>(),
+            [
+                (SyntaxKind::TypeKw, "type"),
+                (SyntaxKind::Ident, "Choice"),
+                (SyntaxKind::Eq, "="),
+                (SyntaxKind::Pipe, "|"),
+                (SyntaxKind::Ident, "None"),
+                (SyntaxKind::LParen, "("),
+                (SyntaxKind::RParen, ")"),
+                (SyntaxKind::Semicolon, ";"),
+                (SyntaxKind::MatchKw, "match"),
+                (SyntaxKind::CaseKw, "case"),
+                (SyntaxKind::DefaultKw, "default"),
+                (SyntaxKind::FatArrow, "=>"),
+                (SyntaxKind::Pipe, "|"),
+                (SyntaxKind::PipePipe, "||"),
             ]
         );
     }
@@ -817,6 +902,18 @@ mod tests {
             SyntaxKind::RecordFieldDeclaration,
             SyntaxKind::RecordExpression,
             SyntaxKind::RecordFieldInitializer,
+            SyntaxKind::MatchKw,
+            SyntaxKind::CaseKw,
+            SyntaxKind::DefaultKw,
+            SyntaxKind::Pipe,
+            SyntaxKind::FatArrow,
+            SyntaxKind::UnionDeclaration,
+            SyntaxKind::UnionVariant,
+            SyntaxKind::VariantPayload,
+            SyntaxKind::MatchExpression,
+            SyntaxKind::MatchArm,
+            SyntaxKind::VariantPattern,
+            SyntaxKind::PatternBindingList,
         ];
 
         for kind in kinds {

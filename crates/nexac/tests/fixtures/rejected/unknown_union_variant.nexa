@@ -1,0 +1,4 @@
+type Choice = | None() | Some(value: Int);
+function main(): Unit {
+  const value = Choice.Missing(1);
+}

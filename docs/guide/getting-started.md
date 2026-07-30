@@ -28,24 +28,23 @@ cargo test --workspace
 ## Try the CLI
 
 ```bash
-cargo run -p nexac -- check examples/named_records.nexa
-cargo run -p nexac -- run examples/named_records.nexa
-cargo run -p nexac -- parse examples/named_records.nexa
+cargo run -p nexac -- check examples/tagged_unions.nexa
+cargo run -p nexac -- run examples/tagged_unions.nexa
+cargo run -p nexac -- parse examples/tagged_unions.nexa
 ```
 
 `check` parses, resolves, and type-checks the program. `run` executes the
 checked program's `main` function through the MIR interpreter. The bundled
-record example prints:
+tagged-union example prints:
 
 ```text
-Ada
 42
 ```
 
-Language Core v0.4 adds nominal immutable record declarations, contextually
-typed record literals, exact field checking, and immutable field access. It
-retains the v0.3 immutable UTF-8 `String` and homogeneous `T[]` values. A
-program may use either `main(): Unit` with no program arguments or
+Language Core v0.5 adds nominal tagged unions, qualified variant construction,
+guarded recursive data, and exhaustive `match` expressions. It retains nominal
+records, immutable UTF-8 `String`, and homogeneous `T[]` values. A program may
+use either `main(): Unit` with no program arguments or
 `main(args: String[]): Unit` to receive arguments after a second `--`.
 
 Nexa adopts familiar TypeScript-shaped syntax, but it is not a TypeScript or

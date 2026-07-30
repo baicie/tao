@@ -1,0 +1,4 @@
+type Pair = | Both(left: Int, right: Int);
+function main(): Unit {
+  const pair = Pair.Both(1);
+}

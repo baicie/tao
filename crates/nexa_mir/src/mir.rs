@@ -1,10 +1,13 @@
-use nexa_hir::{BinaryOperator, FieldId, RecordId, Type, UnaryOperator};
+use nexa_hir::{
+    BinaryOperator, FieldId, PayloadId, RecordId, Type, UnaryOperator, UnionId, VariantId,
+};
 use nexa_span::SourceSpan;
 
 /// A complete Nexa program in resolved middle intermediate representation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MirProgram {
     pub(crate) records: Vec<MirRecord>,
+    pub(crate) unions: Vec<MirUnion>,
     pub(crate) functions: Vec<MirFunction>,
     pub(crate) span: SourceSpan,
 }
@@ -14,6 +17,12 @@ impl MirProgram {
     #[must_use]
     pub fn records(&self) -> &[MirRecord] {
         &self.records
+    }
+
+    /// Returns nominal tagged union layouts in stable source order.
+    #[must_use]
+    pub fn unions(&self) -> &[MirUnion] {
+        &self.unions
     }
 
     /// Returns all functions in their stable source-order identifiers.
@@ -93,6 +102,111 @@ impl MirRecordField {
     }
 
     /// Returns the field declaration's source range.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
+
+/// A nominal tagged union layout resolved before MIR execution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirUnion {
+    pub(crate) id: UnionId,
+    pub(crate) name: String,
+    pub(crate) variants: Vec<MirVariant>,
+    pub(crate) span: SourceSpan,
+}
+
+impl MirUnion {
+    /// Returns the union's stable source-order identifier.
+    #[must_use]
+    pub const fn id(&self) -> UnionId {
+        self.id
+    }
+
+    /// Returns the declared union name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns variants in declaration and runtime-tag order.
+    #[must_use]
+    pub fn variants(&self) -> &[MirVariant] {
+        &self.variants
+    }
+
+    /// Returns the union declaration's source range.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
+
+/// One resolved tagged union variant layout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirVariant {
+    pub(crate) id: VariantId,
+    pub(crate) name: String,
+    pub(crate) payloads: Vec<MirPayload>,
+    pub(crate) span: SourceSpan,
+}
+
+impl MirVariant {
+    /// Returns this variant's owner-scoped identifier.
+    #[must_use]
+    pub const fn id(&self) -> VariantId {
+        self.id
+    }
+
+    /// Returns the declared variant name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns positional payloads in declaration order.
+    #[must_use]
+    pub fn payloads(&self) -> &[MirPayload] {
+        &self.payloads
+    }
+
+    /// Returns the variant declaration's source range.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
+
+/// One resolved positional variant payload layout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirPayload {
+    pub(crate) id: PayloadId,
+    pub(crate) name: String,
+    pub(crate) ty: Type,
+    pub(crate) span: SourceSpan,
+}
+
+impl MirPayload {
+    /// Returns this payload's owner-scoped identifier.
+    #[must_use]
+    pub const fn id(&self) -> PayloadId {
+        self.id
+    }
+
+    /// Returns the payload declaration name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the resolved payload type.
+    #[must_use]
+    pub const fn ty(&self) -> &Type {
+        &self.ty
+    }
+
+    /// Returns the payload declaration's source range.
     #[must_use]
     pub const fn span(&self) -> SourceSpan {
         self.span
@@ -262,6 +376,17 @@ pub enum MirTerminator {
         /// The source range of the control-flow statement.
         span: SourceSpan,
     },
+    /// Dispatches a tagged union local through a dense variant target table.
+    SwitchVariant {
+        /// The local containing the scrutinee value.
+        scrutinee: LocalId,
+        /// The expected nominal union identity.
+        union: UnionId,
+        /// Targets indexed by variant declaration order.
+        targets: Vec<BasicBlockId>,
+        /// The full match expression range.
+        span: SourceSpan,
+    },
     /// Returns from the current function.
     Return {
         /// The optional returned value.
@@ -311,6 +436,17 @@ pub enum MirExpression {
         /// The full record literal range.
         span: SourceSpan,
     },
+    /// Constructs one resolved tagged union variant.
+    Variant {
+        /// The union's resolved nominal identity.
+        union: UnionId,
+        /// The selected owner-scoped variant identity.
+        variant: VariantId,
+        /// Payload values in declaration order.
+        payloads: Vec<MirExpression>,
+        /// The full constructor call range.
+        span: SourceSpan,
+    },
     /// Reads an element from an immutable array.
     Index {
         /// The evaluated array expression.
@@ -336,6 +472,19 @@ pub enum MirExpression {
         /// The resolved field identity.
         field: FieldId,
         /// The full member expression range.
+        span: SourceSpan,
+    },
+    /// Projects one resolved positional payload from a selected variant.
+    VariantPayload {
+        /// The local containing the matched union value.
+        source: LocalId,
+        /// The expected nominal union identity.
+        union: UnionId,
+        /// The selected owner-scoped variant identity.
+        variant: VariantId,
+        /// The projected owner-scoped payload identity.
+        payload: PayloadId,
+        /// The pattern binding's source range.
         span: SourceSpan,
     },
     /// Reads a local slot.
@@ -386,9 +535,11 @@ impl MirExpression {
             | Self::String { span, .. }
             | Self::Array { span, .. }
             | Self::Record { span, .. }
+            | Self::Variant { span, .. }
             | Self::Index { span, .. }
             | Self::Length { span, .. }
             | Self::Field { span, .. }
+            | Self::VariantPayload { span, .. }
             | Self::Local { span, .. }
             | Self::Unary { span, .. }
             | Self::Binary { span, .. }

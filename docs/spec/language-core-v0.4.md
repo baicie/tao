@@ -2,11 +2,10 @@
 
 ## Status
 
-Language Core v0.4 is delivered and is the current executable language. Its
+Language Core v0.4 is delivered and remains a normative predecessor. Its
 implementation satisfies the exit criteria in the
-[v0.4 roadmap](../project/roadmap/language-core-v0.4.md). Development continues
-with the versioned milestones in the
-[Nexa Language 1.0 roadmap](../project/roadmap/language-1.0.md).
+[v0.4 roadmap](../project/roadmap/language-core-v0.4.md). The current executable
+language is [Language Core v0.5](language-core-v0.5.md).
 
 ## Product Contract
 

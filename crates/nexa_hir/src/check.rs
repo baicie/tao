@@ -5,8 +5,9 @@ use nexa_span::SourceSpan;
 
 use crate::{
     AssignmentStatement, BinaryOperator, Block, ConstDeclaration, Expression, FieldId, Function,
-    IfStatement, LetDeclaration, Name, Program, RecordFieldInitializer, RecordId, ReturnStatement,
-    Statement, Type, TypeReference, TypeReferenceKind, UnaryOperator, WhileStatement,
+    IfStatement, LetDeclaration, MatchArm, MatchPattern, Name, PayloadId, Program,
+    RecordFieldInitializer, RecordId, ReturnStatement, Statement, Type, TypeReference,
+    TypeReferenceKind, UnaryOperator, UnionId, VariantId, WhileStatement,
 };
 
 const UNDEFINED_NAME: DiagnosticCode = DiagnosticCode::new("E2001");
@@ -20,6 +21,8 @@ const NON_BOOLEAN_CONDITION: DiagnosticCode = DiagnosticCode::new("E3002");
 const INVALID_RETURN: DiagnosticCode = DiagnosticCode::new("E3003");
 const INVALID_LOOP_CONTROL: DiagnosticCode = DiagnosticCode::new("E3004");
 const RECURSIVE_TYPE: DiagnosticCode = DiagnosticCode::new("E3005");
+const NON_EXHAUSTIVE_MATCH: DiagnosticCode = DiagnosticCode::new("E3006");
+const UNREACHABLE_ARM: DiagnosticCode = DiagnosticCode::new("E3007");
 
 /// The semantic result of type checking a lowered program.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,6 +58,9 @@ pub struct TypedProgram {
     expression_types: HashMap<SourceSpan, Type>,
     name_resolutions: HashMap<SourceSpan, NameResolution>,
     records: Vec<RecordFacts>,
+    unions: Vec<UnionFacts>,
+    variant_constructions: HashMap<SourceSpan, VariantConstructionFacts>,
+    matches: HashMap<SourceSpan, MatchFacts>,
     functions: Vec<FunctionFacts>,
 }
 
@@ -105,6 +111,30 @@ impl TypedProgram {
     #[must_use]
     pub fn records(&self) -> &[RecordFacts] {
         &self.records
+    }
+
+    /// Returns resolved declaration facts for a nominal tagged union.
+    #[must_use]
+    pub fn union_facts(&self, union: UnionId) -> Option<&UnionFacts> {
+        self.unions.get(union.index())
+    }
+
+    /// Returns all nominal tagged unions in stable source order.
+    #[must_use]
+    pub fn unions(&self) -> &[UnionFacts] {
+        &self.unions
+    }
+
+    /// Returns the resolved constructor selected by a call expression.
+    #[must_use]
+    pub fn variant_construction(&self, span: SourceSpan) -> Option<&VariantConstructionFacts> {
+        self.variant_constructions.get(&span)
+    }
+
+    /// Returns resolved control-flow and binding facts for a match expression.
+    #[must_use]
+    pub fn match_facts(&self, span: SourceSpan) -> Option<&MatchFacts> {
+        self.matches.get(&span)
     }
 }
 
@@ -164,6 +194,12 @@ pub enum NameResolution {
     Record(RecordId),
     /// A declared, initialized, or projected record field.
     Field(FieldId),
+    /// A nominal tagged union declaration or named type reference.
+    Union(UnionId),
+    /// A tagged union variant declaration, constructor, or pattern.
+    Variant(VariantId),
+    /// A named positional payload declaration.
+    Payload(PayloadId),
     /// A compiler-provided operation.
     Builtin(Builtin),
 }
@@ -249,6 +285,190 @@ pub struct RecordFieldFacts {
     type_span: SourceSpan,
 }
 
+/// Resolved semantic facts for one nominal tagged union.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnionFacts {
+    id: UnionId,
+    name: String,
+    variants: Vec<VariantFacts>,
+    name_span: SourceSpan,
+    span: SourceSpan,
+}
+
+impl UnionFacts {
+    /// Returns this union's stable identifier.
+    #[must_use]
+    pub const fn id(&self) -> UnionId {
+        self.id
+    }
+
+    /// Returns the declared union name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns variants in declaration order.
+    #[must_use]
+    pub fn variants(&self) -> &[VariantFacts] {
+        &self.variants
+    }
+
+    /// Returns the union declaration's source range.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
+
+/// Resolved semantic facts for one tagged union variant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VariantFacts {
+    id: VariantId,
+    name: String,
+    payloads: Vec<PayloadFacts>,
+    name_span: SourceSpan,
+    span: SourceSpan,
+}
+
+impl VariantFacts {
+    /// Returns this variant's owner-scoped identifier.
+    #[must_use]
+    pub const fn id(&self) -> VariantId {
+        self.id
+    }
+
+    /// Returns the declared variant name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns positional payloads in declaration order.
+    #[must_use]
+    pub fn payloads(&self) -> &[PayloadFacts] {
+        &self.payloads
+    }
+
+    /// Returns the variant declaration's source range.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
+
+/// Resolved semantic facts for one named positional variant payload.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PayloadFacts {
+    id: PayloadId,
+    name: String,
+    ty: Type,
+    span: SourceSpan,
+}
+
+impl PayloadFacts {
+    /// Returns this payload's owner-scoped positional identifier.
+    #[must_use]
+    pub const fn id(&self) -> PayloadId {
+        self.id
+    }
+
+    /// Returns the payload declaration name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the resolved payload type.
+    #[must_use]
+    pub const fn ty(&self) -> &Type {
+        &self.ty
+    }
+
+    /// Returns the payload declaration's source range.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
+
+/// Resolved constructor identity for one qualified variant call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VariantConstructionFacts {
+    union: UnionId,
+    variant: VariantId,
+}
+
+impl VariantConstructionFacts {
+    /// Returns the constructed union.
+    #[must_use]
+    pub const fn union(self) -> UnionId {
+        self.union
+    }
+
+    /// Returns the selected variant.
+    #[must_use]
+    pub const fn variant(self) -> VariantId {
+        self.variant
+    }
+}
+
+/// Resolved variant dispatch and arm-binding facts for one match expression.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchFacts {
+    union: UnionId,
+    arms: Vec<MatchArmFacts>,
+}
+
+impl MatchFacts {
+    /// Returns the matched nominal union.
+    #[must_use]
+    pub const fn union(&self) -> UnionId {
+        self.union
+    }
+
+    /// Returns arm facts in source order.
+    #[must_use]
+    pub fn arms(&self) -> &[MatchArmFacts] {
+        &self.arms
+    }
+}
+
+/// Resolved facts for one source match arm.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MatchArmFacts {
+    /// A resolved variant arm with positional payload bindings.
+    Variant {
+        /// The selected variant.
+        variant: VariantId,
+        /// Payload-to-local bindings in declaration order.
+        bindings: Vec<PayloadBindingFacts>,
+    },
+    /// A catch-all arm.
+    Default,
+}
+
+/// One resolved pattern payload binding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PayloadBindingFacts {
+    payload: PayloadId,
+    local: LocalId,
+}
+
+impl PayloadBindingFacts {
+    /// Returns the projected payload.
+    #[must_use]
+    pub const fn payload(self) -> PayloadId {
+        self.payload
+    }
+
+    /// Returns the immutable local receiving the payload value.
+    #[must_use]
+    pub const fn local(self) -> LocalId {
+        self.local
+    }
+}
+
 impl RecordFieldFacts {
     /// Returns this field's stable identifier.
     #[must_use]
@@ -280,6 +500,9 @@ struct FactBuilder {
     expression_types: HashMap<SourceSpan, Type>,
     name_resolutions: HashMap<SourceSpan, NameResolution>,
     records: Vec<RecordFacts>,
+    unions: Vec<UnionFacts>,
+    variant_constructions: HashMap<SourceSpan, VariantConstructionFacts>,
+    matches: HashMap<SourceSpan, MatchFacts>,
     functions: Vec<FunctionFacts>,
 }
 
@@ -291,6 +514,18 @@ impl FactBuilder {
     fn record_name(&mut self, span: SourceSpan, resolution: NameResolution) {
         let _ = self.name_resolutions.insert(span, resolution);
     }
+
+    fn record_variant_construction(
+        &mut self,
+        span: SourceSpan,
+        construction: VariantConstructionFacts,
+    ) {
+        let _ = self.variant_constructions.insert(span, construction);
+    }
+
+    fn record_match(&mut self, span: SourceSpan, match_facts: MatchFacts) {
+        let _ = self.matches.insert(span, match_facts);
+    }
 }
 
 /// Resolves names and validates static semantics for a lowered program.
@@ -298,19 +533,21 @@ impl FactBuilder {
 pub fn type_check(program: &Program) -> Analysis {
     let mut diagnostics = Vec::new();
     let mut facts = FactBuilder::default();
-    let record_symbols = collect_record_names(program, &mut diagnostics, &mut facts);
-    let records = collect_record_facts(program, &record_symbols, &mut diagnostics, &mut facts);
+    let type_symbols = collect_type_names(program, &mut diagnostics, &mut facts);
+    let records = collect_record_facts(program, &type_symbols, &mut diagnostics, &mut facts);
+    let unions = collect_union_facts(program, &type_symbols, &mut diagnostics, &mut facts);
     reject_recursive_records(&records, &mut diagnostics);
     let functions =
-        collect_function_signatures(program, &record_symbols, &mut diagnostics, &mut facts);
+        collect_function_signatures(program, &type_symbols, &mut diagnostics, &mut facts);
 
     for (index, function) in program.functions.iter().enumerate() {
         check_function(
             function,
             index,
             &functions,
-            &record_symbols,
+            &type_symbols,
             &records,
+            &unions,
             &mut diagnostics,
             &mut facts,
         );
@@ -318,6 +555,7 @@ pub fn type_check(program: &Program) -> Analysis {
 
     diagnostics.sort_by_key(diagnostic_position);
     facts.records = records;
+    facts.unions = unions;
     let typed = diagnostics
         .iter()
         .all(|diagnostic| diagnostic.severity() != nexa_diagnostics::Severity::Error)
@@ -326,44 +564,110 @@ pub fn type_check(program: &Program) -> Analysis {
             expression_types: facts.expression_types,
             name_resolutions: facts.name_resolutions,
             records: facts.records,
+            unions: facts.unions,
+            variant_constructions: facts.variant_constructions,
+            matches: facts.matches,
             functions: facts.functions,
         });
 
     Analysis { typed, diagnostics }
 }
 
-fn collect_record_names(
-    program: &Program,
-    diagnostics: &mut Vec<Diagnostic>,
-    facts: &mut FactBuilder,
-) -> HashMap<String, RecordId> {
-    let mut records = HashMap::<String, RecordId>::new();
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TypeSymbol {
+    Record(RecordId),
+    Union(UnionId),
+}
 
-    for (index, record) in program.records.iter().enumerate() {
-        let id = RecordId::new(index);
-        facts.record_name(record.name.span, NameResolution::Record(id));
-
-        if let Some(previous) = records.get(&record.name.text).copied() {
-            let previous_span = program.records[previous.index()].name.span;
-            diagnostics.push(
-                Diagnostic::error(
-                    DUPLICATE_NAME,
-                    format!("duplicate record `{}`", record.name.text),
-                )
-                .with_label(Label::primary(record.name.span, "duplicate record"))
-                .with_label(Label::secondary(previous_span, "first declared here")),
-            );
-        } else {
-            records.insert(record.name.text.clone(), id);
+impl TypeSymbol {
+    const fn resolution(self) -> NameResolution {
+        match self {
+            Self::Record(record) => NameResolution::Record(record),
+            Self::Union(union) => NameResolution::Union(union),
         }
     }
 
-    records
+    const fn ty(self) -> Type {
+        match self {
+            Self::Record(record) => Type::Record(record),
+            Self::Union(union) => Type::Union(union),
+        }
+    }
+
+    const fn kind_name(self) -> &'static str {
+        match self {
+            Self::Record(_) => "record",
+            Self::Union(_) => "union",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TypeEntry {
+    symbol: TypeSymbol,
+    name_span: SourceSpan,
+}
+
+type TypeCatalog = HashMap<String, TypeEntry>;
+
+fn collect_type_names(
+    program: &Program,
+    diagnostics: &mut Vec<Diagnostic>,
+    facts: &mut FactBuilder,
+) -> TypeCatalog {
+    let mut declarations = program
+        .records
+        .iter()
+        .enumerate()
+        .map(|(index, record)| (&record.name, TypeSymbol::Record(RecordId::new(index))))
+        .chain(
+            program
+                .unions
+                .iter()
+                .enumerate()
+                .map(|(index, union)| (&union.name, TypeSymbol::Union(UnionId::new(index)))),
+        )
+        .collect::<Vec<_>>();
+    declarations.sort_by_key(|(name, _)| (name.span.file().raw(), name.span.range().start()));
+
+    let mut types = TypeCatalog::new();
+    for (name, symbol) in declarations {
+        facts.record_name(name.span, symbol.resolution());
+
+        if let Some(previous) = types.get(&name.text).copied() {
+            let description = if previous.symbol.kind_name() == symbol.kind_name() {
+                symbol.kind_name()
+            } else {
+                "type"
+            };
+            diagnostics.push(
+                Diagnostic::error(
+                    DUPLICATE_NAME,
+                    format!("duplicate {description} `{}`", name.text),
+                )
+                .with_label(Label::primary(
+                    name.span,
+                    format!("duplicate {description}"),
+                ))
+                .with_label(Label::secondary(previous.name_span, "first declared here")),
+            );
+        } else {
+            types.insert(
+                name.text.clone(),
+                TypeEntry {
+                    symbol,
+                    name_span: name.span,
+                },
+            );
+        }
+    }
+
+    types
 }
 
 fn collect_record_facts(
     program: &Program,
-    symbols: &HashMap<String, RecordId>,
+    symbols: &TypeCatalog,
     diagnostics: &mut Vec<Diagnostic>,
     facts: &mut FactBuilder,
 ) -> Vec<RecordFacts> {
@@ -422,13 +726,93 @@ fn collect_record_facts(
         .collect()
 }
 
+fn collect_union_facts(
+    program: &Program,
+    symbols: &TypeCatalog,
+    diagnostics: &mut Vec<Diagnostic>,
+    facts: &mut FactBuilder,
+) -> Vec<UnionFacts> {
+    program
+        .unions
+        .iter()
+        .enumerate()
+        .map(|(union_index, union)| {
+            let union_id = UnionId::new(union_index);
+            let mut declared_variants = HashMap::<String, SourceSpan>::new();
+            let mut variants = Vec::new();
+
+            for (variant_index, variant) in union.variants.iter().enumerate() {
+                let variant_id = VariantId::new(union_id, variant_index);
+                facts.record_name(variant.name.span, NameResolution::Variant(variant_id));
+                if let Some(previous) = declared_variants.get(&variant.name.text).copied() {
+                    diagnostics.push(
+                        Diagnostic::error(
+                            DUPLICATE_NAME,
+                            format!("duplicate variant `{}`", variant.name.text),
+                        )
+                        .with_label(Label::primary(variant.name.span, "duplicate variant"))
+                        .with_label(Label::secondary(previous, "first declared here")),
+                    );
+                    continue;
+                }
+                declared_variants.insert(variant.name.text.clone(), variant.name.span);
+
+                let mut declared_payloads = HashMap::<String, SourceSpan>::new();
+                let mut payloads = Vec::new();
+                for (payload_index, payload) in variant.payloads.iter().enumerate() {
+                    let payload_id = PayloadId::new(variant_id, payload_index);
+                    facts.record_name(payload.name.span, NameResolution::Payload(payload_id));
+                    if let Some(previous) = declared_payloads.get(&payload.name.text).copied() {
+                        diagnostics.push(
+                            Diagnostic::error(
+                                DUPLICATE_NAME,
+                                format!("duplicate payload `{}`", payload.name.text),
+                            )
+                            .with_label(Label::primary(payload.name.span, "duplicate payload"))
+                            .with_label(Label::secondary(previous, "first declared here")),
+                        );
+                        continue;
+                    }
+                    declared_payloads.insert(payload.name.text.clone(), payload.name.span);
+
+                    let Some(ty) = resolve_type(&payload.ty, symbols, diagnostics, facts) else {
+                        continue;
+                    };
+                    payloads.push(PayloadFacts {
+                        id: payload_id,
+                        name: payload.name.text.clone(),
+                        ty,
+                        span: payload.span,
+                    });
+                }
+
+                variants.push(VariantFacts {
+                    id: variant_id,
+                    name: variant.name.text.clone(),
+                    payloads,
+                    name_span: variant.name.span,
+                    span: variant.span,
+                });
+            }
+
+            UnionFacts {
+                id: union_id,
+                name: union.name.text.clone(),
+                variants,
+                name_span: union.name.span,
+                span: union.span,
+            }
+        })
+        .collect()
+}
+
 fn resolve_type(
     reference: &TypeReference,
-    records: &HashMap<String, RecordId>,
+    types: &TypeCatalog,
     diagnostics: &mut Vec<Diagnostic>,
     facts: &mut FactBuilder,
 ) -> Option<Type> {
-    let ty = resolve_type_kind(reference, records, diagnostics, facts)?;
+    let ty = resolve_type_kind(reference, types, diagnostics, facts)?;
     if contains_invalid_array_element(&ty) {
         diagnostics.push(
             Diagnostic::error(TYPE_MISMATCH, "array elements cannot have type `Unit`")
@@ -440,7 +824,7 @@ fn resolve_type(
 
 fn resolve_type_kind(
     reference: &TypeReference,
-    records: &HashMap<String, RecordId>,
+    types: &TypeCatalog,
     diagnostics: &mut Vec<Diagnostic>,
     facts: &mut FactBuilder,
 ) -> Option<Type> {
@@ -449,10 +833,10 @@ fn resolve_type_kind(
         TypeReferenceKind::Bool => Some(Type::Bool),
         TypeReferenceKind::String => Some(Type::String),
         TypeReferenceKind::Unit => Some(Type::Unit),
-        TypeReferenceKind::Named(name) => match records.get(&name.text).copied() {
-            Some(record) => {
-                facts.record_name(name.span, NameResolution::Record(record));
-                Some(Type::Record(record))
+        TypeReferenceKind::Named(name) => match types.get(&name.text).copied() {
+            Some(entry) => {
+                facts.record_name(name.span, entry.symbol.resolution());
+                Some(entry.symbol.ty())
             }
             None => {
                 diagnostics.push(
@@ -462,10 +846,8 @@ fn resolve_type_kind(
                 None
             }
         },
-        TypeReferenceKind::Array(element) => {
-            resolve_type_kind(element, records, diagnostics, facts)
-                .map(|element| Type::Array(Box::new(element)))
-        }
+        TypeReferenceKind::Array(element) => resolve_type_kind(element, types, diagnostics, facts)
+            .map(|element| Type::Array(Box::new(element))),
     }
 }
 
@@ -510,7 +892,7 @@ fn type_reaches_record(
             })
         }
         Type::Array(element) => type_reaches_record(element, target, records, visited),
-        Type::Int | Type::Bool | Type::String | Type::Unit => false,
+        Type::Union(_) | Type::Int | Type::Bool | Type::String | Type::Unit => false,
     }
 }
 
@@ -529,7 +911,7 @@ struct FunctionCatalog {
 
 fn collect_function_signatures(
     program: &Program,
-    records: &HashMap<String, RecordId>,
+    types: &TypeCatalog,
     diagnostics: &mut Vec<Diagnostic>,
     facts: &mut FactBuilder,
 ) -> FunctionCatalog {
@@ -552,9 +934,9 @@ fn collect_function_signatures(
             parameters: function
                 .parameters
                 .iter()
-                .map(|parameter| resolve_type(&parameter.ty, records, diagnostics, facts))
+                .map(|parameter| resolve_type(&parameter.ty, types, diagnostics, facts))
                 .collect(),
-            return_type: resolve_type(&function.return_type, records, diagnostics, facts),
+            return_type: resolve_type(&function.return_type, types, diagnostics, facts),
             declaration: Some(function.name.span),
             resolution: NameResolution::Function(function_id),
         };
@@ -586,16 +968,18 @@ fn check_function(
     function: &Function,
     function_index: usize,
     functions: &FunctionCatalog,
-    record_symbols: &HashMap<String, RecordId>,
+    type_symbols: &TypeCatalog,
     records: &[RecordFacts],
+    unions: &[UnionFacts],
     diagnostics: &mut Vec<Diagnostic>,
     facts: &mut FactBuilder,
 ) {
     let signature = &functions.by_id[function_index];
     let mut checker = FunctionChecker {
         functions: &functions.by_name,
-        record_symbols,
+        type_symbols,
         records,
+        unions,
         diagnostics,
         facts,
         scopes: vec![HashMap::new()],
@@ -626,6 +1010,7 @@ fn check_function(
         let return_type = format_type(
             signature.return_type.as_ref().unwrap_or(&Type::Unit),
             records,
+            unions,
         );
         checker.error(
             INVALID_RETURN,
@@ -659,8 +1044,9 @@ fn check_function(
 
 struct FunctionChecker<'a> {
     functions: &'a HashMap<String, FunctionSignature>,
-    record_symbols: &'a HashMap<String, RecordId>,
+    type_symbols: &'a TypeCatalog,
     records: &'a [RecordFacts],
+    unions: &'a [UnionFacts],
     diagnostics: &'a mut Vec<Diagnostic>,
     facts: &'a mut FactBuilder,
     scopes: Vec<HashMap<String, Binding>>,
@@ -761,12 +1147,7 @@ impl FunctionChecker<'_> {
         mutable: bool,
     ) {
         let declared_type = annotation.and_then(|annotation| {
-            resolve_type(
-                annotation,
-                self.record_symbols,
-                self.diagnostics,
-                self.facts,
-            )
+            resolve_type(annotation, self.type_symbols, self.diagnostics, self.facts)
         });
         let initializer_type =
             self.check_expression_with_expected(initializer, declared_type.as_ref());
@@ -891,7 +1272,7 @@ impl FunctionChecker<'_> {
                 statement.span,
                 format!(
                     "expected a `{}` return value",
-                    format_type(expected, self.records)
+                    format_type(expected, self.records, self.unions)
                 ),
                 "missing return value",
             ),
@@ -903,8 +1284,8 @@ impl FunctionChecker<'_> {
                             value.span(),
                             format!(
                                 "expected return type `{}`, found `{}`",
-                                format_type(expected, self.records),
-                                format_type(&actual, self.records)
+                                format_type(expected, self.records, self.unions),
+                                format_type(&actual, self.records, self.unions)
                             ),
                             "invalid return value",
                         );
@@ -929,6 +1310,11 @@ impl FunctionChecker<'_> {
             Expression::String { .. } => Some(Type::String),
             Expression::Array { elements, span } => self.check_array(elements, *span, expected),
             Expression::Record { fields, span } => self.check_record(fields, *span, expected),
+            Expression::Match {
+                scrutinee,
+                arms,
+                span,
+            } => self.check_match(scrutinee, arms, *span, expected),
             Expression::Index {
                 collection,
                 index,
@@ -967,8 +1353,10 @@ impl FunctionChecker<'_> {
                 ..
             } => self.check_binary(*operator, left, right),
             Expression::Call {
-                callee, arguments, ..
-            } => self.check_call(callee, arguments),
+                callee,
+                arguments,
+                span,
+            } => self.check_call(callee, arguments, *span),
             Expression::Parenthesized { expression, .. } => {
                 self.check_expression_with_expected(expression, expected)
             }
@@ -1049,7 +1437,7 @@ impl FunctionChecker<'_> {
                 |ty| {
                     format!(
                         "record literal requires a nominal record type, found `{}`",
-                        format_type(ty, self.records)
+                        format_type(ty, self.records, self.unions)
                     )
                 },
             );
@@ -1141,6 +1529,273 @@ impl FunctionChecker<'_> {
         Some(Type::Record(*record_id))
     }
 
+    fn check_match(
+        &mut self,
+        scrutinee: &Expression,
+        arms: &[MatchArm],
+        span: SourceSpan,
+        expected: Option<&Type>,
+    ) -> Option<Type> {
+        let scrutinee_type = self.check_expression(scrutinee);
+        let union_id = match scrutinee_type {
+            Some(Type::Union(union)) => Some(union),
+            Some(actual) => {
+                self.error(
+                    TYPE_MISMATCH,
+                    scrutinee.span(),
+                    format!(
+                        "match requires a tagged union, found `{}`",
+                        format_type(&actual, self.records, self.unions)
+                    ),
+                    "expected a tagged union value",
+                );
+                None
+            }
+            None => None,
+        };
+        let union = union_id.and_then(|union| self.unions.get(union.index()).cloned());
+        let mut covered = HashMap::<VariantId, SourceSpan>::new();
+        let mut default_span = None;
+        let mut complete_span = None;
+        let mut coverage_reliable = union.is_some();
+        let mut arm_facts = Vec::with_capacity(arms.len());
+        let mut result_type = expected.cloned();
+
+        for arm in arms {
+            if let Some(previous) = default_span {
+                self.diagnostics.push(
+                    Diagnostic::error(UNREACHABLE_ARM, "match arm is unreachable")
+                        .with_label(Label::primary(arm.span, "unreachable match arm"))
+                        .with_label(Label::secondary(previous, "default arm appears here")),
+                );
+            }
+
+            self.scopes.push(HashMap::new());
+            let resolved = match &arm.pattern {
+                MatchPattern::Variant {
+                    union: qualifier,
+                    variant,
+                    bindings,
+                    ..
+                } => {
+                    let variant_resolution = self.resolve_pattern_variant(qualifier, variant);
+                    let mut payload_bindings = Vec::new();
+                    if let Some((resolved_union, variant_facts)) = &variant_resolution {
+                        if variant_facts.payloads.len() != bindings.len() {
+                            coverage_reliable = false;
+                            self.diagnostics.push(
+                                Diagnostic::error(
+                                    CALL_ARITY,
+                                    format!(
+                                        "variant `{}` expects {} payload binding(s), found {}",
+                                        variant.text,
+                                        variant_facts.payloads.len(),
+                                        bindings.len()
+                                    ),
+                                )
+                                .with_label(Label::primary(
+                                    variant.span,
+                                    "incorrect payload binding count",
+                                ))
+                                .with_label(Label::secondary(
+                                    variant_facts.name_span,
+                                    "variant declared here",
+                                )),
+                            );
+                        }
+
+                        for (index, binding) in bindings.iter().enumerate() {
+                            let payload = variant_facts.payloads.get(index);
+                            let local = self.bind(
+                                binding,
+                                payload.map(|payload| payload.ty.clone()),
+                                false,
+                            );
+                            if let (Some(payload), Some(local)) = (payload, local) {
+                                payload_bindings.push(PayloadBindingFacts {
+                                    payload: payload.id,
+                                    local,
+                                });
+                            }
+                        }
+
+                        if Some(*resolved_union) == union_id {
+                            if let Some(previous) = covered.get(&variant_facts.id).copied() {
+                                self.diagnostics.push(
+                                    Diagnostic::error(
+                                        DUPLICATE_NAME,
+                                        format!("duplicate case for `{}`", variant.text),
+                                    )
+                                    .with_label(Label::primary(variant.span, "duplicate case"))
+                                    .with_label(Label::secondary(previous, "first matched here")),
+                                );
+                            } else {
+                                covered.insert(variant_facts.id, variant.span);
+                                if union
+                                    .as_ref()
+                                    .is_some_and(|union| covered.len() == union.variants.len())
+                                {
+                                    complete_span = Some(arm.span);
+                                }
+                            }
+                        } else if let Some(expected_union) = &union {
+                            coverage_reliable = false;
+                            self.diagnostics.push(
+                                Diagnostic::error(
+                                    TYPE_MISMATCH,
+                                    format!(
+                                        "case `{}` belongs to `{}` instead of `{}`",
+                                        variant.text,
+                                        self.union_name(*resolved_union),
+                                        expected_union.name
+                                    ),
+                                )
+                                .with_label(Label::primary(
+                                    qualifier.span,
+                                    "case uses a different union",
+                                ))
+                                .with_label(Label::secondary(
+                                    expected_union.name_span,
+                                    "matched union declared here",
+                                )),
+                            );
+                        }
+
+                        Some(MatchArmFacts::Variant {
+                            variant: variant_facts.id,
+                            bindings: payload_bindings,
+                        })
+                    } else {
+                        coverage_reliable = false;
+                        for binding in bindings {
+                            let _ = self.bind(binding, None, false);
+                        }
+                        None
+                    }
+                }
+                MatchPattern::Default { span: pattern_span } => {
+                    if default_span.is_none() {
+                        if let Some(previous) = complete_span {
+                            self.diagnostics.push(
+                                Diagnostic::error(
+                                    UNREACHABLE_ARM,
+                                    "default arm is unreachable because all variants are covered",
+                                )
+                                .with_label(Label::primary(arm.span, "unreachable default arm"))
+                                .with_label(Label::secondary(previous, "coverage completed here")),
+                            );
+                        }
+                        default_span = Some(*pattern_span);
+                    }
+                    Some(MatchArmFacts::Default)
+                }
+            };
+
+            let arm_expected = result_type.clone();
+            let actual = self.check_expression_with_expected(&arm.value, arm_expected.as_ref());
+            if let Some(actual) = actual {
+                if let Some(required) = &result_type {
+                    if &actual != required {
+                        self.type_mismatch(arm.value.span(), required, &actual);
+                    }
+                } else {
+                    result_type = Some(actual);
+                }
+            }
+            let _ = self.scopes.pop();
+            if let Some(resolved) = resolved {
+                arm_facts.push(resolved);
+            }
+        }
+
+        if let Some(union) = &union {
+            if coverage_reliable && default_span.is_none() && covered.len() != union.variants.len()
+            {
+                let mut diagnostic = Diagnostic::error(
+                    NON_EXHAUSTIVE_MATCH,
+                    format!("match on `{}` is not exhaustive", union.name),
+                )
+                .with_label(Label::primary(span, "non-exhaustive match"));
+                for variant in &union.variants {
+                    if !covered.contains_key(&variant.id) {
+                        diagnostic = diagnostic.with_label(Label::secondary(
+                            variant.span,
+                            format!("missing case `{}`", variant.name),
+                        ));
+                    }
+                }
+                self.diagnostics.push(diagnostic);
+            }
+
+            if arm_facts.len() == arms.len() {
+                self.facts.record_match(
+                    span,
+                    MatchFacts {
+                        union: union.id,
+                        arms: arm_facts,
+                    },
+                );
+            }
+        }
+
+        (!arms.is_empty()).then_some(result_type).flatten()
+    }
+
+    fn resolve_pattern_variant(
+        &mut self,
+        qualifier: &Name,
+        variant: &Name,
+    ) -> Option<(UnionId, VariantFacts)> {
+        let Some(entry) = self.type_symbols.get(&qualifier.text).copied() else {
+            self.error(
+                UNDEFINED_NAME,
+                qualifier.span,
+                format!("undefined union `{}`", qualifier.text),
+                "not found in this program",
+            );
+            return None;
+        };
+        self.facts
+            .record_name(qualifier.span, entry.symbol.resolution());
+        let TypeSymbol::Union(union_id) = entry.symbol else {
+            self.error(
+                TYPE_MISMATCH,
+                qualifier.span,
+                format!("`{}` is a record, not a tagged union", qualifier.text),
+                "expected a tagged union qualifier",
+            );
+            return None;
+        };
+        let union = self.unions.get(union_id.index()).cloned()?;
+        let Some(variant_facts) = union
+            .variants
+            .iter()
+            .find(|candidate| candidate.name == variant.text)
+            .cloned()
+        else {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    UNKNOWN_MEMBER,
+                    format!("union `{}` has no variant `{}`", union.name, variant.text),
+                )
+                .with_label(Label::primary(variant.span, "unknown union variant"))
+                .with_label(Label::secondary(union.name_span, "union declared here")),
+            );
+            return None;
+        };
+        self.facts
+            .record_name(variant.span, NameResolution::Variant(variant_facts.id));
+
+        Some((union_id, variant_facts))
+    }
+
+    fn union_name(&self, union: UnionId) -> String {
+        self.unions.get(union.index()).map_or_else(
+            || format!("union#{}", union.index()),
+            |union| union.name.clone(),
+        )
+    }
+
     fn check_index(
         &mut self,
         collection: &Expression,
@@ -1163,7 +1818,7 @@ impl FunctionChecker<'_> {
                     span,
                     format!(
                         "cannot index a `{}` value",
-                        format_type(&actual, self.records)
+                        format_type(&actual, self.records, self.unions)
                     ),
                     "expected an array value",
                 );
@@ -1174,6 +1829,29 @@ impl FunctionChecker<'_> {
     }
 
     fn check_member(&mut self, object: &Expression, member: &Name) -> Option<Type> {
+        if let Expression::Name(qualifier) = object {
+            if self.lookup_binding(qualifier).is_none()
+                && matches!(
+                    self.type_symbols
+                        .get(&qualifier.text)
+                        .map(|entry| entry.symbol),
+                    Some(TypeSymbol::Union(_))
+                )
+            {
+                if let Some((_union, variant)) = self.resolve_pattern_variant(qualifier, member) {
+                    self.error(
+                        TYPE_MISMATCH,
+                        member.span,
+                        format!("variant constructor `{}` must be called", member.text),
+                        "add constructor parentheses",
+                    );
+                    self.facts
+                        .record_name(member.span, NameResolution::Variant(variant.id));
+                    return None;
+                }
+            }
+        }
+
         match self.check_expression(object) {
             Some(Type::Array(_)) if member.text == "length" => {
                 self.facts
@@ -1209,13 +1887,26 @@ impl FunctionChecker<'_> {
                     .record_name(member.span, NameResolution::Field(field.id));
                 Some(field.ty)
             }
+            Some(Type::Union(union_id)) => {
+                self.error(
+                    TYPE_MISMATCH,
+                    member.span,
+                    format!(
+                        "tagged union `{}` has no value member `{}`",
+                        self.union_name(union_id),
+                        member.text
+                    ),
+                    "variants are constructed through the union type",
+                );
+                None
+            }
             Some(actual) => {
                 self.error(
                     UNKNOWN_MEMBER,
                     member.span,
                     format!(
                         "type `{}` has no member `{}`",
-                        format_type(&actual, self.records),
+                        format_type(&actual, self.records, self.unions),
                         member.text
                     ),
                     "unknown member",
@@ -1265,11 +1956,13 @@ impl FunctionChecker<'_> {
                 self.require_binary_bools(left, right, Some(left_type), Some(right_type))
             }
             BinaryOperator::Equal => {
-                if matches!(left_type, Type::Array(_) | Type::Record(_)) && left_type == right_type
+                if matches!(left_type, Type::Array(_) | Type::Record(_) | Type::Union(_))
+                    && left_type == right_type
                 {
                     let kind = match left_type {
                         Type::Array(_) => "array",
                         Type::Record(_) => "record",
+                        Type::Union(_) => "tagged union",
                         Type::Int | Type::Bool | Type::String | Type::Unit => "value",
                     };
                     self.error(
@@ -1285,8 +1978,8 @@ impl FunctionChecker<'_> {
                         right.span(),
                         format!(
                             "cannot compare `{}` with `{}` using `===`",
-                            format_type(&left_type, self.records),
-                            format_type(&right_type, self.records)
+                            format_type(&left_type, self.records, self.unions),
+                            format_type(&right_type, self.records, self.unions)
                         ),
                         "operands must have the same type",
                     );
@@ -1353,7 +2046,18 @@ impl FunctionChecker<'_> {
         (left_type == Type::Int && right_type == Type::Int).then_some(result)
     }
 
-    fn check_call(&mut self, callee: &Expression, arguments: &[Expression]) -> Option<Type> {
+    fn check_call(
+        &mut self,
+        callee: &Expression,
+        arguments: &[Expression],
+        span: SourceSpan,
+    ) -> Option<Type> {
+        if let Expression::Member { object, member, .. } = callee {
+            if let Expression::Name(qualifier) = object.as_ref() {
+                return self.check_variant_constructor(qualifier, member, arguments, span);
+            }
+        }
+
         let Expression::Name(name) = callee else {
             let _ = self.check_expression(callee);
             for argument in arguments {
@@ -1376,7 +2080,7 @@ impl FunctionChecker<'_> {
             }
             let binding_description = binding.ty.as_ref().map_or_else(
                 || "value".to_owned(),
-                |ty| format!("`{}` value", format_type(ty, self.records)),
+                |ty| format!("`{}` value", format_type(ty, self.records, self.unions)),
             );
             self.error(
                 TYPE_MISMATCH,
@@ -1413,7 +2117,7 @@ impl FunctionChecker<'_> {
                             argument.span(),
                             format!(
                                 "`print` cannot display `{}`",
-                                format_type(&actual, self.records)
+                                format_type(&actual, self.records, self.unions)
                             ),
                             "expected `Int`, `Bool`, or `String`",
                         );
@@ -1470,6 +2174,117 @@ impl FunctionChecker<'_> {
         signature.return_type
     }
 
+    fn check_variant_constructor(
+        &mut self,
+        qualifier: &Name,
+        variant: &Name,
+        arguments: &[Expression],
+        span: SourceSpan,
+    ) -> Option<Type> {
+        let Some(entry) = self.type_symbols.get(&qualifier.text).copied() else {
+            for argument in arguments {
+                let _ = self.check_expression(argument);
+            }
+            self.error(
+                UNDEFINED_NAME,
+                qualifier.span,
+                format!("undefined union `{}`", qualifier.text),
+                "not found in this program",
+            );
+            return None;
+        };
+        self.facts
+            .record_name(qualifier.span, entry.symbol.resolution());
+        let TypeSymbol::Union(union_id) = entry.symbol else {
+            for argument in arguments {
+                let _ = self.check_expression(argument);
+            }
+            self.error(
+                TYPE_MISMATCH,
+                qualifier.span,
+                format!("`{}` is a record, not a tagged union", qualifier.text),
+                "record types have no variant constructors",
+            );
+            return None;
+        };
+        let Some(union) = self.unions.get(union_id.index()).cloned() else {
+            for argument in arguments {
+                let _ = self.check_expression(argument);
+            }
+            self.error(
+                TYPE_MISMATCH,
+                qualifier.span,
+                "union type has no resolved declaration facts",
+                "invalid union type",
+            );
+            return None;
+        };
+        let Some(variant_facts) = union
+            .variants
+            .iter()
+            .find(|candidate| candidate.name == variant.text)
+            .cloned()
+        else {
+            for argument in arguments {
+                let _ = self.check_expression(argument);
+            }
+            self.diagnostics.push(
+                Diagnostic::error(
+                    UNKNOWN_MEMBER,
+                    format!("union `{}` has no variant `{}`", union.name, variant.text),
+                )
+                .with_label(Label::primary(variant.span, "unknown union variant"))
+                .with_label(Label::secondary(union.name_span, "union declared here")),
+            );
+            return None;
+        };
+        self.facts
+            .record_name(variant.span, NameResolution::Variant(variant_facts.id));
+
+        if variant_facts.payloads.len() != arguments.len() {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    CALL_ARITY,
+                    format!(
+                        "variant `{}` expects {} payload value(s), found {}",
+                        variant.text,
+                        variant_facts.payloads.len(),
+                        arguments.len()
+                    ),
+                )
+                .with_label(Label::primary(
+                    variant.span,
+                    "incorrect constructor argument count",
+                ))
+                .with_label(Label::secondary(
+                    variant_facts.name_span,
+                    "variant declared here",
+                )),
+            );
+        }
+
+        for (argument, payload) in arguments.iter().zip(&variant_facts.payloads) {
+            let actual = self.check_expression_with_expected(argument, Some(&payload.ty));
+            if let Some(actual) = actual {
+                if actual != payload.ty {
+                    self.type_mismatch(argument.span(), &payload.ty, &actual);
+                }
+            }
+        }
+        for argument in arguments.iter().skip(variant_facts.payloads.len()) {
+            let _ = self.check_expression(argument);
+        }
+
+        self.facts.record_variant_construction(
+            span,
+            VariantConstructionFacts {
+                union: union_id,
+                variant: variant_facts.id,
+            },
+        );
+        Some(Type::Union(union_id))
+    }
+
     fn bind(&mut self, name: &Name, ty: Option<Type>, mutable: bool) -> Option<LocalId> {
         let scope = self.scopes.last_mut()?;
 
@@ -1510,8 +2325,8 @@ impl FunctionChecker<'_> {
             span,
             format!(
                 "expected `{}`, found `{}`",
-                format_type(expected, self.records),
-                format_type(actual, self.records)
+                format_type(expected, self.records, self.unions),
+                format_type(actual, self.records, self.unions)
             ),
             "type mismatch",
         );
@@ -1543,19 +2358,25 @@ fn contains_invalid_array_element(ty: &Type) -> bool {
         Type::Array(element) => {
             element.as_ref() == &Type::Unit || contains_invalid_array_element(element)
         }
-        Type::Int | Type::Bool | Type::String | Type::Record(_) | Type::Unit => false,
+        Type::Int | Type::Bool | Type::String | Type::Record(_) | Type::Union(_) | Type::Unit => {
+            false
+        }
     }
 }
 
-fn format_type(ty: &Type, records: &[RecordFacts]) -> String {
+fn format_type(ty: &Type, records: &[RecordFacts], unions: &[UnionFacts]) -> String {
     match ty {
         Type::Int => "Int".to_owned(),
         Type::Bool => "Bool".to_owned(),
         Type::String => "String".to_owned(),
-        Type::Array(element) => format!("{}[]", format_type(element, records)),
+        Type::Array(element) => format!("{}[]", format_type(element, records, unions)),
         Type::Record(record) => records.get(record.index()).map_or_else(
             || format!("record#{}", record.index()),
             |record| record.name.clone(),
+        ),
+        Type::Union(union) => unions.get(union.index()).map_or_else(
+            || format!("union#{}", union.index()),
+            |union| union.name.clone(),
         ),
         Type::Unit => "Unit".to_owned(),
     }

@@ -158,3 +158,55 @@ function main(): Unit {
         Some("array index 2 out of bounds for length 1")
     );
 }
+
+#[test]
+fn check_returns_typed_hir_for_recursive_tagged_unions_and_exhaustive_match() {
+    let result = check(FileId::new(0), tagged_union_program());
+
+    assert!(result.is_ok(), "diagnostics: {:?}", result.diagnostics());
+}
+
+#[test]
+fn check_reports_tagged_union_match_diagnostics() {
+    let result = check(
+        FileId::new(0),
+        r#"type Flag = | Off() | On();
+function read(flag: Flag): Int {
+  return match (flag) {
+    case Flag.Off() => 0;
+  };
+}"#,
+    );
+
+    assert!(!result.is_ok());
+    assert!(result
+        .diagnostics()
+        .iter()
+        .any(|diagnostic| diagnostic.code().as_str() == "E3006"));
+}
+
+#[test]
+fn run_executes_recursive_tagged_unions_and_exhaustive_match() {
+    let result = run(FileId::new(0), tagged_union_program());
+
+    assert!(result.is_ok(), "diagnostics: {:?}", result.diagnostics());
+    assert_eq!(result.output(), ["42"]);
+}
+
+fn tagged_union_program() -> &'static str {
+    r#"type List =
+  | Empty()
+  | Node(head: Int, tail: List);
+
+function sum(values: List): Int {
+  return match (values) {
+    case List.Empty() => 0;
+    case List.Node(head, tail) => head + sum(tail);
+  };
+}
+
+function main(): Unit {
+  const values = List.Node(20, List.Node(22, List.Empty()));
+  print(sum(values));
+}"#
+}

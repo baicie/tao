@@ -1,6 +1,9 @@
 //! MIR lowering and interpretation regression tests.
 
-use nexa_hir::{lower as lower_hir, type_check, BinaryOperator, FieldId, RecordId, Type};
+use nexa_hir::{
+    lower as lower_hir, type_check, BinaryOperator, FieldId, PayloadId, RecordId, Type, UnionId,
+    VariantId,
+};
 use nexa_mir::{
     lower as lower_mir, run, run_with_args, MirExpression, MirProgram, MirStatement, MirTerminator,
 };
@@ -506,6 +509,233 @@ function main(): Unit {
 }
 
 #[test]
+fn interpreter_executes_recursive_unions_and_exhaustive_matches(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"type List =
+  | Empty()
+  | Node(head: Int, tail: List);
+
+function sum(values: List): Int {
+  return match (values) {
+    case List.Empty() => 0;
+    case List.Node(head, tail) => head + sum(tail);
+  };
+}
+
+function main(): Unit {
+  const values = List.Node(20, List.Node(22, List.Empty()));
+  print(sum(values));
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["42"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_preserves_union_values_through_records_arrays_calls_and_returns(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"type Choice = | None() | Some(value: Int);
+type Envelope = { values: Choice[]; };
+
+function keep(value: Choice): Choice {
+  return value;
+}
+
+function wrap(value: Choice): Envelope {
+  return { values: [keep(value)] };
+}
+
+function read(envelope: Envelope): Int {
+  const value = keep(envelope.values[0]);
+  return match (value) {
+    case Choice.None() => 0;
+    case Choice.Some(inner) => inner;
+  };
+}
+
+function main(): Unit {
+  print(read(wrap(Choice.Some(42))));
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["42"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_evaluates_variant_payloads_once_from_left_to_right(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"type Pair = | Values(left: Int, right: Int);
+
+function first(): Int { print(1); return 20; }
+function second(): Int { print(2); return 22; }
+
+function main(): Unit {
+  const pair = Pair.Values(first(), second());
+  const total = match (pair) {
+    case Pair.Values(left, right) => left + right;
+  };
+  print(total);
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["1", "2", "42"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_stops_variant_payload_evaluation_after_a_failure(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = r#"type Triple = | Values(first: Int, second: Int, third: Int);
+
+function first(): Int { print(1); return 1; }
+function fail(): Int {
+  print(2);
+  const values = [0];
+  return values[1];
+}
+function third(): Int { print(3); return 3; }
+
+function main(): Unit {
+  const ignored = Triple.Values(first(), fail(), third());
+}"#;
+    let failure_start = source
+        .find("values[1]")
+        .ok_or_else(|| std::io::Error::other("expected failing constructor payload"))?;
+    let expected_span = SourceSpan::new(
+        FileId::new(3),
+        TextRange::new(failure_start, failure_start + "values[1]".len()),
+    );
+    let program = compile(source)?;
+
+    let failure = run(&program)
+        .err()
+        .ok_or_else(|| std::io::Error::other("expected a constructor payload failure"))?;
+
+    assert_eq!(failure.error().span(), expected_span);
+    assert_eq!(failure.output(), ["1", "2"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_evaluates_a_match_scrutinee_exactly_once() -> Result<(), Box<dyn std::error::Error>>
+{
+    let program = compile(
+        r#"type Flag = | Off() | On();
+
+function probe(): Flag {
+  print(1);
+  return Flag.On();
+}
+
+function main(): Unit {
+  const result = match (probe()) {
+    case Flag.Off() => 0;
+    case Flag.On() => 42;
+  };
+  print(result);
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["1", "42"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_evaluates_only_the_selected_match_arm() -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"type Flag = | Off() | On();
+
+function off(): Int { print(1); return 0; }
+function on(): Int { print(2); return 42; }
+
+function main(): Unit {
+  const result = match (Flag.On()) {
+    case Flag.Off() => off();
+    case Flag.On() => on();
+  };
+  print(result);
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["2", "42"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_selects_a_default_match_arm_for_an_uncovered_variant(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"type Choice = | Zero() | One() | Other();
+
+function main(): Unit {
+  const result = match (Choice.Other()) {
+    case Choice.Zero() => 0;
+    case Choice.One() => 1;
+    default => 42;
+  };
+  print(result);
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["42"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_contextually_types_record_literals_in_nested_match_arms(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"type Box = { value: Int; };
+type Inner = | Number(value: Int) | Missing();
+type Outer = | Wrapped(value: Inner) | Empty();
+
+function unpack(value: Outer): Box {
+  return match (value) {
+    case Outer.Wrapped(inner) => match (inner) {
+      case Inner.Number(number) => { value: number };
+      case Inner.Missing() => { value: 0 };
+    };
+    case Outer.Empty() => { value: 0 };
+  };
+}
+
+function main(): Unit {
+  print(unpack(Outer.Wrapped(Inner.Number(42))).value);
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["42"]);
+
+    Ok(())
+}
+
+#[test]
 fn mir_keeps_source_order_record_and_field_layout_ids() -> Result<(), Box<dyn std::error::Error>> {
     let program = compile(
         r#"type User = { name: String; age: Int; };
@@ -548,6 +778,181 @@ function main(): Unit {}"#,
 }
 
 #[test]
+fn mir_keeps_owner_scoped_union_variant_and_payload_layout_ids(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"type Left = | Same(value: Int) | Empty();
+type Right = | Same(flag: Bool, left: Left);
+function main(): Unit {}"#,
+    )?;
+    let left = program
+        .unions()
+        .first()
+        .ok_or_else(|| std::io::Error::other("expected Left union layout"))?;
+    let right = program
+        .unions()
+        .get(1)
+        .ok_or_else(|| std::io::Error::other("expected Right union layout"))?;
+    let left_id = UnionId::new(0);
+    let right_id = UnionId::new(1);
+    let left_same = VariantId::new(left_id, 0);
+    let left_empty = VariantId::new(left_id, 1);
+    let right_same = VariantId::new(right_id, 0);
+
+    assert_eq!(
+        (
+            left.id(),
+            left.name(),
+            left.variants()
+                .iter()
+                .map(|variant| {
+                    (
+                        variant.id(),
+                        variant.name(),
+                        variant
+                            .payloads()
+                            .iter()
+                            .map(|payload| (payload.id(), payload.name(), payload.ty().clone()))
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            right.id(),
+            right.variants().first().map(|variant| {
+                (
+                    variant.id(),
+                    variant
+                        .payloads()
+                        .iter()
+                        .map(|payload| (payload.id(), payload.ty().clone()))
+                        .collect::<Vec<_>>(),
+                )
+            }),
+        ),
+        (
+            left_id,
+            "Left",
+            vec![
+                (
+                    left_same,
+                    "Same",
+                    vec![(PayloadId::new(left_same, 0), "value", Type::Int)],
+                ),
+                (left_empty, "Empty", Vec::new()),
+            ],
+            right_id,
+            Some((
+                right_same,
+                vec![
+                    (PayloadId::new(right_same, 0), Type::Bool),
+                    (PayloadId::new(right_same, 1), Type::Union(left_id)),
+                ],
+            )),
+        )
+    );
+
+    Ok(())
+}
+
+#[test]
+fn mir_switch_variant_uses_dense_resolved_targets_within_the_function(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"type Choice = | Zero() | One() | Two();
+
+function choose(value: Choice): Int {
+  return match (value) {
+    case Choice.Zero() => 0;
+    case Choice.One() => 1;
+    case Choice.Two() => 2;
+  };
+}
+
+function main(): Unit { print(choose(Choice.Two())); }"#,
+    )?;
+    let function = program
+        .functions()
+        .first()
+        .ok_or_else(|| std::io::Error::other("expected choose function"))?;
+    let switches = function
+        .blocks()
+        .iter()
+        .filter_map(|block| match block.terminator() {
+            MirTerminator::SwitchVariant { union, targets, .. } => {
+                Some((*union, targets.as_slice()))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let (union, targets) = switches
+        .first()
+        .ok_or_else(|| std::io::Error::other("expected resolved variant switch"))?;
+
+    assert_eq!(switches.len(), 1);
+    assert_eq!(*union, UnionId::new(0));
+    assert_eq!(targets.len(), 3);
+    assert!(
+        targets
+            .iter()
+            .all(|target| target.index() < function.blocks().len()),
+        "MIR blocks: {:?}",
+        function.blocks()
+    );
+
+    Ok(())
+}
+
+#[test]
+fn mir_projects_payloads_by_resolved_owner_and_position() -> Result<(), Box<dyn std::error::Error>>
+{
+    let program = compile(
+        r#"type Pair = | Values(left: Int, right: Int);
+
+function sum(value: Pair): Int {
+  return match (value) {
+    case Pair.Values(left, right) => left + right;
+  };
+}
+
+function main(): Unit { print(sum(Pair.Values(20, 22))); }"#,
+    )?;
+    let function = program
+        .functions()
+        .first()
+        .ok_or_else(|| std::io::Error::other("expected sum function"))?;
+    let projections = function
+        .blocks()
+        .iter()
+        .flat_map(|block| block.statements())
+        .filter_map(|statement| match statement {
+            MirStatement::Store {
+                value:
+                    MirExpression::VariantPayload {
+                        union,
+                        variant,
+                        payload,
+                        ..
+                    },
+                ..
+            } => Some((*union, *variant, *payload)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let union = UnionId::new(0);
+    let variant = VariantId::new(union, 0);
+
+    assert_eq!(
+        projections,
+        [
+            (union, variant, PayloadId::new(variant, 0)),
+            (union, variant, PayloadId::new(variant, 1)),
+        ]
+    );
+
+    Ok(())
+}
+
+#[test]
 fn mir_lowering_expands_logical_operators_into_cfg_branches(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let program = compile(
@@ -576,7 +981,7 @@ fn mir_lowering_expands_logical_operators_into_cfg_branches(
             MirTerminator::Return { value, .. } => value
                 .as_ref()
                 .is_some_and(expression_contains_logical_binary),
-            MirTerminator::Goto { .. } => false,
+            MirTerminator::Goto { .. } | MirTerminator::SwitchVariant { .. } => false,
         }
     });
 
@@ -665,6 +1070,9 @@ fn mir_lowering_builds_explicit_control_flow_terminators() -> Result<(), Box<dyn
                     else_target,
                     ..
                 } => then_target.index() < block_count && else_target.index() < block_count,
+                MirTerminator::SwitchVariant { targets, .. } => {
+                    targets.iter().all(|target| target.index() < block_count)
+                }
                 MirTerminator::Return { .. } => true,
             });
     let has_explicit_return = function
@@ -703,6 +1111,150 @@ fn interpreter_preserves_output_before_a_runtime_failure() -> Result<(), Box<dyn
         .ok_or_else(|| std::io::Error::other("expected a division error"))?;
 
     assert_eq!(failure.output(), ["1"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_accepts_recursive_union_depth_1024() -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"type Nest = | End() | Next(value: Nest);
+
+function main(): Unit {
+  let value: Nest = Nest.End();
+  let depth = 1;
+  while (depth < 1024) {
+    value = Nest.Next(value);
+    depth = depth + 1;
+  }
+  const result = match (value) {
+    case Nest.End() => 0;
+    case Nest.Next(inner) => 42;
+  };
+  print(result);
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["42"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_accepts_union_depth_1024_transmitted_through_record_payloads(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"type Link = { value: Nest; };
+type Nest = | End() | Next(link: Link);
+
+function main(): Unit {
+  let value: Nest = Nest.End();
+  let depth = 1;
+  while (depth < 1024) {
+    value = Nest.Next({ value: value });
+    depth = depth + 1;
+  }
+  const result = match (value) {
+    case Nest.End() => 0;
+    case Nest.Next(link) => 42;
+  };
+  print(result);
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["42"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_rejects_union_depth_1025_transmitted_through_array_payloads(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = r#"type Nest = | End() | Next(values: Nest[]);
+
+function observe(values: Nest[]): Nest[] {
+  print(7);
+  return values;
+}
+
+function main(): Unit {
+  let value: Nest = Nest.End();
+  let depth = 1;
+  while (depth < 1024) {
+    value = Nest.Next([value]);
+    depth = depth + 1;
+  }
+  value = Nest.Next(observe([value]));
+  print(8);
+}"#;
+    let constructor = "Nest.Next(observe([value]))";
+    let constructor_start = source
+        .rfind(constructor)
+        .ok_or_else(|| std::io::Error::other("expected depth-1025 array constructor"))?;
+    let expected_span = SourceSpan::new(
+        FileId::new(3),
+        TextRange::new(constructor_start, constructor_start + constructor.len()),
+    );
+    let program = compile(source)?;
+
+    let failure = run(&program)
+        .err()
+        .ok_or_else(|| std::io::Error::other("expected a recursive union depth error"))?;
+
+    assert_eq!(
+        failure.error().message(),
+        "recursive union nesting limit of 1024 exceeded"
+    );
+    assert_eq!(failure.error().span(), expected_span);
+    assert_eq!(failure.output(), ["7"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_rejects_recursive_union_depth_1025_at_the_constructor(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = r#"type Nest = | End() | Next(value: Nest);
+
+function observe(value: Nest): Nest {
+  print(7);
+  return value;
+}
+
+function main(): Unit {
+  let value: Nest = Nest.End();
+  let depth = 1;
+  while (depth < 1024) {
+    value = Nest.Next(value);
+    depth = depth + 1;
+  }
+  value = Nest.Next(observe(value));
+  print(8);
+}"#;
+    let constructor = "Nest.Next(observe(value))";
+    let constructor_start = source
+        .rfind(constructor)
+        .ok_or_else(|| std::io::Error::other("expected depth-1025 constructor"))?;
+    let expected_span = SourceSpan::new(
+        FileId::new(3),
+        TextRange::new(constructor_start, constructor_start + constructor.len()),
+    );
+    let program = compile(source)?;
+
+    let failure = run(&program)
+        .err()
+        .ok_or_else(|| std::io::Error::other("expected a recursive union depth error"))?;
+
+    assert_eq!(
+        failure.error().message(),
+        "recursive union nesting limit of 1024 exceeded"
+    );
+    assert_eq!(failure.error().span(), expected_span);
+    assert_eq!(failure.output(), ["7"]);
 
     Ok(())
 }
@@ -843,6 +1395,9 @@ fn expression_contains_logical_binary(expression: &MirExpression) -> bool {
         MirExpression::Record { fields, .. } => {
             fields.iter().any(expression_contains_logical_binary)
         }
+        MirExpression::Variant { payloads, .. } => {
+            payloads.iter().any(expression_contains_logical_binary)
+        }
         MirExpression::Index { target, index, .. } => {
             expression_contains_logical_binary(target) || expression_contains_logical_binary(index)
         }
@@ -851,6 +1406,7 @@ fn expression_contains_logical_binary(expression: &MirExpression) -> bool {
         MirExpression::Integer { .. }
         | MirExpression::Boolean { .. }
         | MirExpression::String { .. }
+        | MirExpression::VariantPayload { .. }
         | MirExpression::Local { .. } => false,
     }
 }

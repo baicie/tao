@@ -5,6 +5,8 @@ use nexa_span::SourceSpan;
 pub struct Program {
     /// All top-level nominal record declarations in source order.
     pub records: Vec<RecordDeclaration>,
+    /// All top-level nominal tagged union declarations in source order.
+    pub unions: Vec<UnionDeclaration>,
     /// All top-level function declarations in source order.
     pub functions: Vec<Function>,
     /// The source range covered by the source file node.
@@ -30,6 +32,39 @@ pub struct RecordFieldDeclaration {
     /// The declared field type.
     pub ty: TypeReference,
     /// The field declaration's full source range.
+    pub span: SourceSpan,
+}
+
+/// A nominal tagged union declaration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnionDeclaration {
+    /// The declared union name.
+    pub name: Name,
+    /// Variants in declaration order.
+    pub variants: Vec<UnionVariantDeclaration>,
+    /// The declaration's full source range.
+    pub span: SourceSpan,
+}
+
+/// One variant in a nominal tagged union.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnionVariantDeclaration {
+    /// The declared variant name.
+    pub name: Name,
+    /// Positional payload declarations in source order.
+    pub payloads: Vec<VariantPayloadDeclaration>,
+    /// The variant declaration's full source range.
+    pub span: SourceSpan,
+}
+
+/// One named positional payload in a tagged union variant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VariantPayloadDeclaration {
+    /// The payload's declaration name.
+    pub name: Name,
+    /// The payload's declared type.
+    pub ty: TypeReference,
+    /// The payload declaration's full source range.
     pub span: SourceSpan,
 }
 
@@ -139,6 +174,78 @@ impl FieldId {
     }
 }
 
+/// A stable source-order identifier for a nominal tagged union in one program.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UnionId(usize);
+
+impl UnionId {
+    /// Creates a union identifier from its zero-based source index.
+    #[must_use]
+    pub const fn new(index: usize) -> Self {
+        Self(index)
+    }
+
+    /// Returns the zero-based source index within the program.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.0
+    }
+}
+
+/// A stable variant identifier scoped to one nominal tagged union.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct VariantId {
+    union: UnionId,
+    index: usize,
+}
+
+impl VariantId {
+    /// Creates a variant identifier from its union and declaration-order index.
+    #[must_use]
+    pub const fn new(union: UnionId, index: usize) -> Self {
+        Self { union, index }
+    }
+
+    /// Returns the union that owns this variant.
+    #[must_use]
+    pub const fn union(self) -> UnionId {
+        self.union
+    }
+
+    /// Returns the zero-based declaration-order index within the union.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.index
+    }
+}
+
+/// A stable payload identifier scoped to one tagged union variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PayloadId {
+    variant: VariantId,
+    index: usize,
+}
+
+impl PayloadId {
+    /// Creates a payload identifier from its variant and positional index.
+    #[must_use]
+    pub const fn new(variant: VariantId, index: usize) -> Self {
+        Self { variant, index }
+    }
+
+    /// Returns the variant that owns this payload.
+    #[must_use]
+    pub const fn variant(self) -> VariantId {
+        self.variant
+    }
+
+    /// Returns the zero-based positional index within the variant.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.index
+    }
+}
+
 /// The closed set of Language Core value types.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
@@ -152,6 +259,8 @@ pub enum Type {
     Array(Box<Type>),
     /// A nominal immutable record value.
     Record(RecordId),
+    /// A nominal tagged union value.
+    Union(UnionId),
     /// The result type for expressions with no value.
     Unit,
 }
@@ -164,6 +273,7 @@ impl std::fmt::Display for Type {
             Self::String => formatter.write_str("String"),
             Self::Array(element) => write!(formatter, "{element}[]"),
             Self::Record(record) => write!(formatter, "record#{}", record.index()),
+            Self::Union(union) => write!(formatter, "union#{}", union.index()),
             Self::Unit => formatter.write_str("Unit"),
         }
     }
@@ -332,6 +442,15 @@ pub enum Expression {
         /// The full expression range.
         span: SourceSpan,
     },
+    /// An exhaustive tagged-union match expression.
+    Match {
+        /// The tagged union value inspected exactly once.
+        scrutinee: Box<Expression>,
+        /// Match arms in source order.
+        arms: Vec<MatchArm>,
+        /// The full match expression range.
+        span: SourceSpan,
+    },
     /// An indexed array access.
     Index {
         /// The array-valued expression.
@@ -400,6 +519,7 @@ impl Expression {
             | Self::String { span, .. }
             | Self::Array { span, .. }
             | Self::Record { span, .. }
+            | Self::Match { span, .. }
             | Self::Index { span, .. }
             | Self::Member { span, .. }
             | Self::Unary { span, .. }
@@ -420,6 +540,48 @@ pub struct RecordFieldInitializer {
     pub value: Expression,
     /// The initializer's full source range.
     pub span: SourceSpan,
+}
+
+/// One expression arm in a tagged-union match.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchArm {
+    /// The variant or default pattern selecting this arm.
+    pub pattern: MatchPattern,
+    /// The expression evaluated when the pattern is selected.
+    pub value: Expression,
+    /// The arm's full source range.
+    pub span: SourceSpan,
+}
+
+/// A non-nested v0.5 match pattern.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MatchPattern {
+    /// A qualified variant pattern with positional immutable bindings.
+    Variant {
+        /// The source-written union qualifier.
+        union: Name,
+        /// The source-written variant name.
+        variant: Name,
+        /// Positional payload bindings in source order.
+        bindings: Vec<Name>,
+        /// The full pattern range.
+        span: SourceSpan,
+    },
+    /// A catch-all pattern covering every remaining variant.
+    Default {
+        /// The `default` token range.
+        span: SourceSpan,
+    },
+}
+
+impl MatchPattern {
+    /// Returns the complete source range of this pattern.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        match self {
+            Self::Variant { span, .. } | Self::Default { span } => *span,
+        }
+    }
 }
 
 /// A prefix operator.

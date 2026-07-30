@@ -17,6 +17,7 @@ const STATEMENT_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::BreakKw,
     SyntaxKind::ContinueKw,
     SyntaxKind::ReturnKw,
+    SyntaxKind::MatchKw,
     SyntaxKind::TypeKw,
 ];
 const ARRAY_RECOVERY: &[SyntaxKind] = &[
@@ -34,6 +35,9 @@ const ARRAY_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::BreakKw,
     SyntaxKind::ContinueKw,
     SyntaxKind::ReturnKw,
+    SyntaxKind::MatchKw,
+    SyntaxKind::CaseKw,
+    SyntaxKind::DefaultKw,
     SyntaxKind::TypeKw,
 ];
 const RECORD_BODY_RECOVERY: &[SyntaxKind] = &[
@@ -57,7 +61,67 @@ const RECORD_EXPRESSION_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::BreakKw,
     SyntaxKind::ContinueKw,
     SyntaxKind::ReturnKw,
+    SyntaxKind::MatchKw,
+    SyntaxKind::CaseKw,
+    SyntaxKind::DefaultKw,
     SyntaxKind::TypeKw,
+];
+const UNION_DECLARATION_RECOVERY: &[SyntaxKind] = &[
+    SyntaxKind::Ident,
+    SyntaxKind::Pipe,
+    SyntaxKind::Semicolon,
+    SyntaxKind::FunctionKw,
+    SyntaxKind::TypeKw,
+];
+const VARIANT_PAYLOAD_RECOVERY: &[SyntaxKind] = &[
+    SyntaxKind::Ident,
+    SyntaxKind::Comma,
+    SyntaxKind::RParen,
+    SyntaxKind::Pipe,
+    SyntaxKind::Semicolon,
+    SyntaxKind::FunctionKw,
+    SyntaxKind::TypeKw,
+];
+const MATCH_BODY_RECOVERY: &[SyntaxKind] = &[
+    SyntaxKind::CaseKw,
+    SyntaxKind::DefaultKw,
+    SyntaxKind::RBrace,
+    SyntaxKind::Semicolon,
+    SyntaxKind::ConstKw,
+    SyntaxKind::LetKw,
+    SyntaxKind::IfKw,
+    SyntaxKind::WhileKw,
+    SyntaxKind::BreakKw,
+    SyntaxKind::ContinueKw,
+    SyntaxKind::ReturnKw,
+    SyntaxKind::MatchKw,
+    SyntaxKind::FunctionKw,
+    SyntaxKind::TypeKw,
+];
+const MATCH_ARM_RECOVERY: &[SyntaxKind] = &[
+    SyntaxKind::Semicolon,
+    SyntaxKind::CaseKw,
+    SyntaxKind::DefaultKw,
+    SyntaxKind::RBrace,
+    SyntaxKind::ConstKw,
+    SyntaxKind::LetKw,
+    SyntaxKind::IfKw,
+    SyntaxKind::WhileKw,
+    SyntaxKind::BreakKw,
+    SyntaxKind::ContinueKw,
+    SyntaxKind::ReturnKw,
+    SyntaxKind::MatchKw,
+    SyntaxKind::FunctionKw,
+    SyntaxKind::TypeKw,
+];
+const PATTERN_BINDING_RECOVERY: &[SyntaxKind] = &[
+    SyntaxKind::Ident,
+    SyntaxKind::Comma,
+    SyntaxKind::RParen,
+    SyntaxKind::FatArrow,
+    SyntaxKind::CaseKw,
+    SyntaxKind::DefaultKw,
+    SyntaxKind::RBrace,
 ];
 
 pub(super) fn parse_tokens(
@@ -108,7 +172,7 @@ impl Parser<'_> {
             } else if self.at(SyntaxKind::FunctionKw) {
                 self.parse_function_declaration();
             } else if self.at(SyntaxKind::TypeKw) {
-                self.parse_record_declaration();
+                self.parse_type_declaration();
             } else {
                 self.parse_unexpected_top_level_item();
             }
@@ -124,6 +188,14 @@ impl Parser<'_> {
                 })
         });
         (self.builder.finish(), self.diagnostics)
+    }
+
+    fn parse_type_declaration(&mut self) {
+        if self.type_declaration_is_union() {
+            self.parse_union_declaration();
+        } else {
+            self.parse_record_declaration();
+        }
     }
 
     fn parse_function_declaration(&mut self) {
@@ -201,6 +273,144 @@ impl Parser<'_> {
         ) {
             self.recover_record_body();
         }
+        self.builder.finish_node();
+    }
+
+    fn parse_union_declaration(&mut self) {
+        self.builder.start_node(SyntaxKind::UnionDeclaration.into());
+        self.expect(SyntaxKind::TypeKw, "expected `type`");
+        self.expect(SyntaxKind::Ident, "expected union name");
+        self.expect(SyntaxKind::Eq, "expected `=` after union name");
+        self.skip_trivia();
+
+        if self.at(SyntaxKind::Pipe) {
+            self.bump();
+            self.skip_trivia();
+        }
+
+        let mut parsed_variant = false;
+        loop {
+            self.skip_trivia();
+            match self.current() {
+                Some(SyntaxKind::Ident) => {
+                    self.parse_union_variant();
+                    parsed_variant = true;
+                }
+                Some(SyntaxKind::Semicolon | SyntaxKind::FunctionKw | SyntaxKind::TypeKw)
+                | None => {
+                    if !parsed_variant {
+                        self.error_at_current("expected union variant");
+                    }
+                    break;
+                }
+                Some(_) => {
+                    self.error_at_current("expected union variant");
+                    self.recover_to(UNION_DECLARATION_RECOVERY);
+                    if self.at(SyntaxKind::Ident) {
+                        continue;
+                    }
+                    if self.at(SyntaxKind::Pipe) {
+                        self.bump();
+                        continue;
+                    }
+                    break;
+                }
+            }
+
+            self.skip_trivia();
+            if self.at(SyntaxKind::Pipe) {
+                self.bump();
+                self.skip_trivia();
+                if matches!(
+                    self.current(),
+                    Some(SyntaxKind::Semicolon | SyntaxKind::FunctionKw | SyntaxKind::TypeKw)
+                        | None
+                ) {
+                    self.error_at_current("expected union variant after `|`");
+                    break;
+                }
+                continue;
+            }
+            if self.at(SyntaxKind::Ident) {
+                self.error_at_current("expected `|` between union variants");
+                continue;
+            }
+            break;
+        }
+
+        if !self.expect(
+            SyntaxKind::Semicolon,
+            "expected `;` after union declaration",
+        ) {
+            self.recover_to(TOP_LEVEL_RECOVERY);
+        }
+        self.builder.finish_node();
+    }
+
+    fn parse_union_variant(&mut self) {
+        self.builder.start_node(SyntaxKind::UnionVariant.into());
+        self.expect(SyntaxKind::Ident, "expected union variant name");
+        self.parse_variant_payload();
+        self.builder.finish_node();
+    }
+
+    fn parse_variant_payload(&mut self) {
+        self.builder.start_node(SyntaxKind::VariantPayload.into());
+        if !self.expect(SyntaxKind::LParen, "expected `(` after union variant name") {
+            self.builder.finish_node();
+            return;
+        }
+
+        self.skip_trivia();
+        if self.at(SyntaxKind::RParen) {
+            self.bump();
+            self.builder.finish_node();
+            return;
+        }
+
+        loop {
+            let field_position = self.position;
+            self.expect(SyntaxKind::Ident, "expected variant field name");
+            self.expect(SyntaxKind::Colon, "expected `:` after variant field name");
+            self.parse_type();
+
+            if self.position == field_position {
+                self.recover_to(VARIANT_PAYLOAD_RECOVERY);
+            }
+
+            self.skip_trivia();
+            if self.at(SyntaxKind::Comma) {
+                self.bump();
+                self.skip_trivia();
+                if self.at(SyntaxKind::RParen) {
+                    self.error_at_current("expected variant field after `,`");
+                    break;
+                }
+                continue;
+            }
+            if self.at(SyntaxKind::RParen) {
+                break;
+            }
+            if self.at(SyntaxKind::Ident) {
+                self.error_at_current("expected `,` or `)` after variant field");
+                continue;
+            }
+
+            self.error_at_current("expected `,` or `)` after variant field");
+            self.recover_to(VARIANT_PAYLOAD_RECOVERY);
+            if self.at(SyntaxKind::Comma) {
+                self.bump();
+                self.skip_trivia();
+                if self.at(SyntaxKind::RParen) {
+                    self.error_at_current("expected variant field after `,`");
+                    break;
+                }
+                continue;
+            }
+            break;
+        }
+
+        self.expect(SyntaxKind::RParen, "expected `)` after variant payload");
         self.builder.finish_node();
     }
 
@@ -646,6 +856,10 @@ impl Parser<'_> {
                 self.parse_record_expression();
                 true
             }
+            Some(SyntaxKind::MatchKw) => {
+                self.parse_match_expression();
+                true
+            }
             Some(SyntaxKind::LParen) => {
                 self.builder
                     .start_node(SyntaxKind::ParenthesizedExpression.into());
@@ -771,6 +985,150 @@ impl Parser<'_> {
         self.builder.finish_node();
     }
 
+    fn parse_match_expression(&mut self) {
+        self.builder.start_node(SyntaxKind::MatchExpression.into());
+        self.expect(SyntaxKind::MatchKw, "expected `match`");
+        let has_left_parenthesis = self.expect(SyntaxKind::LParen, "expected `(` after `match`");
+        if has_left_parenthesis || !self.at(SyntaxKind::LBrace) {
+            let _ = self.parse_expression();
+        } else {
+            self.error_at_current("expected match scrutinee");
+        }
+        self.expect(SyntaxKind::RParen, "expected `)` after match scrutinee");
+        if !self.expect(SyntaxKind::LBrace, "expected `{` before match arms") {
+            self.builder.finish_node();
+            return;
+        }
+
+        loop {
+            self.skip_trivia();
+            match self.current() {
+                Some(SyntaxKind::CaseKw | SyntaxKind::DefaultKw) => self.parse_match_arm(),
+                Some(SyntaxKind::RBrace) => {
+                    self.bump();
+                    break;
+                }
+                Some(
+                    SyntaxKind::Semicolon
+                    | SyntaxKind::ConstKw
+                    | SyntaxKind::LetKw
+                    | SyntaxKind::IfKw
+                    | SyntaxKind::WhileKw
+                    | SyntaxKind::BreakKw
+                    | SyntaxKind::ContinueKw
+                    | SyntaxKind::ReturnKw
+                    | SyntaxKind::MatchKw
+                    | SyntaxKind::FunctionKw
+                    | SyntaxKind::TypeKw,
+                ) => {
+                    self.error_at_current("expected `}` after match arms");
+                    break;
+                }
+                Some(_) => {
+                    self.error_at_current("expected `case`, `default`, or `}` in match");
+                    let position = self.position;
+                    self.recover_to(MATCH_BODY_RECOVERY);
+                    if self.position == position {
+                        self.bump();
+                    }
+                }
+                None => {
+                    self.error_at_current("expected `}` after match arms");
+                    break;
+                }
+            }
+        }
+
+        self.builder.finish_node();
+    }
+
+    fn parse_match_arm(&mut self) {
+        self.builder.start_node(SyntaxKind::MatchArm.into());
+        if self.at(SyntaxKind::CaseKw) {
+            self.bump();
+            self.parse_variant_pattern();
+        } else {
+            self.expect(SyntaxKind::DefaultKw, "expected `case` or `default`");
+        }
+
+        self.expect(SyntaxKind::FatArrow, "expected `=>` before match arm value");
+        if !self.parse_expression() {
+            self.recover_to(MATCH_ARM_RECOVERY);
+        }
+        if !self.expect(SyntaxKind::Semicolon, "expected `;` after match arm") {
+            self.recover_to(MATCH_ARM_RECOVERY);
+            if self.at(SyntaxKind::Semicolon) {
+                self.bump();
+            }
+        }
+        self.builder.finish_node();
+    }
+
+    fn parse_variant_pattern(&mut self) {
+        self.builder.start_node(SyntaxKind::VariantPattern.into());
+        self.expect(SyntaxKind::Ident, "expected union name in pattern");
+        self.expect(SyntaxKind::Dot, "expected `.` in variant pattern");
+        self.expect(SyntaxKind::Ident, "expected variant name in pattern");
+        self.parse_pattern_binding_list();
+        self.builder.finish_node();
+    }
+
+    fn parse_pattern_binding_list(&mut self) {
+        self.builder
+            .start_node(SyntaxKind::PatternBindingList.into());
+        if !self.expect(SyntaxKind::LParen, "expected `(` after variant pattern") {
+            self.builder.finish_node();
+            return;
+        }
+
+        self.skip_trivia();
+        if self.at(SyntaxKind::RParen) {
+            self.bump();
+            self.builder.finish_node();
+            return;
+        }
+
+        loop {
+            if !self.expect(SyntaxKind::Ident, "expected pattern binding") {
+                self.recover_to(PATTERN_BINDING_RECOVERY);
+            }
+
+            self.skip_trivia();
+            if self.at(SyntaxKind::Comma) {
+                self.bump();
+                self.skip_trivia();
+                if self.at(SyntaxKind::RParen) {
+                    self.error_at_current("expected pattern binding after `,`");
+                    break;
+                }
+                continue;
+            }
+            if self.at(SyntaxKind::RParen) {
+                break;
+            }
+            if self.at(SyntaxKind::Ident) {
+                self.error_at_current("expected `,` or `)` after pattern binding");
+                continue;
+            }
+
+            self.error_at_current("expected `,` or `)` after pattern binding");
+            self.recover_to(PATTERN_BINDING_RECOVERY);
+            if self.at(SyntaxKind::Comma) {
+                self.bump();
+                self.skip_trivia();
+                if self.at(SyntaxKind::RParen) {
+                    self.error_at_current("expected pattern binding after `,`");
+                    break;
+                }
+                continue;
+            }
+            break;
+        }
+
+        self.expect(SyntaxKind::RParen, "expected `)` after pattern bindings");
+        self.builder.finish_node();
+    }
+
     fn binary_precedence(&self) -> Option<u8> {
         match self.current() {
             Some(SyntaxKind::PipePipe) => Some(1),
@@ -872,6 +1230,21 @@ impl Parser<'_> {
     fn at_assignment_statement(&self) -> bool {
         self.nth_non_trivia(0) == Some(SyntaxKind::Ident)
             && self.nth_non_trivia(1) == Some(SyntaxKind::Eq)
+    }
+
+    fn type_declaration_is_union(&self) -> bool {
+        let mut offset = 1;
+        if self.nth_non_trivia(offset) == Some(SyntaxKind::Ident) {
+            offset += 1;
+        }
+        if self.nth_non_trivia(offset) == Some(SyntaxKind::Eq) {
+            offset += 1;
+        }
+
+        matches!(
+            self.nth_non_trivia(offset),
+            Some(SyntaxKind::Ident | SyntaxKind::Pipe)
+        )
     }
 
     fn nth_non_trivia(&self, offset: usize) -> Option<SyntaxKind> {

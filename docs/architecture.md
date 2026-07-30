@@ -1,18 +1,18 @@
 # Architecture
 
-Nexa is a small compiler workspace for Language Core v0.4. The workspace keeps
+Nexa is a small compiler workspace for Language Core v0.5. The workspace keeps
 each crate aligned to a compiler responsibility rather than a generic
 application layer.
 
 The active 1.0 target preserves these phase boundaries while extending the
-single-file driver into a source session and module graph. v0.4 is the current
-delivered architecture; v0.5 adds tagged unions and exhaustive matching while
-preserving the same phase boundaries.
+single-file driver into a source session and module graph. v0.5 is the current
+delivered architecture; v0.6 adds explicit multi-file modules while preserving
+the same phase boundaries.
 
-Language Core v0.4 introduced module-ready `RecordId` and `FieldId` identities
-without claiming a module loader. Typed HIR resolves record construction and
-field access before MIR, and the interpreter operates only on resolved record
-layouts.
+Language Core v0.5 extends module-ready `RecordId` and `FieldId` identities
+with `UnionId`, `VariantId`, and `PayloadId`. Typed HIR resolves construction,
+patterns, coverage, and payload bindings before MIR; the interpreter operates
+only on resolved layouts and dense tag dispatch.
 
 ## Crate Responsibilities
 
@@ -46,8 +46,8 @@ Rules:
 - Diagnostics are expressed in terms of stable source spans.
 - The compiler driver orchestrates parser, HIR, and MIR; the interpreter only
   consumes MIR.
-- String, array, record, member, and index types are resolved in typed HIR
-  rather than rediscovered by MIR lowering.
+- String, array, record, union, member, index, constructor, and match types are
+  resolved in typed HIR rather than rediscovered by MIR lowering.
 - Array storage may be shared across immutable values, but storage identity is
   never exposed as language behavior.
 - Language Core uses TypeScript-shaped syntax, not TypeScript or JavaScript

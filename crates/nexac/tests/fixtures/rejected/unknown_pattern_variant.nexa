@@ -1,0 +1,8 @@
+type Choice = | None() | Some(value: Int);
+function read(choice: Choice): Int {
+  return match (choice) {
+    case Choice.Missing(value) => value;
+    default => 0;
+  };
+}
+function main(): Unit {}

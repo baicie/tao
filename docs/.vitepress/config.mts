@@ -67,8 +67,10 @@ export default defineConfig({
           text: "Language Design",
           collapsed: false,
           items: [
+            { text: "Language Core v0.5 (Delivered)", link: "/spec/language-core-v0.5" },
+            { text: "v0.6 Milestone (Active)", link: "/project/roadmap/language-1.0" },
+            { text: "v0.5 Roadmap (Delivered)", link: "/project/roadmap/language-core-v0.5" },
             { text: "Language Core v0.4 (Delivered)", link: "/spec/language-core-v0.4" },
-            { text: "v0.5 Milestone (Active)", link: "/project/roadmap/language-1.0" },
             { text: "v0.4 Roadmap (Delivered)", link: "/project/roadmap/language-core-v0.4" },
             { text: "Language 1.0 Target", link: "/spec/language-1.0" },
             { text: "1.0 Roadmap", link: "/project/roadmap/language-1.0" },

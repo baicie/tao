@@ -1,0 +1,8 @@
+type Flag = | Off() | On();
+function read(flag: Flag): Int {
+  return match (flag) {
+    case Flag.Off() => 0;
+    case Flag.Off() => 1;
+    default => 2;
+  };
+}
