@@ -89,3 +89,72 @@ fn run_passes_an_empty_array_to_an_argument_taking_main() {
     assert!(result.is_ok(), "diagnostics: {:?}", result.diagnostics());
     assert_eq!(result.output(), ["0"]);
 }
+
+#[test]
+fn check_returns_typed_hir_for_nominal_records() {
+    let result = check(
+        FileId::new(0),
+        r#"type User = { name: String; scores: Int[]; };
+function main(): Unit {
+  const user: User = { scores: [20, 22], name: "Ada" };
+  print(user.name);
+}"#,
+    );
+
+    assert!(result.is_ok(), "diagnostics: {:?}", result.diagnostics());
+}
+
+#[test]
+fn check_reports_missing_and_recursive_record_diagnostics() {
+    let result = check(
+        FileId::new(0),
+        r#"type Node = { children: Node[]; };
+type User = { name: String; age: Int; };
+function main(): Unit { const user: User = { name: "Ada" }; }"#,
+    );
+    let codes = result
+        .diagnostics()
+        .iter()
+        .map(|diagnostic| diagnostic.code().as_str())
+        .collect::<Vec<_>>();
+
+    assert!(!result.is_ok());
+    assert!(codes.contains(&"E2006"), "codes: {codes:?}");
+    assert!(codes.contains(&"E3005"), "codes: {codes:?}");
+}
+
+#[test]
+fn run_executes_records_with_source_order_initializers_and_declared_layout() {
+    let result = run(
+        FileId::new(0),
+        r#"type Pair = { first: Int; second: Int; };
+function emit(value: Int): Int { print(value); return value; }
+function main(): Unit {
+  const pair: Pair = { second: emit(2), first: emit(1) };
+  print(pair.first);
+  print(pair.second);
+}"#,
+    );
+
+    assert!(result.is_ok(), "diagnostics: {:?}", result.diagnostics());
+    assert_eq!(result.output(), ["2", "1", "1", "2"]);
+}
+
+#[test]
+fn run_preserves_output_before_a_record_initializer_failure() {
+    let result = run(
+        FileId::new(0),
+        r#"type Pair = { first: Int; second: Int; };
+function fail(): Int { print(7); return [1][2]; }
+function main(): Unit {
+  const pair: Pair = { first: fail(), second: 2 };
+  print(pair.second);
+}"#,
+    );
+
+    assert_eq!(result.output(), ["7"]);
+    assert_eq!(
+        result.runtime_error().map(|error| error.message()),
+        Some("array index 2 out of bounds for length 1")
+    );
+}

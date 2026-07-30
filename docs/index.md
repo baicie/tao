@@ -3,7 +3,7 @@ layout: home
 
 hero:
   name: "Nexa"
-  text: "Language Core v0.3"
+  text: "Language Core v0.4 Delivered"
   tagline: "A TS-shaped language with independent static semantics and a MIR interpreter."
   actions:
     - theme: brand
@@ -21,7 +21,9 @@ features:
   - title: Checked Execution
     details: nexac parses, type-checks, lowers to CFG MIR, and runs a single source file.
   - title: Immutable Data
-    details: UTF-8 strings, homogeneous arrays, and command-line arguments have explicit native semantics.
+    details: UTF-8 strings, homogeneous arrays, nominal records, and command-line arguments have explicit native semantics.
+  - title: Current Milestone
+    details: Language Core v0.4 delivers exact record construction and immutable field access; v0.5 targets tagged unions and exhaustive matching.
   - title: Native Semantics
     details: Familiar TypeScript-shaped syntax does not imply JavaScript runtime compatibility.
   - title: Rust Tooling

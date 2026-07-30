@@ -168,6 +168,48 @@ fn nexac_check_rejects_an_invalid_main_argument_type() -> Result<(), Box<dyn std
 }
 
 #[test]
+fn nexac_check_accepts_nominal_records() -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("check")
+        .arg(fixture("accepted/named_records.nexa"))
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "ok\n");
+
+    Ok(())
+}
+
+#[test]
+fn nexac_check_rejects_a_missing_record_field() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/missing_record_field.nexa", "E2006", ":3:22:")
+}
+
+#[test]
+fn nexac_check_rejects_recursive_records() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/recursive_record.nexa", "E3005", ":1:25:")
+}
+
+#[test]
+fn nexac_check_rejects_an_unknown_record_field() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/unknown_record_field.nexa", "E2005", ":3:37:")
+}
+
+#[test]
+fn nexac_check_rejects_record_field_assignment() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/record_field_assignment.nexa", "E1001", ":4:13:")
+}
+
+#[test]
+fn nexac_check_rejects_type_as_a_v0_3_identifier() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/reserved_type_identifier.nexa", "E1001", ":1:10:")
+}
+
+#[test]
 fn nexac_run_executes_main_and_prints_its_output() -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
         .arg("run")
@@ -217,6 +259,23 @@ fn nexac_run_executes_immutable_data_with_cli_arguments() -> Result<(), Box<dyn 
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(String::from_utf8_lossy(&output.stdout), "Nexa\n42\n");
+
+    Ok(())
+}
+
+#[test]
+fn nexac_run_executes_nominal_records() -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("run")
+        .arg(fixture("accepted/named_records.nexa"))
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "Ada\n42\n");
 
     Ok(())
 }

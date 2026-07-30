@@ -1,12 +1,12 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use nexa_diagnostics::{Diagnostic, DiagnosticCode, Label};
 use nexa_span::SourceSpan;
 
 use crate::{
-    AssignmentStatement, BinaryOperator, Block, ConstDeclaration, Expression, Function,
-    IfStatement, LetDeclaration, Name, Program, ReturnStatement, Statement, Type, TypeReference,
-    UnaryOperator, WhileStatement,
+    AssignmentStatement, BinaryOperator, Block, ConstDeclaration, Expression, FieldId, Function,
+    IfStatement, LetDeclaration, Name, Program, RecordFieldInitializer, RecordId, ReturnStatement,
+    Statement, Type, TypeReference, TypeReferenceKind, UnaryOperator, WhileStatement,
 };
 
 const UNDEFINED_NAME: DiagnosticCode = DiagnosticCode::new("E2001");
@@ -14,10 +14,12 @@ const DUPLICATE_NAME: DiagnosticCode = DiagnosticCode::new("E2002");
 const CALL_ARITY: DiagnosticCode = DiagnosticCode::new("E2003");
 const IMMUTABLE_ASSIGNMENT: DiagnosticCode = DiagnosticCode::new("E2004");
 const UNKNOWN_MEMBER: DiagnosticCode = DiagnosticCode::new("E2005");
+const MISSING_FIELD: DiagnosticCode = DiagnosticCode::new("E2006");
 const TYPE_MISMATCH: DiagnosticCode = DiagnosticCode::new("E3001");
 const NON_BOOLEAN_CONDITION: DiagnosticCode = DiagnosticCode::new("E3002");
 const INVALID_RETURN: DiagnosticCode = DiagnosticCode::new("E3003");
 const INVALID_LOOP_CONTROL: DiagnosticCode = DiagnosticCode::new("E3004");
+const RECURSIVE_TYPE: DiagnosticCode = DiagnosticCode::new("E3005");
 
 /// The semantic result of type checking a lowered program.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +54,7 @@ pub struct TypedProgram {
     program: Program,
     expression_types: HashMap<SourceSpan, Type>,
     name_resolutions: HashMap<SourceSpan, NameResolution>,
+    records: Vec<RecordFacts>,
     functions: Vec<FunctionFacts>,
 }
 
@@ -90,6 +93,18 @@ impl TypedProgram {
     #[must_use]
     pub fn function_facts(&self, function: FunctionId) -> Option<&FunctionFacts> {
         self.functions.get(function.index())
+    }
+
+    /// Returns resolved layout facts for a nominal record.
+    #[must_use]
+    pub fn record_facts(&self, record: RecordId) -> Option<&RecordFacts> {
+        self.records.get(record.index())
+    }
+
+    /// Returns all nominal records in stable source order.
+    #[must_use]
+    pub fn records(&self) -> &[RecordFacts] {
+        &self.records
     }
 }
 
@@ -145,6 +160,10 @@ pub enum NameResolution {
     Local(LocalId),
     /// A source function.
     Function(FunctionId),
+    /// A nominal record declaration or named type reference.
+    Record(RecordId),
+    /// A declared, initialized, or projected record field.
+    Field(FieldId),
     /// A compiler-provided operation.
     Builtin(Builtin),
 }
@@ -153,6 +172,8 @@ pub enum NameResolution {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionFacts {
     parameters: Vec<LocalId>,
+    parameter_types: Vec<Type>,
+    return_type: Type,
     local_count: usize,
 }
 
@@ -163,6 +184,18 @@ impl FunctionFacts {
         &self.parameters
     }
 
+    /// Returns resolved parameter types in declaration order.
+    #[must_use]
+    pub fn parameter_types(&self) -> &[Type] {
+        &self.parameter_types
+    }
+
+    /// Returns the resolved function result type.
+    #[must_use]
+    pub const fn return_type(&self) -> &Type {
+        &self.return_type
+    }
+
     /// Returns the number of parameter and local slots used by the function.
     #[must_use]
     pub const fn local_count(&self) -> usize {
@@ -170,10 +203,83 @@ impl FunctionFacts {
     }
 }
 
+/// Resolved semantic facts for one nominal record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordFacts {
+    id: RecordId,
+    name: String,
+    fields: Vec<RecordFieldFacts>,
+    name_span: SourceSpan,
+    span: SourceSpan,
+}
+
+impl RecordFacts {
+    /// Returns this record's stable identifier.
+    #[must_use]
+    pub const fn id(&self) -> RecordId {
+        self.id
+    }
+
+    /// Returns the declared record name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns fields in declaration order.
+    #[must_use]
+    pub fn fields(&self) -> &[RecordFieldFacts] {
+        &self.fields
+    }
+
+    /// Returns the record declaration's source range.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
+
+/// Resolved semantic facts for one immutable record field.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordFieldFacts {
+    id: FieldId,
+    name: String,
+    ty: Type,
+    span: SourceSpan,
+    type_span: SourceSpan,
+}
+
+impl RecordFieldFacts {
+    /// Returns this field's stable identifier.
+    #[must_use]
+    pub const fn id(&self) -> FieldId {
+        self.id
+    }
+
+    /// Returns the declared field name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the resolved field type.
+    #[must_use]
+    pub const fn ty(&self) -> &Type {
+        &self.ty
+    }
+
+    /// Returns the field declaration's source range.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
+
 #[derive(Default)]
 struct FactBuilder {
     expression_types: HashMap<SourceSpan, Type>,
     name_resolutions: HashMap<SourceSpan, NameResolution>,
+    records: Vec<RecordFacts>,
     functions: Vec<FunctionFacts>,
 }
 
@@ -192,13 +298,26 @@ impl FactBuilder {
 pub fn type_check(program: &Program) -> Analysis {
     let mut diagnostics = Vec::new();
     let mut facts = FactBuilder::default();
-    let functions = collect_function_signatures(program, &mut diagnostics, &mut facts);
+    let record_symbols = collect_record_names(program, &mut diagnostics, &mut facts);
+    let records = collect_record_facts(program, &record_symbols, &mut diagnostics, &mut facts);
+    reject_recursive_records(&records, &mut diagnostics);
+    let functions =
+        collect_function_signatures(program, &record_symbols, &mut diagnostics, &mut facts);
 
-    for function in &program.functions {
-        check_function(function, &functions, &mut diagnostics, &mut facts);
+    for (index, function) in program.functions.iter().enumerate() {
+        check_function(
+            function,
+            index,
+            &functions,
+            &record_symbols,
+            &records,
+            &mut diagnostics,
+            &mut facts,
+        );
     }
 
     diagnostics.sort_by_key(diagnostic_position);
+    facts.records = records;
     let typed = diagnostics
         .iter()
         .all(|diagnostic| diagnostic.severity() != nexa_diagnostics::Severity::Error)
@@ -206,35 +325,225 @@ pub fn type_check(program: &Program) -> Analysis {
             program: program.clone(),
             expression_types: facts.expression_types,
             name_resolutions: facts.name_resolutions,
+            records: facts.records,
             functions: facts.functions,
         });
 
     Analysis { typed, diagnostics }
 }
 
+fn collect_record_names(
+    program: &Program,
+    diagnostics: &mut Vec<Diagnostic>,
+    facts: &mut FactBuilder,
+) -> HashMap<String, RecordId> {
+    let mut records = HashMap::<String, RecordId>::new();
+
+    for (index, record) in program.records.iter().enumerate() {
+        let id = RecordId::new(index);
+        facts.record_name(record.name.span, NameResolution::Record(id));
+
+        if let Some(previous) = records.get(&record.name.text).copied() {
+            let previous_span = program.records[previous.index()].name.span;
+            diagnostics.push(
+                Diagnostic::error(
+                    DUPLICATE_NAME,
+                    format!("duplicate record `{}`", record.name.text),
+                )
+                .with_label(Label::primary(record.name.span, "duplicate record"))
+                .with_label(Label::secondary(previous_span, "first declared here")),
+            );
+        } else {
+            records.insert(record.name.text.clone(), id);
+        }
+    }
+
+    records
+}
+
+fn collect_record_facts(
+    program: &Program,
+    symbols: &HashMap<String, RecordId>,
+    diagnostics: &mut Vec<Diagnostic>,
+    facts: &mut FactBuilder,
+) -> Vec<RecordFacts> {
+    program
+        .records
+        .iter()
+        .enumerate()
+        .map(|(record_index, record)| {
+            let record_id = RecordId::new(record_index);
+            let mut declared_fields = HashMap::<String, SourceSpan>::new();
+            let mut fields = Vec::new();
+
+            for (field_index, field) in record.fields.iter().enumerate() {
+                let field_id = FieldId::new(record_id, field_index);
+                facts.record_name(field.name.span, NameResolution::Field(field_id));
+                if let Some(previous) = declared_fields.get(&field.name.text).copied() {
+                    diagnostics.push(
+                        Diagnostic::error(
+                            DUPLICATE_NAME,
+                            format!("duplicate field `{}`", field.name.text),
+                        )
+                        .with_label(Label::primary(field.name.span, "duplicate field"))
+                        .with_label(Label::secondary(previous, "first declared here")),
+                    );
+                    continue;
+                }
+                declared_fields.insert(field.name.text.clone(), field.name.span);
+
+                let Some(ty) = resolve_type(&field.ty, symbols, diagnostics, facts) else {
+                    continue;
+                };
+                if ty == Type::Unit {
+                    diagnostics.push(
+                        Diagnostic::error(TYPE_MISMATCH, "record fields cannot have type `Unit`")
+                            .with_label(Label::primary(field.ty.span, "invalid record field type")),
+                    );
+                }
+
+                fields.push(RecordFieldFacts {
+                    id: field_id,
+                    name: field.name.text.clone(),
+                    ty,
+                    span: field.span,
+                    type_span: field.ty.span,
+                });
+            }
+
+            RecordFacts {
+                id: record_id,
+                name: record.name.text.clone(),
+                fields,
+                name_span: record.name.span,
+                span: record.span,
+            }
+        })
+        .collect()
+}
+
+fn resolve_type(
+    reference: &TypeReference,
+    records: &HashMap<String, RecordId>,
+    diagnostics: &mut Vec<Diagnostic>,
+    facts: &mut FactBuilder,
+) -> Option<Type> {
+    let ty = resolve_type_kind(reference, records, diagnostics, facts)?;
+    if contains_invalid_array_element(&ty) {
+        diagnostics.push(
+            Diagnostic::error(TYPE_MISMATCH, "array elements cannot have type `Unit`")
+                .with_label(Label::primary(reference.span, "invalid array element type")),
+        );
+    }
+    Some(ty)
+}
+
+fn resolve_type_kind(
+    reference: &TypeReference,
+    records: &HashMap<String, RecordId>,
+    diagnostics: &mut Vec<Diagnostic>,
+    facts: &mut FactBuilder,
+) -> Option<Type> {
+    match &reference.kind {
+        TypeReferenceKind::Int => Some(Type::Int),
+        TypeReferenceKind::Bool => Some(Type::Bool),
+        TypeReferenceKind::String => Some(Type::String),
+        TypeReferenceKind::Unit => Some(Type::Unit),
+        TypeReferenceKind::Named(name) => match records.get(&name.text).copied() {
+            Some(record) => {
+                facts.record_name(name.span, NameResolution::Record(record));
+                Some(Type::Record(record))
+            }
+            None => {
+                diagnostics.push(
+                    Diagnostic::error(UNDEFINED_NAME, format!("undefined type `{}`", name.text))
+                        .with_label(Label::primary(name.span, "not found in this program")),
+                );
+                None
+            }
+        },
+        TypeReferenceKind::Array(element) => {
+            resolve_type_kind(element, records, diagnostics, facts)
+                .map(|element| Type::Array(Box::new(element)))
+        }
+    }
+}
+
+fn reject_recursive_records(records: &[RecordFacts], diagnostics: &mut Vec<Diagnostic>) {
+    for record in records {
+        for field in &record.fields {
+            if type_reaches_record(&field.ty, record.id, records, &mut HashSet::new()) {
+                diagnostics.push(
+                    Diagnostic::error(
+                        RECURSIVE_TYPE,
+                        format!(
+                            "record `{}` contains itself through field `{}`",
+                            record.name, field.name
+                        ),
+                    )
+                    .with_label(Label::primary(field.type_span, "recursive record field"))
+                    .with_label(Label::secondary(record.name_span, "record declared here")),
+                );
+                break;
+            }
+        }
+    }
+}
+
+fn type_reaches_record(
+    ty: &Type,
+    target: RecordId,
+    records: &[RecordFacts],
+    visited: &mut HashSet<RecordId>,
+) -> bool {
+    match ty {
+        Type::Record(record) if *record == target => true,
+        Type::Record(record) => {
+            if !visited.insert(*record) {
+                return false;
+            }
+            records.get(record.index()).is_some_and(|record| {
+                record
+                    .fields
+                    .iter()
+                    .any(|field| type_reaches_record(&field.ty, target, records, visited))
+            })
+        }
+        Type::Array(element) => type_reaches_record(element, target, records, visited),
+        Type::Int | Type::Bool | Type::String | Type::Unit => false,
+    }
+}
+
 #[derive(Debug, Clone)]
 struct FunctionSignature {
-    parameters: Vec<Type>,
-    return_type: Type,
+    parameters: Vec<Option<Type>>,
+    return_type: Option<Type>,
     declaration: Option<SourceSpan>,
     resolution: NameResolution,
 }
 
+struct FunctionCatalog {
+    by_name: HashMap<String, FunctionSignature>,
+    by_id: Vec<FunctionSignature>,
+}
+
 fn collect_function_signatures(
     program: &Program,
+    records: &HashMap<String, RecordId>,
     diagnostics: &mut Vec<Diagnostic>,
     facts: &mut FactBuilder,
-) -> HashMap<String, FunctionSignature> {
+) -> FunctionCatalog {
     let mut functions = HashMap::new();
     functions.insert(
         "print".to_owned(),
         FunctionSignature {
-            parameters: vec![Type::Int],
-            return_type: Type::Unit,
+            parameters: vec![Some(Type::Int)],
+            return_type: Some(Type::Unit),
             declaration: None,
             resolution: NameResolution::Builtin(Builtin::Print),
         },
     );
+    let mut by_id = Vec::with_capacity(program.functions.len());
 
     for (index, function) in program.functions.iter().enumerate() {
         let function_id = FunctionId::new(index);
@@ -243,9 +552,9 @@ fn collect_function_signatures(
             parameters: function
                 .parameters
                 .iter()
-                .map(|parameter| parameter.ty.kind.clone())
+                .map(|parameter| resolve_type(&parameter.ty, records, diagnostics, facts))
                 .collect(),
-            return_type: function.return_type.kind.clone(),
+            return_type: resolve_type(&function.return_type, records, diagnostics, facts),
             declaration: Some(function.name.span),
             resolution: NameResolution::Function(function_id),
         };
@@ -262,59 +571,80 @@ fn collect_function_signatures(
             }
             diagnostics.push(diagnostic);
         } else {
-            functions.insert(function.name.text.clone(), signature);
+            functions.insert(function.name.text.clone(), signature.clone());
         }
+        by_id.push(signature);
     }
 
-    functions
+    FunctionCatalog {
+        by_name: functions,
+        by_id,
+    }
 }
 
 fn check_function(
     function: &Function,
-    functions: &HashMap<String, FunctionSignature>,
+    function_index: usize,
+    functions: &FunctionCatalog,
+    record_symbols: &HashMap<String, RecordId>,
+    records: &[RecordFacts],
     diagnostics: &mut Vec<Diagnostic>,
     facts: &mut FactBuilder,
 ) {
+    let signature = &functions.by_id[function_index];
     let mut checker = FunctionChecker {
-        functions,
+        functions: &functions.by_name,
+        record_symbols,
+        records,
         diagnostics,
         facts,
         scopes: vec![HashMap::new()],
-        return_type: function.return_type.kind.clone(),
+        return_type: signature.return_type.clone(),
+        parameter_types: signature
+            .parameters
+            .iter()
+            .filter_map(Clone::clone)
+            .collect(),
         loop_depth: 0,
         parameters: Vec::new(),
         next_local: 0,
     };
 
-    for parameter in &function.parameters {
-        if let Some(local) = checker.bind(&parameter.name, Some(parameter.ty.kind.clone()), false) {
+    for (parameter, ty) in function.parameters.iter().zip(&signature.parameters) {
+        if let Some(local) = checker.bind(&parameter.name, ty.clone(), false) {
             checker.parameters.push(local);
         }
-        checker.check_value_type(&parameter.ty);
     }
-    checker.check_value_type(&function.return_type);
 
     let always_returns = checker.check_block(&function.body, false);
-    if function.return_type.kind != Type::Unit && !always_returns {
+    if signature
+        .return_type
+        .as_ref()
+        .is_some_and(|ty| ty != &Type::Unit)
+        && !always_returns
+    {
+        let return_type = format_type(
+            signature.return_type.as_ref().unwrap_or(&Type::Unit),
+            records,
+        );
         checker.error(
             INVALID_RETURN,
             function.return_type.span,
             format!(
                 "function `{}` may not return `{}` on every path",
-                function.name.text, function.return_type.kind
+                function.name.text, return_type
             ),
             "return required on every path",
         );
     }
 
-    let valid_main_parameters = function.parameters.is_empty()
-        || matches!(
-            function.parameters.as_slice(),
-            [parameter]
-                if parameter.ty.kind == Type::Array(Box::new(Type::String))
-        );
+    let known_signature =
+        signature.return_type.is_some() && signature.parameters.iter().all(Option::is_some);
+    let valid_main_parameters = signature.parameters.is_empty()
+        || matches!(signature.parameters.as_slice(), [Some(Type::Array(element))] if element.as_ref() == &Type::String);
     if function.name.text == "main"
-        && (!valid_main_parameters || function.return_type.kind != Type::Unit)
+        && known_signature
+        && (!valid_main_parameters || signature.return_type != Some(Type::Unit))
     {
         checker.error(
             INVALID_RETURN,
@@ -329,10 +659,13 @@ fn check_function(
 
 struct FunctionChecker<'a> {
     functions: &'a HashMap<String, FunctionSignature>,
+    record_symbols: &'a HashMap<String, RecordId>,
+    records: &'a [RecordFacts],
     diagnostics: &'a mut Vec<Diagnostic>,
     facts: &'a mut FactBuilder,
     scopes: Vec<HashMap<String, Binding>>,
-    return_type: Type,
+    return_type: Option<Type>,
+    parameter_types: Vec<Type>,
     loop_depth: usize,
     parameters: Vec<LocalId>,
     next_local: usize,
@@ -427,10 +760,14 @@ impl FunctionChecker<'_> {
         initializer: &Expression,
         mutable: bool,
     ) {
-        let declared_type = annotation.map(|annotation| annotation.kind.clone());
-        if let Some(annotation) = annotation {
-            self.check_value_type(annotation);
-        }
+        let declared_type = annotation.and_then(|annotation| {
+            resolve_type(
+                annotation,
+                self.record_symbols,
+                self.diagnostics,
+                self.facts,
+            )
+        });
         let initializer_type =
             self.check_expression_with_expected(initializer, declared_type.as_ref());
 
@@ -532,7 +869,12 @@ impl FunctionChecker<'_> {
     }
 
     fn check_return(&mut self, statement: &ReturnStatement) {
-        let return_type = self.return_type.clone();
+        let Some(return_type) = self.return_type.clone() else {
+            if let Some(value) = &statement.value {
+                let _ = self.check_expression(value);
+            }
+            return;
+        };
         match (&return_type, statement.value.as_ref()) {
             (Type::Unit, None) => {}
             (Type::Unit, Some(value)) => {
@@ -547,7 +889,10 @@ impl FunctionChecker<'_> {
             (expected, None) => self.error(
                 INVALID_RETURN,
                 statement.span,
-                format!("expected a `{expected}` return value"),
+                format!(
+                    "expected a `{}` return value",
+                    format_type(expected, self.records)
+                ),
                 "missing return value",
             ),
             (expected, Some(value)) => {
@@ -556,7 +901,11 @@ impl FunctionChecker<'_> {
                         self.error(
                             INVALID_RETURN,
                             value.span(),
-                            format!("expected return type `{expected}`, found `{actual}`"),
+                            format!(
+                                "expected return type `{}`, found `{}`",
+                                format_type(expected, self.records),
+                                format_type(&actual, self.records)
+                            ),
                             "invalid return value",
                         );
                     }
@@ -579,6 +928,7 @@ impl FunctionChecker<'_> {
             Expression::Boolean { .. } => Some(Type::Bool),
             Expression::String { .. } => Some(Type::String),
             Expression::Array { elements, span } => self.check_array(elements, *span, expected),
+            Expression::Record { fields, span } => self.check_record(fields, *span, expected),
             Expression::Index {
                 collection,
                 index,
@@ -684,6 +1034,113 @@ impl FunctionChecker<'_> {
         element_type.map(|element| Type::Array(Box::new(element)))
     }
 
+    fn check_record(
+        &mut self,
+        fields: &[RecordFieldInitializer],
+        span: SourceSpan,
+        expected: Option<&Type>,
+    ) -> Option<Type> {
+        let Some(Type::Record(record_id)) = expected else {
+            for field in fields {
+                let _ = self.check_expression(&field.value);
+            }
+            let message = expected.map_or_else(
+                || "cannot infer the type of a record literal".to_owned(),
+                |ty| {
+                    format!(
+                        "record literal requires a nominal record type, found `{}`",
+                        format_type(ty, self.records)
+                    )
+                },
+            );
+            self.error(
+                TYPE_MISMATCH,
+                span,
+                message,
+                "add an exact record type context",
+            );
+            return None;
+        };
+        let Some(record) = self.records.get(record_id.index()).cloned() else {
+            self.error(
+                TYPE_MISMATCH,
+                span,
+                "record type has no resolved layout",
+                "invalid record type",
+            );
+            return None;
+        };
+
+        let mut seen = HashMap::<String, SourceSpan>::new();
+        let mut initialized = HashSet::new();
+        for initializer in fields {
+            let duplicate = if let Some(previous) = seen.get(&initializer.name.text).copied() {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        DUPLICATE_NAME,
+                        format!("duplicate field `{}`", initializer.name.text),
+                    )
+                    .with_label(Label::primary(
+                        initializer.name.span,
+                        "duplicate field initializer",
+                    ))
+                    .with_label(Label::secondary(previous, "first initialized here")),
+                );
+                true
+            } else {
+                seen.insert(initializer.name.text.clone(), initializer.name.span);
+                false
+            };
+            let Some(field) = record
+                .fields
+                .iter()
+                .find(|field| field.name == initializer.name.text)
+            else {
+                let _ = self.check_expression(&initializer.value);
+                self.error(
+                    UNKNOWN_MEMBER,
+                    initializer.name.span,
+                    format!(
+                        "record `{}` has no field `{}`",
+                        record.name, initializer.name.text
+                    ),
+                    "unknown record field",
+                );
+                continue;
+            };
+
+            self.facts
+                .record_name(initializer.name.span, NameResolution::Field(field.id));
+            let actual = self.check_expression_with_expected(&initializer.value, Some(&field.ty));
+            if let Some(actual) = actual {
+                if actual != field.ty {
+                    self.type_mismatch(initializer.value.span(), &field.ty, &actual);
+                }
+            }
+            if !duplicate {
+                initialized.insert(field.id);
+            }
+        }
+
+        for field in &record.fields {
+            if !initialized.contains(&field.id) {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        MISSING_FIELD,
+                        format!(
+                            "record literal for `{}` is missing field `{}`",
+                            record.name, field.name
+                        ),
+                    )
+                    .with_label(Label::primary(span, "missing record field"))
+                    .with_label(Label::secondary(field.span, "field declared here")),
+                );
+            }
+        }
+
+        Some(Type::Record(*record_id))
+    }
+
     fn check_index(
         &mut self,
         collection: &Expression,
@@ -704,7 +1161,10 @@ impl FunctionChecker<'_> {
                 self.error(
                     TYPE_MISMATCH,
                     span,
-                    format!("cannot index a `{actual}` value"),
+                    format!(
+                        "cannot index a `{}` value",
+                        format_type(&actual, self.records)
+                    ),
                     "expected an array value",
                 );
                 None
@@ -720,27 +1180,49 @@ impl FunctionChecker<'_> {
                     .record_name(member.span, NameResolution::Builtin(Builtin::ArrayLength));
                 Some(Type::Int)
             }
+            Some(Type::Record(record_id)) => {
+                let Some(record) = self.records.get(record_id.index()) else {
+                    self.error(
+                        UNKNOWN_MEMBER,
+                        member.span,
+                        "record type has no resolved layout",
+                        "invalid record type",
+                    );
+                    return None;
+                };
+                let Some(field) = record
+                    .fields
+                    .iter()
+                    .find(|field| field.name == member.text)
+                    .cloned()
+                else {
+                    let record_name = record.name.clone();
+                    self.error(
+                        UNKNOWN_MEMBER,
+                        member.span,
+                        format!("record `{record_name}` has no field `{}`", member.text),
+                        "unknown record field",
+                    );
+                    return None;
+                };
+                self.facts
+                    .record_name(member.span, NameResolution::Field(field.id));
+                Some(field.ty)
+            }
             Some(actual) => {
                 self.error(
                     UNKNOWN_MEMBER,
                     member.span,
-                    format!("type `{actual}` has no member `{}`", member.text),
+                    format!(
+                        "type `{}` has no member `{}`",
+                        format_type(&actual, self.records),
+                        member.text
+                    ),
                     "unknown member",
                 );
                 None
             }
             None => None,
-        }
-    }
-
-    fn check_value_type(&mut self, reference: &TypeReference) {
-        if contains_invalid_array_element(&reference.kind) {
-            self.error(
-                TYPE_MISMATCH,
-                reference.span,
-                "array elements cannot have type `Unit`",
-                "invalid array element type",
-            );
         }
     }
 
@@ -783,19 +1265,29 @@ impl FunctionChecker<'_> {
                 self.require_binary_bools(left, right, Some(left_type), Some(right_type))
             }
             BinaryOperator::Equal => {
-                if matches!(left_type, Type::Array(_)) && left_type == right_type {
+                if matches!(left_type, Type::Array(_) | Type::Record(_)) && left_type == right_type
+                {
+                    let kind = match left_type {
+                        Type::Array(_) => "array",
+                        Type::Record(_) => "record",
+                        Type::Int | Type::Bool | Type::String | Type::Unit => "value",
+                    };
                     self.error(
                         TYPE_MISMATCH,
                         right.span(),
-                        "array equality is not defined",
-                        "arrays cannot be compared with `===`",
+                        format!("{kind} equality is not defined"),
+                        format!("{kind}s cannot be compared with `===`"),
                     );
                     None
                 } else if left_type != right_type {
                     self.error(
                         TYPE_MISMATCH,
                         right.span(),
-                        format!("cannot compare `{left_type}` with `{right_type}` using `===`"),
+                        format!(
+                            "cannot compare `{}` with `{}` using `===`",
+                            format_type(&left_type, self.records),
+                            format_type(&right_type, self.records)
+                        ),
                         "operands must have the same type",
                     );
                     None
@@ -882,10 +1374,10 @@ impl FunctionChecker<'_> {
             for argument in arguments {
                 let _ = self.check_expression(argument);
             }
-            let binding_description = binding
-                .ty
-                .as_ref()
-                .map_or_else(|| "value".to_owned(), |ty| format!("`{ty}` value"));
+            let binding_description = binding.ty.as_ref().map_or_else(
+                || "value".to_owned(),
+                |ty| format!("`{}` value", format_type(ty, self.records)),
+            );
             self.error(
                 TYPE_MISMATCH,
                 name.span,
@@ -919,7 +1411,10 @@ impl FunctionChecker<'_> {
                         self.error(
                             TYPE_MISMATCH,
                             argument.span(),
-                            format!("`print` cannot display `{actual}`"),
+                            format!(
+                                "`print` cannot display `{}`",
+                                format_type(&actual, self.records)
+                            ),
                             "expected `Int`, `Bool`, or `String`",
                         );
                     }
@@ -957,18 +1452,22 @@ impl FunctionChecker<'_> {
         }
 
         for (argument, expected) in arguments.iter().zip(&signature.parameters) {
-            let actual = self.check_expression_with_expected(argument, Some(expected));
-            if let Some(actual) = actual {
-                if &actual != expected {
-                    self.type_mismatch(argument.span(), expected, &actual);
+            if let Some(expected) = expected {
+                let actual = self.check_expression_with_expected(argument, Some(expected));
+                if let Some(actual) = actual {
+                    if &actual != expected {
+                        self.type_mismatch(argument.span(), expected, &actual);
+                    }
                 }
+            } else {
+                let _ = self.check_expression(argument);
             }
         }
         for argument in arguments.iter().skip(signature.parameters.len()) {
             let _ = self.check_expression(argument);
         }
 
-        Some(signature.return_type)
+        signature.return_type
     }
 
     fn bind(&mut self, name: &Name, ty: Option<Type>, mutable: bool) -> Option<LocalId> {
@@ -1009,7 +1508,11 @@ impl FunctionChecker<'_> {
         self.error(
             TYPE_MISMATCH,
             span,
-            format!("expected `{expected}`, found `{actual}`"),
+            format!(
+                "expected `{}`, found `{}`",
+                format_type(expected, self.records),
+                format_type(actual, self.records)
+            ),
             "type mismatch",
         );
     }
@@ -1028,6 +1531,8 @@ impl FunctionChecker<'_> {
     fn finish(self) {
         self.facts.functions.push(FunctionFacts {
             parameters: self.parameters,
+            parameter_types: self.parameter_types,
+            return_type: self.return_type.unwrap_or(Type::Unit),
             local_count: self.next_local,
         });
     }
@@ -1038,7 +1543,21 @@ fn contains_invalid_array_element(ty: &Type) -> bool {
         Type::Array(element) => {
             element.as_ref() == &Type::Unit || contains_invalid_array_element(element)
         }
-        Type::Int | Type::Bool | Type::String | Type::Unit => false,
+        Type::Int | Type::Bool | Type::String | Type::Record(_) | Type::Unit => false,
+    }
+}
+
+fn format_type(ty: &Type, records: &[RecordFacts]) -> String {
+    match ty {
+        Type::Int => "Int".to_owned(),
+        Type::Bool => "Bool".to_owned(),
+        Type::String => "String".to_owned(),
+        Type::Array(element) => format!("{}[]", format_type(element, records)),
+        Type::Record(record) => records.get(record.index()).map_or_else(
+            || format!("record#{}", record.index()),
+            |record| record.name.clone(),
+        ),
+        Type::Unit => "Unit".to_owned(),
     }
 }
 

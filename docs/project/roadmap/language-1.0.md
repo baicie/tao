@@ -6,14 +6,14 @@ Deliver the [Nexa Language 1.0 Reference Core](../../spec/language-1.0.md): a
 statically checked, multi-file command-line language executed by the CFG MIR
 reference interpreter.
 
-Language Core v0.3 is fully delivered. It represents roughly 55-60% of the
-required compiler pipeline and 30-35% of the user-visible 1.0 language
-capability. The remaining record, union, module, and generic milestones are
-semantic and architectural work rather than additive parser features.
+Language Core v0.4 is fully delivered. It establishes nominal immutable
+records and module-ready record and field identities across CST, typed HIR,
+CFG MIR, and the interpreter. v0.5, tagged unions and exhaustive matching, is
+the active implementation milestone.
 
 ## Delivery Milestones
 
-### v0.4: Nominal Immutable Records
+### v0.4: Nominal Immutable Records (Delivered)
 
 - Add named record declarations, record literals, and field access.
 - Reject missing, duplicate, unknown, and mistyped fields.
@@ -23,7 +23,7 @@ semantic and architectural work rather than additive parser features.
   extended with module identity.
 - Lower fields to MIR by resolved IDs rather than source strings.
 
-### v0.5: Tagged Unions And Matching
+### v0.5: Tagged Unions And Matching (Active)
 
 - Add nominal tagged unions whose variants may carry typed payloads.
 - Add exhaustive `match` expressions with stable pattern spans.
@@ -50,8 +50,12 @@ semantic and architectural work rather than additive parser features.
 - Keep recoverable errors explicit; do not add exceptions or implicit
   propagation.
 
-### v0.8: Practical Core
+### v0.8: Function Values And Practical Core
 
+- Add statically typed function types and indirect calls.
+- Add arrow-function expressions and immutable lexical captures.
+- Define closure identity, capture order, recursion restrictions, and runtime
+  limits without introducing JavaScript `this` or prototype semantics.
 - Add array `for...of` iteration with deterministic source-order behavior.
 - Add immutable array append/concatenation operations.
 - Define Unicode-scalar string length semantics.
@@ -72,7 +76,7 @@ semantic and architectural work rather than additive parser features.
 - Run one multi-file program through parse, check, typed HIR, CFG MIR, and the
   reference interpreter.
 - Cover records, unions, exhaustive matching, generics, `Result`, imports,
-  loops, immutable data, and CLI arguments in that program.
+  closures, loops, immutable data, and CLI arguments in that program.
 - Publish the complete reference specification and conformance suite.
 - Pass Rust 1.80 checks, all workspace tests, rustdoc, documentation build, and
   release validation.
@@ -108,6 +112,6 @@ entry point.
 
 ## Deferred Beyond 1.0
 
-Function values and closures, `Float`, exceptions, async/concurrency, mutable
-heap collections, native code generation, UI, FFI, package management, LSP,
-and TypeScript ecosystem compatibility remain post-1.0 work.
+`Float`, exceptions, async/concurrency, mutable heap collections, native code
+generation, UI, FFI, package management, LSP, and TypeScript ecosystem
+compatibility remain post-1.0 work.

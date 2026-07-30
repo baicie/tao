@@ -1,0 +1,5 @@
+type User = { name: String; };
+function main(): Unit {
+  let user: User = { name: "Ada" };
+  user.name = "Grace";
+}

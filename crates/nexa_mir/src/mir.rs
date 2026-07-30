@@ -1,14 +1,21 @@
-use nexa_hir::{BinaryOperator, Type, UnaryOperator};
+use nexa_hir::{BinaryOperator, FieldId, RecordId, Type, UnaryOperator};
 use nexa_span::SourceSpan;
 
 /// A complete Nexa program in resolved middle intermediate representation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MirProgram {
+    pub(crate) records: Vec<MirRecord>,
     pub(crate) functions: Vec<MirFunction>,
     pub(crate) span: SourceSpan,
 }
 
 impl MirProgram {
+    /// Returns nominal record layouts in stable source order.
+    #[must_use]
+    pub fn records(&self) -> &[MirRecord] {
+        &self.records
+    }
+
     /// Returns all functions in their stable source-order identifiers.
     #[must_use]
     pub fn functions(&self) -> &[MirFunction] {
@@ -22,11 +29,82 @@ impl MirProgram {
     }
 }
 
+/// A nominal record layout resolved before MIR execution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirRecord {
+    pub(crate) id: RecordId,
+    pub(crate) name: String,
+    pub(crate) fields: Vec<MirRecordField>,
+    pub(crate) span: SourceSpan,
+}
+
+impl MirRecord {
+    /// Returns the record's stable source-order identifier.
+    #[must_use]
+    pub const fn id(&self) -> RecordId {
+        self.id
+    }
+
+    /// Returns the declared record name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns fields in declaration and runtime-layout order.
+    #[must_use]
+    pub fn fields(&self) -> &[MirRecordField] {
+        &self.fields
+    }
+
+    /// Returns the record declaration's source range.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
+
+/// One typed field in a resolved nominal record layout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirRecordField {
+    pub(crate) id: FieldId,
+    pub(crate) name: String,
+    pub(crate) ty: Type,
+    pub(crate) span: SourceSpan,
+}
+
+impl MirRecordField {
+    /// Returns the field's stable declaration-order identifier.
+    #[must_use]
+    pub const fn id(&self) -> FieldId {
+        self.id
+    }
+
+    /// Returns the declared field name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the resolved field type.
+    #[must_use]
+    pub const fn ty(&self) -> &Type {
+        &self.ty
+    }
+
+    /// Returns the field declaration's source range.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
+
 /// A function after local and function-name resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MirFunction {
     pub(crate) name: String,
     pub(crate) parameters: Vec<LocalId>,
+    pub(crate) parameter_types: Vec<Type>,
     pub(crate) local_count: usize,
     pub(crate) return_type: Type,
     pub(crate) entry: BasicBlockId,
@@ -45,6 +123,12 @@ impl MirFunction {
     #[must_use]
     pub fn parameter_count(&self) -> usize {
         self.parameters.len()
+    }
+
+    /// Returns resolved parameter types in declaration order.
+    #[must_use]
+    pub fn parameter_types(&self) -> &[Type] {
+        &self.parameter_types
     }
 
     /// Returns the declared return type.
@@ -218,6 +302,15 @@ pub enum MirExpression {
         /// The full array literal range.
         span: SourceSpan,
     },
+    /// Constructs an immutable nominal record in declaration field order.
+    Record {
+        /// The record's resolved nominal identity.
+        record: RecordId,
+        /// Field values in declaration and runtime-layout order.
+        fields: Vec<MirExpression>,
+        /// The full record literal range.
+        span: SourceSpan,
+    },
     /// Reads an element from an immutable array.
     Index {
         /// The evaluated array expression.
@@ -231,6 +324,17 @@ pub enum MirExpression {
     Length {
         /// The evaluated array expression.
         target: Box<MirExpression>,
+        /// The full member expression range.
+        span: SourceSpan,
+    },
+    /// Reads a resolved field from an immutable nominal record.
+    Field {
+        /// The evaluated record expression.
+        target: Box<MirExpression>,
+        /// The expected nominal record identity.
+        record: RecordId,
+        /// The resolved field identity.
+        field: FieldId,
         /// The full member expression range.
         span: SourceSpan,
     },
@@ -281,8 +385,10 @@ impl MirExpression {
             | Self::Boolean { span, .. }
             | Self::String { span, .. }
             | Self::Array { span, .. }
+            | Self::Record { span, .. }
             | Self::Index { span, .. }
             | Self::Length { span, .. }
+            | Self::Field { span, .. }
             | Self::Local { span, .. }
             | Self::Unary { span, .. }
             | Self::Binary { span, .. }

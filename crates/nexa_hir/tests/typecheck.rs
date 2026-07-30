@@ -2,7 +2,7 @@
 
 use nexa_hir::{
     lower, type_check, Analysis, Builtin, Expression, FunctionId, LocalId, LoweringError,
-    NameResolution, Statement, Type,
+    NameResolution, Statement, Type, TypeReferenceKind,
 };
 use nexa_parser::parse_source;
 use nexa_span::{FileId, SourceSpan, TextRange};
@@ -93,7 +93,7 @@ fn type_check_accepts_and_decodes_string_expressions() -> Result<(), Box<dyn std
             value.as_str(),
             declaration.annotation.as_ref().map(|ty| &ty.kind)
         ),
-        ("Nexa\n", Some(&Type::String))
+        ("Nexa\n", Some(&TypeReferenceKind::String))
     );
 
     Ok(())

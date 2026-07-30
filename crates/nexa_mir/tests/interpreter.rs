@@ -1,6 +1,6 @@
 //! MIR lowering and interpretation regression tests.
 
-use nexa_hir::{lower as lower_hir, type_check, BinaryOperator};
+use nexa_hir::{lower as lower_hir, type_check, BinaryOperator, FieldId, RecordId, Type};
 use nexa_mir::{
     lower as lower_mir, run, run_with_args, MirExpression, MirProgram, MirStatement, MirTerminator,
 };
@@ -399,6 +399,155 @@ function main(): Unit {
 }
 
 #[test]
+fn interpreter_evaluates_reordered_record_fields_once_in_literal_order(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"type Pair = { left: Int; right: Int; };
+
+function left(): Int { print(1); return 20; }
+function right(): Int { print(2); return 22; }
+
+function main(): Unit {
+  const pair: Pair = { right: right(), left: left() };
+  print(pair.left);
+  print(pair.right);
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["2", "1", "20", "22"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_evaluates_a_record_field_base_exactly_once() -> Result<(), Box<dyn std::error::Error>>
+{
+    let program = compile(
+        r#"type Box = { value: Int; };
+
+function make(): Box {
+  print(1);
+  return { value: 42 };
+}
+
+function main(): Unit {
+  print(make().value);
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["1", "42"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_passes_returns_nests_and_arrays_nominal_records(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"type Address = { city: String; };
+type User = { name: String; address: Address; scores: Int[]; };
+
+function makeUser(name: String): User {
+  return { scores: [20, 22], address: { city: "London" }, name: name };
+}
+
+function city(user: User): String { return user.address.city; }
+
+function main(): Unit {
+  const users: User[] = [makeUser("Ada")];
+  print(users[0].name);
+  print(city(users[0]));
+  print(users[0].scores[0] + users[0].scores[1]);
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["Ada", "London", "42"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_preserves_output_before_a_record_initializer_failure(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = r#"type Result = { label: String; value: Int; };
+
+function fail(): Int {
+  print("before");
+  const values = [1];
+  return values[1];
+}
+
+function main(): Unit {
+  const result: Result = { label: "Nexa", value: fail() };
+}"#;
+    let expected_start = source
+        .find("values[1]")
+        .ok_or_else(|| std::io::Error::other("expected failing field initializer"))?;
+    let expected_span = SourceSpan::new(
+        FileId::new(3),
+        TextRange::new(expected_start, expected_start + "values[1]".len()),
+    );
+    let program = compile(source)?;
+
+    let failure = run(&program)
+        .err()
+        .ok_or_else(|| std::io::Error::other("expected a record initializer failure"))?;
+
+    assert_eq!(failure.error().span(), expected_span);
+    assert_eq!(failure.output(), ["before"]);
+
+    Ok(())
+}
+
+#[test]
+fn mir_keeps_source_order_record_and_field_layout_ids() -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"type User = { name: String; age: Int; };
+type Envelope = { user: User; };
+function main(): Unit {}"#,
+    )?;
+    let user = program
+        .records()
+        .first()
+        .ok_or_else(|| std::io::Error::other("expected User layout"))?;
+    let envelope = program
+        .records()
+        .get(1)
+        .ok_or_else(|| std::io::Error::other("expected Envelope layout"))?;
+
+    assert_eq!(
+        (
+            user.id(),
+            user.name(),
+            user.fields()
+                .iter()
+                .map(|field| (field.id(), field.name(), field.ty().clone()))
+                .collect::<Vec<_>>(),
+            envelope.id(),
+            envelope.fields().first().map(|field| field.ty())
+        ),
+        (
+            RecordId::new(0),
+            "User",
+            vec![
+                (FieldId::new(RecordId::new(0), 0), "name", Type::String),
+                (FieldId::new(RecordId::new(0), 1), "age", Type::Int)
+            ],
+            RecordId::new(1),
+            Some(&Type::Record(RecordId::new(0)))
+        )
+    );
+
+    Ok(())
+}
+
+#[test]
 fn mir_lowering_expands_logical_operators_into_cfg_branches(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let program = compile(
@@ -691,10 +840,14 @@ fn expression_contains_logical_binary(expression: &MirExpression) -> bool {
         MirExpression::Array { elements, .. } => {
             elements.iter().any(expression_contains_logical_binary)
         }
+        MirExpression::Record { fields, .. } => {
+            fields.iter().any(expression_contains_logical_binary)
+        }
         MirExpression::Index { target, index, .. } => {
             expression_contains_logical_binary(target) || expression_contains_logical_binary(index)
         }
         MirExpression::Length { target, .. } => expression_contains_logical_binary(target),
+        MirExpression::Field { target, .. } => expression_contains_logical_binary(target),
         MirExpression::Integer { .. }
         | MirExpression::Boolean { .. }
         | MirExpression::String { .. }

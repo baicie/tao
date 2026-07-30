@@ -10,12 +10,14 @@ mod hir;
 mod lower;
 
 pub use check::{
-    type_check, Analysis, Builtin, FunctionFacts, FunctionId, LocalId, NameResolution, TypedProgram,
+    type_check, Analysis, Builtin, FunctionFacts, FunctionId, LocalId, NameResolution, RecordFacts,
+    RecordFieldFacts, TypedProgram,
 };
 pub use hir::{
     AssignmentStatement, BinaryOperator, Block, BreakStatement, ConstDeclaration,
-    ContinueStatement, Expression, ExpressionStatement, Function, IfStatement, LetDeclaration,
-    Name, Parameter, Program, ReturnStatement, Statement, Type, TypeReference, UnaryOperator,
-    WhileStatement,
+    ContinueStatement, Expression, ExpressionStatement, FieldId, Function, IfStatement,
+    LetDeclaration, Name, Parameter, Program, RecordDeclaration, RecordFieldDeclaration,
+    RecordFieldInitializer, RecordId, ReturnStatement, Statement, Type, TypeReference,
+    TypeReferenceKind, UnaryOperator, WhileStatement,
 };
 pub use lower::{lower, LoweringError};

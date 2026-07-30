@@ -3,7 +3,7 @@
 ## Status
 
 This document defines the target contract for Nexa Language 1.0. The current
-delivered implementation is [Language Core v0.3](language-core-v0.3.md); the
+delivered implementation is [Language Core v0.4](language-core-v0.4.md); the
 features below become language guarantees only when their milestone is marked
 delivered in the [1.0 roadmap](../project/roadmap/language-1.0.md).
 
@@ -29,6 +29,8 @@ The 1.0 reference core includes:
   loops, direct calls, and recursion;
 - bounded generic functions and generic data types with explicit declarations
   and local type-argument inference;
+- statically typed function values, arrow-function expressions, and lexical
+  closures with explicit parameter and result types;
 - `Option<T>` and `Result<T, E>` expressed through ordinary tagged unions, so
   recoverable errors are values rather than exceptions;
 - explicit relative-path imports and exports across multiple source files;
@@ -84,8 +86,9 @@ diagnostic codes, and conformance fixtures become the compatibility baseline.
 ## 1.0 Acceptance Program
 
 The release is complete when one multi-file example uses records, tagged
-unions, exhaustive matching, generics, `Result`, imports, loops, immutable
-collections, and command-line arguments in one checked and interpreted flow.
+unions, exhaustive matching, generics, `Result`, imports, a lexical closure,
+loops, immutable collections, and command-line arguments in one checked and
+interpreted flow.
 The same release must provide rejected fixtures for visibility, exhaustiveness,
 generic constraints, module cycles, type mismatches, and deterministic runtime
 failures.
@@ -101,8 +104,8 @@ Nexa Language 1.0 does not include:
 - TypeScript source compatibility, npm compatibility, or JavaScript runtime
   semantics such as `any`, `null`, `undefined`, coercion, or prototypes;
 - classes, interfaces, traits, inheritance, or operator overloading;
-- function values, closures, arrow functions, exceptions, `throw`/`catch`,
-  async execution, threads, or concurrency;
+- exceptions, `throw`/`catch`, implicit error propagation, async execution,
+  threads, or concurrency;
 - `Float`, mutable heap objects, or growable mutable collections;
 - native AOT code generation, LLVM, WebAssembly, UI, FFI, or platform APIs;
 - a package manager, remote dependencies, LSP, formatter, or complete standard

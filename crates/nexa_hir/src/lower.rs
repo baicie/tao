@@ -7,8 +7,8 @@ use nexa_syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 use crate::{
     AssignmentStatement, BinaryOperator, Block, BreakStatement, ConstDeclaration,
     ContinueStatement, Expression, ExpressionStatement, Function, IfStatement, LetDeclaration,
-    Name, Parameter, Program, ReturnStatement, Statement, Type, TypeReference, UnaryOperator,
-    WhileStatement,
+    Name, Parameter, Program, RecordDeclaration, RecordFieldDeclaration, RecordFieldInitializer,
+    ReturnStatement, Statement, TypeReference, TypeReferenceKind, UnaryOperator, WhileStatement,
 };
 
 const SYNTAX_ERROR: DiagnosticCode = DiagnosticCode::new("E1001");
@@ -72,6 +72,11 @@ pub fn lower(file: FileId, syntax: &SyntaxNode) -> Result<Program, LoweringError
         return Err(malformed(node_span(file, syntax)));
     }
 
+    let records = syntax
+        .children()
+        .filter(|node| node.kind() == SyntaxKind::RecordDeclaration)
+        .map(|node| lower_record(file, &node))
+        .collect::<Result<Vec<_>, _>>()?;
     let functions = syntax
         .children()
         .filter(|node| node.kind() == SyntaxKind::FunctionDeclaration)
@@ -79,8 +84,35 @@ pub fn lower(file: FileId, syntax: &SyntaxNode) -> Result<Program, LoweringError
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(Program {
+        records,
         functions,
         span: node_span(file, syntax),
+    })
+}
+
+fn lower_record(file: FileId, node: &SyntaxNode) -> Result<RecordDeclaration, LoweringError> {
+    let body = required_child(file, node, SyntaxKind::RecordBody)?;
+    let fields = body
+        .children()
+        .filter(|field| field.kind() == SyntaxKind::RecordFieldDeclaration)
+        .map(|field| lower_record_field(file, &field))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(RecordDeclaration {
+        name: lower_direct_name(file, node)?,
+        fields,
+        span: node_span(file, node),
+    })
+}
+
+fn lower_record_field(
+    file: FileId,
+    node: &SyntaxNode,
+) -> Result<RecordFieldDeclaration, LoweringError> {
+    Ok(RecordFieldDeclaration {
+        name: lower_direct_name(file, node)?,
+        ty: lower_type(file, &required_type_child(file, node)?)?,
+        span: node_span(file, node),
     })
 }
 
@@ -120,7 +152,7 @@ fn lower_type(file: FileId, node: &SyntaxNode) -> Result<TypeReference, Lowering
     if node.kind() == SyntaxKind::ArrayType {
         let element = lower_type(file, &required_type_child(file, node)?)?;
         return Ok(TypeReference {
-            kind: Type::Array(Box::new(element.kind)),
+            kind: TypeReferenceKind::Array(Box::new(element)),
             span: node_span(file, node),
         });
     }
@@ -134,15 +166,23 @@ fn lower_type(file: FileId, node: &SyntaxNode) -> Result<TypeReference, Lowering
         .find(|token| {
             matches!(
                 token.kind(),
-                SyntaxKind::IntKw | SyntaxKind::BoolKw | SyntaxKind::StringKw | SyntaxKind::UnitKw
+                SyntaxKind::IntKw
+                    | SyntaxKind::BoolKw
+                    | SyntaxKind::StringKw
+                    | SyntaxKind::UnitKw
+                    | SyntaxKind::Ident
             )
         })
         .ok_or_else(|| malformed(node_span(file, node)))?;
     let kind = match token.kind() {
-        SyntaxKind::IntKw => Type::Int,
-        SyntaxKind::BoolKw => Type::Bool,
-        SyntaxKind::StringKw => Type::String,
-        SyntaxKind::UnitKw => Type::Unit,
+        SyntaxKind::IntKw => TypeReferenceKind::Int,
+        SyntaxKind::BoolKw => TypeReferenceKind::Bool,
+        SyntaxKind::StringKw => TypeReferenceKind::String,
+        SyntaxKind::UnitKw => TypeReferenceKind::Unit,
+        SyntaxKind::Ident => TypeReferenceKind::Named(Name {
+            text: token.text().to_owned(),
+            span: token_span(file, &token),
+        }),
         _ => return Err(malformed(token_span(file, &token))),
     };
 
@@ -275,6 +315,7 @@ fn lower_expression(file: FileId, node: &SyntaxNode) -> Result<Expression, Lower
         SyntaxKind::BoolLiteral => lower_boolean(file, node),
         SyntaxKind::StringLiteral => lower_string(file, node),
         SyntaxKind::ArrayExpression => lower_array(file, node),
+        SyntaxKind::RecordExpression => lower_record_expression(file, node),
         SyntaxKind::IndexExpression => lower_index(file, node),
         SyntaxKind::MemberExpression => lower_member(file, node),
         SyntaxKind::NameReference => Ok(Expression::Name(lower_direct_name(file, node)?)),
@@ -348,6 +389,30 @@ fn lower_array(file: FileId, node: &SyntaxNode) -> Result<Expression, LoweringEr
 
     Ok(Expression::Array {
         elements,
+        span: node_span(file, node),
+    })
+}
+
+fn lower_record_expression(file: FileId, node: &SyntaxNode) -> Result<Expression, LoweringError> {
+    let fields = node
+        .children()
+        .filter(|field| field.kind() == SyntaxKind::RecordFieldInitializer)
+        .map(|field| lower_record_initializer(file, &field))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(Expression::Record {
+        fields,
+        span: node_span(file, node),
+    })
+}
+
+fn lower_record_initializer(
+    file: FileId,
+    node: &SyntaxNode,
+) -> Result<RecordFieldInitializer, LoweringError> {
+    Ok(RecordFieldInitializer {
+        name: lower_direct_name(file, node)?,
+        value: lower_expression(file, &required_expression_child(file, node)?)?,
         span: node_span(file, node),
     })
 }
@@ -535,6 +600,7 @@ const fn is_expression_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::BoolLiteral
             | SyntaxKind::StringLiteral
             | SyntaxKind::ArrayExpression
+            | SyntaxKind::RecordExpression
             | SyntaxKind::IndexExpression
             | SyntaxKind::MemberExpression
             | SyntaxKind::ParenthesizedExpression

@@ -155,6 +155,18 @@ pub enum SyntaxKind {
     IndexExpression = 72,
     /// A named member access expression.
     MemberExpression = 73,
+    /// The `type` keyword.
+    TypeKw = 74,
+    /// A top-level named record declaration.
+    RecordDeclaration = 75,
+    /// The braced body of a named record declaration.
+    RecordBody = 76,
+    /// One named and typed record field declaration.
+    RecordFieldDeclaration = 77,
+    /// A record literal expression.
+    RecordExpression = 78,
+    /// One named field initializer in a record literal.
+    RecordFieldInitializer = 79,
 }
 
 impl SyntaxKind {
@@ -240,6 +252,12 @@ impl SyntaxKind {
             71 => Self::ArrayExpression,
             72 => Self::IndexExpression,
             73 => Self::MemberExpression,
+            74 => Self::TypeKw,
+            75 => Self::RecordDeclaration,
+            76 => Self::RecordBody,
+            77 => Self::RecordFieldDeclaration,
+            78 => Self::RecordExpression,
+            79 => Self::RecordFieldInitializer,
             _ => unreachable!("invalid Nexa syntax kind: {raw}"),
         }
     }
@@ -395,6 +413,7 @@ fn keyword_kind(kind: SyntaxKind, text: &str) -> SyntaxKind {
         "Bool" => SyntaxKind::BoolKw,
         "String" => SyntaxKind::StringKw,
         "Unit" => SyntaxKind::UnitKw,
+        "type" => SyntaxKind::TypeKw,
         _ => SyntaxKind::Ident,
     }
 }
@@ -631,6 +650,31 @@ mod tests {
     }
 
     #[test]
+    fn tokenizes_the_type_keyword_and_record_field_names() {
+        let tokens = tokenize("type User = { name: String; };");
+
+        assert_eq!(
+            tokens
+                .iter()
+                .filter(|token| !token.kind().is_trivia())
+                .map(|token| (token.kind(), token.text()))
+                .collect::<Vec<_>>(),
+            [
+                (SyntaxKind::TypeKw, "type"),
+                (SyntaxKind::Ident, "User"),
+                (SyntaxKind::Eq, "="),
+                (SyntaxKind::LBrace, "{"),
+                (SyntaxKind::Ident, "name"),
+                (SyntaxKind::Colon, ":"),
+                (SyntaxKind::StringKw, "String"),
+                (SyntaxKind::Semicolon, ";"),
+                (SyntaxKind::RBrace, "}"),
+                (SyntaxKind::Semicolon, ";"),
+            ]
+        );
+    }
+
+    #[test]
     fn unicode_string_literal_uses_a_byte_range_and_preserves_text() {
         let source = "\"Nexa \u{4f60}\u{597d}\"";
         let tokens = tokenize(source);
@@ -767,6 +811,12 @@ mod tests {
             SyntaxKind::ArrayExpression,
             SyntaxKind::IndexExpression,
             SyntaxKind::MemberExpression,
+            SyntaxKind::TypeKw,
+            SyntaxKind::RecordDeclaration,
+            SyntaxKind::RecordBody,
+            SyntaxKind::RecordFieldDeclaration,
+            SyntaxKind::RecordExpression,
+            SyntaxKind::RecordFieldInitializer,
         ];
 
         for kind in kinds {

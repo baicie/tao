@@ -1,0 +1,2 @@
+type Node = { children: Node[]; };
+function main(): Unit {}

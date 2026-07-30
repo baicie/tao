@@ -4,6 +4,7 @@ use nexa_syntax::{SyntaxKind, Token};
 use rowan::{GreenNode, GreenNodeBuilder};
 
 const PARSE_ERROR: DiagnosticCode = DiagnosticCode::new("E1001");
+const TOP_LEVEL_RECOVERY: &[SyntaxKind] = &[SyntaxKind::FunctionKw, SyntaxKind::TypeKw];
 const STATEMENT_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::Semicolon,
     SyntaxKind::RBrace,
@@ -16,6 +17,7 @@ const STATEMENT_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::BreakKw,
     SyntaxKind::ContinueKw,
     SyntaxKind::ReturnKw,
+    SyntaxKind::TypeKw,
 ];
 const ARRAY_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::Comma,
@@ -32,6 +34,30 @@ const ARRAY_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::BreakKw,
     SyntaxKind::ContinueKw,
     SyntaxKind::ReturnKw,
+    SyntaxKind::TypeKw,
+];
+const RECORD_BODY_RECOVERY: &[SyntaxKind] = &[
+    SyntaxKind::Ident,
+    SyntaxKind::Semicolon,
+    SyntaxKind::RBrace,
+    SyntaxKind::FunctionKw,
+    SyntaxKind::TypeKw,
+];
+const RECORD_EXPRESSION_RECOVERY: &[SyntaxKind] = &[
+    SyntaxKind::Comma,
+    SyntaxKind::RBrace,
+    SyntaxKind::RBracket,
+    SyntaxKind::RParen,
+    SyntaxKind::Semicolon,
+    SyntaxKind::FunctionKw,
+    SyntaxKind::ConstKw,
+    SyntaxKind::LetKw,
+    SyntaxKind::IfKw,
+    SyntaxKind::WhileKw,
+    SyntaxKind::BreakKw,
+    SyntaxKind::ContinueKw,
+    SyntaxKind::ReturnKw,
+    SyntaxKind::TypeKw,
 ];
 
 pub(super) fn parse_tokens(
@@ -81,6 +107,8 @@ impl Parser<'_> {
                 self.bump();
             } else if self.at(SyntaxKind::FunctionKw) {
                 self.parse_function_declaration();
+            } else if self.at(SyntaxKind::TypeKw) {
+                self.parse_record_declaration();
             } else {
                 self.parse_unexpected_top_level_item();
             }
@@ -109,6 +137,70 @@ impl Parser<'_> {
         self.expect(SyntaxKind::Colon, "expected `:` before return type");
         self.parse_type();
         self.parse_block();
+        self.builder.finish_node();
+    }
+
+    fn parse_record_declaration(&mut self) {
+        self.builder
+            .start_node(SyntaxKind::RecordDeclaration.into());
+        self.expect(SyntaxKind::TypeKw, "expected `type`");
+        self.expect(SyntaxKind::Ident, "expected record name");
+        self.expect(SyntaxKind::Eq, "expected `=` after record name");
+        self.parse_record_body();
+        if !self.expect(
+            SyntaxKind::Semicolon,
+            "expected `;` after record declaration",
+        ) {
+            self.recover_to(TOP_LEVEL_RECOVERY);
+        }
+        self.builder.finish_node();
+    }
+
+    fn parse_record_body(&mut self) {
+        self.builder.start_node(SyntaxKind::RecordBody.into());
+        if !self.expect(SyntaxKind::LBrace, "expected `{` before record fields") {
+            self.builder.finish_node();
+            return;
+        }
+
+        loop {
+            self.skip_trivia();
+            match self.current() {
+                Some(SyntaxKind::RBrace) => {
+                    self.bump();
+                    break;
+                }
+                Some(SyntaxKind::Ident) => self.parse_record_field_declaration(),
+                Some(SyntaxKind::FunctionKw | SyntaxKind::TypeKw) => {
+                    self.error_at_current("expected `}` after record fields");
+                    break;
+                }
+                Some(_) => {
+                    self.error_at_current("expected record field declaration");
+                    self.recover_record_body();
+                }
+                None => {
+                    self.error_at_current("expected `}` after record fields");
+                    break;
+                }
+            }
+        }
+
+        self.builder.finish_node();
+    }
+
+    fn parse_record_field_declaration(&mut self) {
+        self.builder
+            .start_node(SyntaxKind::RecordFieldDeclaration.into());
+        self.expect(SyntaxKind::Ident, "expected record field name");
+        self.expect(SyntaxKind::Colon, "expected `:` after record field name");
+        self.parse_type();
+        if !self.expect(
+            SyntaxKind::Semicolon,
+            "expected `;` after record field declaration",
+        ) {
+            self.recover_record_body();
+        }
         self.builder.finish_node();
     }
 
@@ -165,13 +257,17 @@ impl Parser<'_> {
         let parsed = if matches!(
             self.current(),
             Some(
-                SyntaxKind::IntKw | SyntaxKind::BoolKw | SyntaxKind::StringKw | SyntaxKind::UnitKw
+                SyntaxKind::IntKw
+                    | SyntaxKind::BoolKw
+                    | SyntaxKind::StringKw
+                    | SyntaxKind::UnitKw
+                    | SyntaxKind::Ident
             )
         ) {
             self.bump();
             true
         } else {
-            self.error_at_current("expected type `Int`, `Bool`, `String`, or `Unit`");
+            self.error_at_current("expected type `Int`, `Bool`, `String`, `Unit`, or a named type");
             false
         };
 
@@ -212,7 +308,7 @@ impl Parser<'_> {
                     self.error_at_current("unexpected `else`");
                     self.bump();
                 }
-                Some(SyntaxKind::FunctionKw) => {
+                Some(SyntaxKind::FunctionKw | SyntaxKind::TypeKw) => {
                     self.error_at_current("expected `}` to close block");
                     break;
                 }
@@ -306,8 +402,12 @@ impl Parser<'_> {
     fn parse_if_statement(&mut self) {
         self.builder.start_node(SyntaxKind::IfStatement.into());
         self.expect(SyntaxKind::IfKw, "expected `if`");
-        self.expect(SyntaxKind::LParen, "expected `(` after `if`");
-        let _ = self.parse_expression();
+        let has_left_parenthesis = self.expect(SyntaxKind::LParen, "expected `(` after `if`");
+        if has_left_parenthesis || !self.at(SyntaxKind::LBrace) {
+            let _ = self.parse_expression();
+        } else {
+            self.error_at_current("expected expression");
+        }
         self.expect(SyntaxKind::RParen, "expected `)` after condition");
         self.parse_block();
         self.skip_trivia();
@@ -325,8 +425,12 @@ impl Parser<'_> {
     fn parse_while_statement(&mut self) {
         self.builder.start_node(SyntaxKind::WhileStatement.into());
         self.expect(SyntaxKind::WhileKw, "expected `while`");
-        self.expect(SyntaxKind::LParen, "expected `(` after `while`");
-        let _ = self.parse_expression();
+        let has_left_parenthesis = self.expect(SyntaxKind::LParen, "expected `(` after `while`");
+        if has_left_parenthesis || !self.at(SyntaxKind::LBrace) {
+            let _ = self.parse_expression();
+        } else {
+            self.error_at_current("expected expression");
+        }
         self.expect(SyntaxKind::RParen, "expected `)` after condition");
         self.parse_block();
         self.builder.finish_node();
@@ -538,6 +642,10 @@ impl Parser<'_> {
                 self.parse_array_expression();
                 true
             }
+            Some(SyntaxKind::LBrace) => {
+                self.parse_record_expression();
+                true
+            }
             Some(SyntaxKind::LParen) => {
                 self.builder
                     .start_node(SyntaxKind::ParenthesizedExpression.into());
@@ -602,6 +710,67 @@ impl Parser<'_> {
         self.builder.finish_node();
     }
 
+    fn parse_record_expression(&mut self) {
+        self.builder.start_node(SyntaxKind::RecordExpression.into());
+        self.expect(SyntaxKind::LBrace, "expected `{` before record fields");
+        self.skip_trivia();
+
+        if self.at(SyntaxKind::RBrace) {
+            self.bump();
+            self.builder.finish_node();
+            return;
+        }
+
+        loop {
+            self.parse_record_field_initializer();
+            self.skip_trivia();
+
+            if self.at(SyntaxKind::Comma) {
+                self.bump();
+                self.skip_trivia();
+                if self.at(SyntaxKind::RBrace) {
+                    self.error_at_current("expected record field after `,`");
+                    break;
+                }
+                continue;
+            }
+            if self.at(SyntaxKind::RBrace) {
+                break;
+            }
+            if self.at(SyntaxKind::Ident) {
+                self.error_at_current("expected `,` or `}` after record field");
+                continue;
+            }
+
+            self.error_at_current("expected `,` or `}` after record field");
+            self.recover_to(RECORD_EXPRESSION_RECOVERY);
+            if self.at(SyntaxKind::Comma) {
+                self.bump();
+                self.skip_trivia();
+                if self.at(SyntaxKind::RBrace) {
+                    self.error_at_current("expected record field after `,`");
+                    break;
+                }
+                continue;
+            }
+            break;
+        }
+
+        self.expect(SyntaxKind::RBrace, "expected `}` after record fields");
+        self.builder.finish_node();
+    }
+
+    fn parse_record_field_initializer(&mut self) {
+        self.builder
+            .start_node(SyntaxKind::RecordFieldInitializer.into());
+        self.expect(SyntaxKind::Ident, "expected record field name");
+        self.expect(SyntaxKind::Colon, "expected `:` after record field name");
+        if !self.parse_expression() {
+            self.recover_to(RECORD_EXPRESSION_RECOVERY);
+        }
+        self.builder.finish_node();
+    }
+
     fn binary_precedence(&self) -> Option<u8> {
         match self.current() {
             Some(SyntaxKind::PipePipe) => Some(1),
@@ -622,7 +791,7 @@ impl Parser<'_> {
         }
 
         while let Some(kind) = self.current() {
-            if kind == SyntaxKind::FunctionKw {
+            if matches!(kind, SyntaxKind::FunctionKw | SyntaxKind::TypeKw) {
                 break;
             }
             self.bump();
@@ -645,6 +814,13 @@ impl Parser<'_> {
 
     fn recover_statement(&mut self) {
         self.recover_to(STATEMENT_RECOVERY);
+        if self.at(SyntaxKind::Semicolon) {
+            self.bump();
+        }
+    }
+
+    fn recover_record_body(&mut self) {
+        self.recover_to(RECORD_BODY_RECOVERY);
         if self.at(SyntaxKind::Semicolon) {
             self.bump();
         }

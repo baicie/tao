@@ -28,26 +28,25 @@ cargo test --workspace
 ## Try the CLI
 
 ```bash
-cargo run -p nexac -- check examples/immutable_data.nexa
-cargo run -p nexac -- run examples/immutable_data.nexa -- Nexa
-cargo run -p nexac -- parse examples/immutable_data.nexa
+cargo run -p nexac -- check examples/named_records.nexa
+cargo run -p nexac -- run examples/named_records.nexa
+cargo run -p nexac -- parse examples/named_records.nexa
 ```
 
 `check` parses, resolves, and type-checks the program. `run` executes the
-checked program's `main` function through the MIR interpreter. The second `--`
-separates Nexa program arguments from compiler arguments. The bundled example
-prints:
+checked program's `main` function through the MIR interpreter. The bundled
+record example prints:
 
 ```text
-Hello, Nexa
-true
-2
+Ada
 42
 ```
 
-Language Core v0.3 adds immutable UTF-8 `String` values and immutable `T[]`
-arrays. A program may use either `main(): Unit` with no program arguments or
-`main(args: String[]): Unit` to receive the arguments after `--`.
+Language Core v0.4 adds nominal immutable record declarations, contextually
+typed record literals, exact field checking, and immutable field access. It
+retains the v0.3 immutable UTF-8 `String` and homogeneous `T[]` values. A
+program may use either `main(): Unit` with no program arguments or
+`main(args: String[]): Unit` to receive arguments after a second `--`.
 
 Nexa adopts familiar TypeScript-shaped syntax, but it is not a TypeScript or
 JavaScript compatibility layer. It deliberately has no JavaScript runtime

@@ -3,9 +3,33 @@ use nexa_span::SourceSpan;
 /// A complete Nexa source file after syntax lowering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
+    /// All top-level nominal record declarations in source order.
+    pub records: Vec<RecordDeclaration>,
     /// All top-level function declarations in source order.
     pub functions: Vec<Function>,
     /// The source range covered by the source file node.
+    pub span: SourceSpan,
+}
+
+/// A nominal immutable record declaration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordDeclaration {
+    /// The declared record name.
+    pub name: Name,
+    /// Fields in declaration order.
+    pub fields: Vec<RecordFieldDeclaration>,
+    /// The declaration's full source range.
+    pub span: SourceSpan,
+}
+
+/// One named field in a record declaration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordFieldDeclaration {
+    /// The declared field name.
+    pub name: Name,
+    /// The declared field type.
+    pub ty: TypeReference,
+    /// The field declaration's full source range.
     pub span: SourceSpan,
 }
 
@@ -47,10 +71,72 @@ pub struct Name {
 /// A source-level type reference.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeReference {
-    /// The resolved source type, including recursive array element types.
-    pub kind: Type,
+    /// The source type spelling before semantic name resolution.
+    pub kind: TypeReferenceKind,
     /// The complete source range of the type syntax.
     pub span: SourceSpan,
+}
+
+/// A source-level type spelling before semantic name resolution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeReferenceKind {
+    /// The built-in signed integer type.
+    Int,
+    /// The built-in boolean type.
+    Bool,
+    /// The built-in UTF-8 string type.
+    String,
+    /// The built-in no-value result type.
+    Unit,
+    /// A named nominal type.
+    Named(Name),
+    /// An immutable homogeneous array type.
+    Array(Box<TypeReference>),
+}
+
+/// A stable source-order identifier for a nominal record in one program.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RecordId(usize);
+
+impl RecordId {
+    /// Creates a record identifier from its zero-based source index.
+    #[must_use]
+    pub const fn new(index: usize) -> Self {
+        Self(index)
+    }
+
+    /// Returns the zero-based source index within the program.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.0
+    }
+}
+
+/// A stable field identifier scoped to one nominal record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FieldId {
+    record: RecordId,
+    index: usize,
+}
+
+impl FieldId {
+    /// Creates a field identifier from its record and declaration-order index.
+    #[must_use]
+    pub const fn new(record: RecordId, index: usize) -> Self {
+        Self { record, index }
+    }
+
+    /// Returns the record that owns this field.
+    #[must_use]
+    pub const fn record(self) -> RecordId {
+        self.record
+    }
+
+    /// Returns the zero-based declaration-order index within the record.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.index
+    }
 }
 
 /// The closed set of Language Core value types.
@@ -64,6 +150,8 @@ pub enum Type {
     String,
     /// An immutable homogeneous array value.
     Array(Box<Type>),
+    /// A nominal immutable record value.
+    Record(RecordId),
     /// The result type for expressions with no value.
     Unit,
 }
@@ -75,6 +163,7 @@ impl std::fmt::Display for Type {
             Self::Bool => formatter.write_str("Bool"),
             Self::String => formatter.write_str("String"),
             Self::Array(element) => write!(formatter, "{element}[]"),
+            Self::Record(record) => write!(formatter, "record#{}", record.index()),
             Self::Unit => formatter.write_str("Unit"),
         }
     }
@@ -236,6 +325,13 @@ pub enum Expression {
         /// The full expression range.
         span: SourceSpan,
     },
+    /// An immutable record literal whose type is supplied by context.
+    Record {
+        /// Field initializers in source order.
+        fields: Vec<RecordFieldInitializer>,
+        /// The full expression range.
+        span: SourceSpan,
+    },
     /// An indexed array access.
     Index {
         /// The array-valued expression.
@@ -303,6 +399,7 @@ impl Expression {
             | Self::Boolean { span, .. }
             | Self::String { span, .. }
             | Self::Array { span, .. }
+            | Self::Record { span, .. }
             | Self::Index { span, .. }
             | Self::Member { span, .. }
             | Self::Unary { span, .. }
@@ -312,6 +409,17 @@ impl Expression {
             Self::Name(name) => name.span,
         }
     }
+}
+
+/// One named initializer in an immutable record literal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordFieldInitializer {
+    /// The source-written field name.
+    pub name: Name,
+    /// The initializer expression.
+    pub value: Expression,
+    /// The initializer's full source range.
+    pub span: SourceSpan,
 }
 
 /// A prefix operator.

@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
 
-use nexa_hir::{BinaryOperator, UnaryOperator};
+use nexa_hir::{BinaryOperator, FieldId, RecordId, UnaryOperator};
 use nexa_span::SourceSpan;
 
 use crate::{
@@ -20,6 +20,13 @@ pub enum Value {
     String(Rc<str>),
     /// An immutable, fixed-length array.
     Array(Rc<[Value]>),
+    /// An immutable nominal record with declaration-ordered fields.
+    Record {
+        /// The record's resolved nominal identity.
+        record: RecordId,
+        /// Field values in declaration order.
+        fields: Rc<[Value]>,
+    },
     /// The absence of a value.
     Unit,
 }
@@ -31,6 +38,7 @@ impl Display for Value {
             Self::Bool(value) => write!(formatter, "{value}"),
             Self::String(value) => formatter.write_str(value),
             Self::Array(_) => formatter.write_str("<array>"),
+            Self::Record { record, .. } => write!(formatter, "<record#{}>", record.index()),
             Self::Unit => formatter.write_str("Unit"),
         }
     }
@@ -364,6 +372,11 @@ impl Interpreter {
                 .map(|element| self.evaluate(program, element, frame))
                 .collect::<Result<Vec<_>, _>>()
                 .map(|values| Value::Array(values.into())),
+            MirExpression::Record {
+                record,
+                fields,
+                span,
+            } => self.evaluate_record(program, *record, fields, *span, frame),
             MirExpression::Index {
                 target,
                 index,
@@ -376,6 +389,16 @@ impl Interpreter {
             MirExpression::Length { target, span } => {
                 let target = self.evaluate(program, target, frame)?;
                 evaluate_length(target, *span)
+            }
+            MirExpression::Field {
+                target,
+                record,
+                field,
+                span,
+            } => {
+                let target = self.evaluate(program, target, frame)?;
+                validate_field_layout(program, *record, *field, *span)?;
+                evaluate_field(target, *record, *field, *span)
             }
             MirExpression::Local { local, span } => frame.load(*local, *span),
             MirExpression::Unary {
@@ -401,6 +424,40 @@ impl Interpreter {
                 self.evaluate_call(program, *callee, arguments, *span)
             }
         }
+    }
+
+    fn evaluate_record(
+        &mut self,
+        program: &MirProgram,
+        record: RecordId,
+        fields: &[MirExpression],
+        span: SourceSpan,
+        frame: &Frame,
+    ) -> Result<Value, RuntimeError> {
+        let layout = program
+            .records
+            .get(record.index())
+            .filter(|layout| layout.id == record)
+            .ok_or_else(|| RuntimeError::new(span, "record layout does not exist"))?;
+        if fields.len() != layout.fields.len() {
+            return Err(RuntimeError::new(
+                span,
+                format!(
+                    "record construction expected {} field(s), found {}",
+                    layout.fields.len(),
+                    fields.len()
+                ),
+            ));
+        }
+
+        fields
+            .iter()
+            .map(|field| self.evaluate(program, field, frame))
+            .collect::<Result<Vec<_>, _>>()
+            .map(|fields| Value::Record {
+                record,
+                fields: fields.into(),
+            })
     }
 
     fn evaluate_unary(
@@ -504,7 +561,7 @@ impl Interpreter {
                         "`print` requires one scalar argument",
                     ));
                 };
-                if matches!(value, Value::Array(_) | Value::Unit) {
+                if matches!(value, Value::Array(_) | Value::Record { .. } | Value::Unit) {
                     return Err(RuntimeError::new(
                         span,
                         format!("`print` cannot print `{}`", value_type(value)),
@@ -649,6 +706,76 @@ fn evaluate_length(target: Value, span: SourceSpan) -> Result<Value, RuntimeErro
         .map_err(|_| RuntimeError::new(span, "array length exceeds `Int` range"))
 }
 
+fn validate_field_layout(
+    program: &MirProgram,
+    record: RecordId,
+    field: FieldId,
+    span: SourceSpan,
+) -> Result<(), RuntimeError> {
+    if field.record() != record {
+        return Err(RuntimeError::new(
+            span,
+            "record field identity does not match the projected record",
+        ));
+    }
+    let layout = program
+        .records
+        .get(record.index())
+        .filter(|layout| layout.id == record)
+        .ok_or_else(|| RuntimeError::new(span, "record layout does not exist"))?;
+    let Some(layout_field) = layout.fields.get(field.index()) else {
+        return Err(RuntimeError::new(
+            span,
+            "record field index is outside its layout",
+        ));
+    };
+    if layout_field.id != field {
+        return Err(RuntimeError::new(
+            span,
+            "record field layout identity is inconsistent",
+        ));
+    }
+
+    Ok(())
+}
+
+fn evaluate_field(
+    target: Value,
+    record: RecordId,
+    field: FieldId,
+    span: SourceSpan,
+) -> Result<Value, RuntimeError> {
+    let (actual_record, fields) = match target {
+        Value::Record { record, fields } => (record, fields),
+        target => {
+            return Err(RuntimeError::new(
+                span,
+                format!("cannot read a record field from `{}`", value_type(&target)),
+            ));
+        }
+    };
+    if actual_record != record {
+        return Err(RuntimeError::new(
+            span,
+            format!(
+                "record field expected record#{}, found record#{}",
+                record.index(),
+                actual_record.index()
+            ),
+        ));
+    }
+
+    fields.get(field.index()).cloned().ok_or_else(|| {
+        RuntimeError::new(
+            span,
+            format!(
+                "record field index {} is outside the runtime value",
+                field.index()
+            ),
+        )
+    })
+}
+
 fn checked_integer_operation(
     left: Value,
     right: Value,
@@ -708,6 +835,98 @@ const fn value_type(value: &Value) -> &'static str {
         Value::Bool(_) => "Bool",
         Value::String(_) => "String",
         Value::Array(_) => "Array",
+        Value::Record { .. } => "Record",
         Value::Unit => "Unit",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nexa_hir::Type;
+    use nexa_span::{FileId, TextRange};
+
+    use super::{evaluate_field, validate_field_layout, FieldId, RecordId, SourceSpan, Value};
+    use crate::{MirProgram, MirRecord, MirRecordField};
+
+    #[test]
+    fn field_projection_reports_a_nominal_tag_mismatch_at_the_access_span(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let expected = RecordId::new(0);
+        let actual = RecordId::new(1);
+        let span = SourceSpan::new(FileId::new(9), TextRange::new(10, 20));
+        let value = Value::Record {
+            record: actual,
+            fields: vec![Value::Int(42)].into(),
+        };
+
+        let error = evaluate_field(value, expected, FieldId::new(expected, 0), span)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected a record tag error"))?;
+
+        assert_eq!(
+            (error.message(), error.span()),
+            ("record field expected record#0, found record#1", span)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn field_projection_reports_a_runtime_field_index_error_at_the_access_span(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let record = RecordId::new(0);
+        let span = SourceSpan::new(FileId::new(9), TextRange::new(30, 40));
+        let value = Value::Record {
+            record,
+            fields: vec![Value::Int(42)].into(),
+        };
+
+        let error = evaluate_field(value, record, FieldId::new(record, 1), span)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected a record field index error"))?;
+
+        assert_eq!(
+            (error.message(), error.span()),
+            ("record field index 1 is outside the runtime value", span)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn field_layout_validation_rejects_a_field_owned_by_another_record(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let record = RecordId::new(0);
+        let other = RecordId::new(1);
+        let span = SourceSpan::new(FileId::new(9), TextRange::new(50, 60));
+        let program = MirProgram {
+            records: vec![MirRecord {
+                id: record,
+                name: "Box".to_owned(),
+                fields: vec![MirRecordField {
+                    id: FieldId::new(record, 0),
+                    name: "value".to_owned(),
+                    ty: Type::Int,
+                    span,
+                }],
+                span,
+            }],
+            functions: Vec::new(),
+            span,
+        };
+
+        let error = validate_field_layout(&program, record, FieldId::new(other, 0), span)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected a field owner error"))?;
+
+        assert_eq!(
+            (error.message(), error.span()),
+            (
+                "record field identity does not match the projected record",
+                span
+            )
+        );
+
+        Ok(())
     }
 }

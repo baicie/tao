@@ -1,14 +1,15 @@
 use std::fmt::{Display, Formatter};
 
 use nexa_hir::{
-    BinaryOperator, Block, Builtin, Expression, Function, FunctionId as HirFunctionId, IfStatement,
-    Name, NameResolution, ReturnStatement, Statement, Type, TypedProgram, WhileStatement,
+    BinaryOperator, Block, Builtin, Expression, FieldId, Function, FunctionId as HirFunctionId,
+    IfStatement, Name, NameResolution, RecordFacts, RecordFieldInitializer, RecordId,
+    ReturnStatement, Statement, Type, TypedProgram, WhileStatement,
 };
 use nexa_span::SourceSpan;
 
 use crate::{
     BasicBlockId, Callee, FunctionId, LocalId, MirBasicBlock, MirExpression, MirFunction,
-    MirProgram, MirStatement, MirTerminator,
+    MirProgram, MirRecord, MirRecordField, MirStatement, MirTerminator,
 };
 
 /// An invariant violation while lowering validated HIR to MIR.
@@ -48,6 +49,12 @@ impl std::error::Error for MirLoweringError {}
 /// semantic invariants enforced by [`nexa_hir::type_check`].
 pub fn lower(typed: &TypedProgram) -> Result<MirProgram, MirLoweringError> {
     let program = typed.program();
+    let records = typed
+        .records()
+        .iter()
+        .enumerate()
+        .map(|(index, record)| lower_record_layout(RecordId::new(index), record))
+        .collect::<Result<Vec<_>, _>>()?;
     let functions = program
         .functions
         .iter()
@@ -56,8 +63,56 @@ pub fn lower(typed: &TypedProgram) -> Result<MirProgram, MirLoweringError> {
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(MirProgram {
+        records,
         functions,
         span: program.span,
+    })
+}
+
+fn lower_record_layout(
+    expected_id: RecordId,
+    record: &RecordFacts,
+) -> Result<MirRecord, MirLoweringError> {
+    if record.id() != expected_id {
+        return Err(error(
+            record.span(),
+            format!(
+                "record `{}` has inconsistent typed HIR source-order identity",
+                record.name()
+            ),
+        ));
+    }
+
+    let fields = record
+        .fields()
+        .iter()
+        .enumerate()
+        .map(|(index, field)| {
+            let expected_field = FieldId::new(expected_id, index);
+            if field.id() != expected_field {
+                return Err(error(
+                    field.span(),
+                    format!(
+                        "field `{}` has inconsistent typed HIR declaration-order identity",
+                        field.name()
+                    ),
+                ));
+            }
+
+            Ok(MirRecordField {
+                id: expected_field,
+                name: field.name().to_owned(),
+                ty: field.ty().clone(),
+                span: field.span(),
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(MirRecord {
+        id: expected_id,
+        name: record.name().to_owned(),
+        fields,
+        span: record.span(),
     })
 }
 
@@ -93,6 +148,15 @@ fn lower_function(
             ),
         ));
     }
+    if facts.parameter_types().len() != function.parameters.len() {
+        return Err(error(
+            function.span,
+            format!(
+                "function `{}` has inconsistent typed HIR parameter type facts",
+                function.name.text
+            ),
+        ));
+    }
     for (parameter, local) in function.parameters.iter().zip(facts.parameter_ids()) {
         if typed.name_resolution(parameter.name.span) != Some(NameResolution::Local(*local)) {
             return Err(error(
@@ -120,7 +184,7 @@ fn lower_function(
     let entry = lowerer.new_block(function.body.span);
     let end = lowerer.lower_block(&function.body, Some(entry))?;
     if let Some(end) = end {
-        if function.return_type.kind != Type::Unit {
+        if facts.return_type() != &Type::Unit {
             return Err(error(
                 function.return_type.span,
                 "non-Unit function reached the end during MIR lowering",
@@ -140,8 +204,9 @@ fn lower_function(
     Ok(MirFunction {
         name: function.name.text.clone(),
         parameters,
+        parameter_types: facts.parameter_types().to_vec(),
         local_count,
-        return_type: function.return_type.kind.clone(),
+        return_type: facts.return_type().clone(),
         entry,
         blocks,
         span: function.span,
@@ -456,6 +521,7 @@ impl FunctionLowerer<'_> {
                     },
                 )
             }
+            Expression::Record { fields, span } => self.lower_record(fields, *span, current),
             Expression::Index {
                 collection,
                 index,
@@ -476,27 +542,67 @@ impl FunctionLowerer<'_> {
                 object,
                 member,
                 span,
-            } => {
-                if self.typed.name_resolution(member.span)
-                    != Some(NameResolution::Builtin(Builtin::ArrayLength))
-                {
-                    return Err(error(
-                        member.span,
-                        format!(
-                            "member `{}` has no matching typed HIR builtin resolution",
-                            member.text
-                        ),
-                    ));
+            } => match self.typed.name_resolution(member.span) {
+                Some(NameResolution::Builtin(Builtin::ArrayLength)) => {
+                    let (current, target) = self.lower_expression(object, current)?;
+                    self.materialize(
+                        current,
+                        MirExpression::Length {
+                            target: Box::new(target),
+                            span: *span,
+                        },
+                    )
                 }
-                let (current, target) = self.lower_expression(object, current)?;
-                self.materialize(
-                    current,
-                    MirExpression::Length {
-                        target: Box::new(target),
-                        span: *span,
-                    },
-                )
-            }
+                Some(NameResolution::Field(field)) => {
+                    let record = match self.typed.expression_type(object.span()) {
+                        Some(Type::Record(record)) => *record,
+                        Some(ty) => {
+                            return Err(error(
+                                object.span(),
+                                format!(
+                                    "record field base has typed HIR type `{ty}` instead of a record"
+                                ),
+                            ));
+                        }
+                        None => {
+                            return Err(error(
+                                object.span(),
+                                "record field base has no typed HIR type fact",
+                            ));
+                        }
+                    };
+                    if field.record() != record {
+                        return Err(error(
+                            member.span,
+                            "record field resolution does not match the base record type",
+                        ));
+                    }
+                    let (current, target) = self.lower_expression(object, current)?;
+                    self.materialize(
+                        current,
+                        MirExpression::Field {
+                            target: Box::new(target),
+                            record,
+                            field,
+                            span: *span,
+                        },
+                    )
+                }
+                Some(resolution) => Err(error(
+                    member.span,
+                    format!(
+                        "member `{}` resolved to `{resolution:?}` instead of a field operation",
+                        member.text
+                    ),
+                )),
+                None => Err(error(
+                    member.span,
+                    format!(
+                        "member `{}` has no matching typed HIR resolution",
+                        member.text
+                    ),
+                )),
+            },
             Expression::Name(name) => {
                 let local = self.resolve_local(name, "value")?;
                 Ok((
@@ -556,6 +662,102 @@ impl FunctionLowerer<'_> {
                 self.lower_expression(expression, current)
             }
         }
+    }
+
+    fn lower_record(
+        &mut self,
+        fields: &[RecordFieldInitializer],
+        span: SourceSpan,
+        mut current: BasicBlockId,
+    ) -> Result<(BasicBlockId, MirExpression), MirLoweringError> {
+        let record = match self.typed.expression_type(span) {
+            Some(Type::Record(record)) => *record,
+            Some(ty) => {
+                return Err(error(
+                    span,
+                    format!("record literal has typed HIR type `{ty}` instead of a record"),
+                ));
+            }
+            None => {
+                return Err(error(span, "record literal has no typed HIR type fact"));
+            }
+        };
+        let field_count = self
+            .typed
+            .record_facts(record)
+            .ok_or_else(|| error(span, "record literal references a missing typed HIR layout"))?
+            .fields()
+            .len();
+        let mut values = vec![None; field_count];
+
+        for initializer in fields {
+            let field = match self.typed.name_resolution(initializer.name.span) {
+                Some(NameResolution::Field(field)) => field,
+                Some(resolution) => {
+                    return Err(error(
+                        initializer.name.span,
+                        format!(
+                            "record initializer `{}` resolved to `{resolution:?}` instead of a field",
+                            initializer.name.text
+                        ),
+                    ));
+                }
+                None => {
+                    return Err(error(
+                        initializer.name.span,
+                        format!(
+                            "record initializer `{}` has no typed HIR field resolution",
+                            initializer.name.text
+                        ),
+                    ));
+                }
+            };
+            if field.record() != record {
+                return Err(error(
+                    initializer.name.span,
+                    "record initializer field belongs to a different nominal record",
+                ));
+            }
+            let Some(slot) = values.get_mut(field.index()) else {
+                return Err(error(
+                    initializer.name.span,
+                    "record initializer field index is outside its typed HIR layout",
+                ));
+            };
+            if slot.is_some() {
+                return Err(error(
+                    initializer.name.span,
+                    "duplicate record initializer reached MIR lowering",
+                ));
+            }
+
+            let (next, value) = self.lower_expression(&initializer.value, current)?;
+            let (next, value) = self.materialize(next, value)?;
+            current = next;
+            *slot = Some(value);
+        }
+
+        let fields = values
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| {
+                value.ok_or_else(|| {
+                    error(
+                        span,
+                        format!("record literal is missing resolved field index {index}"),
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        self.materialize(
+            current,
+            MirExpression::Record {
+                record,
+                fields,
+                span,
+            },
+        )
     }
 
     fn lower_logical(
@@ -643,6 +845,15 @@ impl FunctionLowerer<'_> {
                 return Err(error(
                     name.span,
                     format!("local `{}` called as a function in MIR lowering", name.text),
+                ));
+            }
+            Some(NameResolution::Record(_) | NameResolution::Field(_)) => {
+                return Err(error(
+                    name.span,
+                    format!(
+                        "non-callable name `{}` reached function-call lowering",
+                        name.text
+                    ),
                 ));
             }
             Some(NameResolution::Builtin(Builtin::ArrayLength)) => {
