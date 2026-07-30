@@ -17,10 +17,10 @@ pub use check::{
 pub use hir::{
     AssignmentStatement, BinaryOperator, Block, BreakStatement, ConstDeclaration,
     ContinueStatement, DefId, Expression, ExpressionStatement, FieldId, Function, FunctionId,
-    IfStatement, LetDeclaration, MatchArm, MatchPattern, ModuleId, Name, Parameter, PayloadId,
-    Program, RecordDeclaration, RecordFieldDeclaration, RecordFieldInitializer, RecordId,
-    ReturnStatement, Statement, Type, TypeReference, TypeReferenceKind, UnaryOperator,
-    UnionDeclaration, UnionId, UnionVariantDeclaration, VariantId, VariantPayloadDeclaration,
-    WhileStatement,
+    IfStatement, ImportDeclaration, LetDeclaration, MatchArm, MatchPattern, ModuleId, Name,
+    Parameter, PayloadId, Program, RecordDeclaration, RecordFieldDeclaration,
+    RecordFieldInitializer, RecordId, ReturnStatement, Statement, Type, TypeReference,
+    TypeReferenceKind, UnaryOperator, UnionDeclaration, UnionId, UnionVariantDeclaration,
+    VariantId, VariantPayloadDeclaration, Visibility, WhileStatement,
 };
 pub use lower::{lower, lower_module, LoweringError};

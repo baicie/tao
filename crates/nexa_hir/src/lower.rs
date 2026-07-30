@@ -6,11 +6,11 @@ use nexa_syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
 use crate::{
     AssignmentStatement, BinaryOperator, Block, BreakStatement, ConstDeclaration,
-    ContinueStatement, Expression, ExpressionStatement, Function, IfStatement, LetDeclaration,
-    MatchArm, MatchPattern, ModuleId, Name, Parameter, Program, RecordDeclaration,
+    ContinueStatement, Expression, ExpressionStatement, Function, IfStatement, ImportDeclaration,
+    LetDeclaration, MatchArm, MatchPattern, ModuleId, Name, Parameter, Program, RecordDeclaration,
     RecordFieldDeclaration, RecordFieldInitializer, ReturnStatement, Statement, TypeReference,
     TypeReferenceKind, UnaryOperator, UnionDeclaration, UnionVariantDeclaration,
-    VariantPayloadDeclaration, WhileStatement,
+    VariantPayloadDeclaration, Visibility, WhileStatement,
 };
 
 const SYNTAX_ERROR: DiagnosticCode = DiagnosticCode::new("E1001");
@@ -88,24 +88,44 @@ pub fn lower_module(
         return Err(malformed(node_span(file, syntax)));
     }
 
-    let records = syntax
-        .children()
-        .filter(|node| node.kind() == SyntaxKind::RecordDeclaration)
-        .map(|node| lower_record(file, &node))
-        .collect::<Result<Vec<_>, _>>()?;
-    let unions = syntax
-        .children()
-        .filter(|node| node.kind() == SyntaxKind::UnionDeclaration)
-        .map(|node| lower_union(file, &node))
-        .collect::<Result<Vec<_>, _>>()?;
-    let functions = syntax
-        .children()
-        .filter(|node| node.kind() == SyntaxKind::FunctionDeclaration)
-        .map(|node| lower_function(file, &node))
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut imports = Vec::new();
+    let mut records = Vec::new();
+    let mut unions = Vec::new();
+    let mut functions = Vec::new();
+
+    for item in syntax.children() {
+        let (declaration, visibility) = match item.kind() {
+            SyntaxKind::ImportDeclaration => {
+                imports.push(lower_import(file, &item)?);
+                continue;
+            }
+            SyntaxKind::FunctionDeclaration
+            | SyntaxKind::RecordDeclaration
+            | SyntaxKind::UnionDeclaration => (item, Visibility::Private),
+            SyntaxKind::ExportedDeclaration => (
+                exported_declaration_child(file, &item)?,
+                Visibility::Exported,
+            ),
+            _ => return Err(malformed(node_span(file, &item))),
+        };
+
+        match declaration.kind() {
+            SyntaxKind::FunctionDeclaration => {
+                functions.push(lower_function(file, &declaration, visibility)?);
+            }
+            SyntaxKind::RecordDeclaration => {
+                records.push(lower_record(file, &declaration, visibility)?);
+            }
+            SyntaxKind::UnionDeclaration => {
+                unions.push(lower_union(file, &declaration, visibility)?);
+            }
+            _ => return Err(malformed(node_span(file, &declaration))),
+        }
+    }
 
     Ok(Program {
         module,
+        imports,
         records,
         unions,
         functions,
@@ -113,7 +133,123 @@ pub fn lower_module(
     })
 }
 
-fn lower_union(file: FileId, node: &SyntaxNode) -> Result<UnionDeclaration, LoweringError> {
+fn lower_import(file: FileId, node: &SyntaxNode) -> Result<ImportDeclaration, LoweringError> {
+    const EXPECTED_TOKENS: [SyntaxKind; 6] = [
+        SyntaxKind::ImportKw,
+        SyntaxKind::LBrace,
+        SyntaxKind::RBrace,
+        SyntaxKind::FromKw,
+        SyntaxKind::String,
+        SyntaxKind::Semicolon,
+    ];
+
+    let direct_tokens = node
+        .children_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter(|token| !token.kind().is_trivia())
+        .collect::<Vec<_>>();
+    if !direct_tokens
+        .iter()
+        .map(SyntaxToken::kind)
+        .eq(EXPECTED_TOKENS)
+    {
+        return Err(malformed(node_span(file, node)));
+    }
+
+    let mut children = node.children();
+    let list = children
+        .next()
+        .filter(|child| child.kind() == SyntaxKind::ImportList)
+        .ok_or_else(|| malformed(node_span(file, node)))?;
+    if children.next().is_some() {
+        return Err(malformed(node_span(file, node)));
+    }
+
+    let names = lower_import_names(file, &list)?;
+    let path_token = required_direct_token(file, node, SyntaxKind::String)?;
+    let path_span = token_span(file, &path_token);
+    let path = decode_string_token(file, &path_token)?;
+
+    Ok(ImportDeclaration {
+        names,
+        path,
+        path_span,
+        span: node_span(file, node),
+    })
+}
+
+fn lower_import_names(file: FileId, node: &SyntaxNode) -> Result<Vec<Name>, LoweringError> {
+    let mut names = Vec::new();
+    let mut expects_name = true;
+
+    for element in node.children_with_tokens() {
+        let Some(token) = element.into_token() else {
+            return Err(malformed(node_span(file, node)));
+        };
+        if token.kind().is_trivia() {
+            continue;
+        }
+
+        if expects_name && token.kind() == SyntaxKind::Ident {
+            names.push(Name {
+                text: token.text().to_owned(),
+                span: token_span(file, &token),
+            });
+            expects_name = false;
+        } else if !expects_name && token.kind() == SyntaxKind::Comma {
+            expects_name = true;
+        } else {
+            return Err(malformed(token_span(file, &token)));
+        }
+    }
+
+    if names.is_empty() || expects_name {
+        return Err(malformed(node_span(file, node)));
+    }
+
+    Ok(names)
+}
+
+fn exported_declaration_child(
+    file: FileId,
+    node: &SyntaxNode,
+) -> Result<SyntaxNode, LoweringError> {
+    let mut direct_tokens = node
+        .children_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter(|token| !token.kind().is_trivia());
+    if !direct_tokens
+        .next()
+        .is_some_and(|token| token.kind() == SyntaxKind::ExportKw)
+        || direct_tokens.next().is_some()
+    {
+        return Err(malformed(node_span(file, node)));
+    }
+
+    let mut children = node.children();
+    let declaration = children
+        .next()
+        .filter(|child| {
+            matches!(
+                child.kind(),
+                SyntaxKind::FunctionDeclaration
+                    | SyntaxKind::RecordDeclaration
+                    | SyntaxKind::UnionDeclaration
+            )
+        })
+        .ok_or_else(|| malformed(node_span(file, node)))?;
+    if children.next().is_some() {
+        return Err(malformed(node_span(file, node)));
+    }
+
+    Ok(declaration)
+}
+
+fn lower_union(
+    file: FileId,
+    node: &SyntaxNode,
+    visibility: Visibility,
+) -> Result<UnionDeclaration, LoweringError> {
     let variants = node
         .children()
         .filter(|variant| variant.kind() == SyntaxKind::UnionVariant)
@@ -122,6 +258,7 @@ fn lower_union(file: FileId, node: &SyntaxNode) -> Result<UnionDeclaration, Lowe
 
     Ok(UnionDeclaration {
         name: lower_direct_name(file, node)?,
+        visibility,
         variants,
         span: node_span(file, node),
     })
@@ -168,7 +305,11 @@ fn lower_union_variant(
     })
 }
 
-fn lower_record(file: FileId, node: &SyntaxNode) -> Result<RecordDeclaration, LoweringError> {
+fn lower_record(
+    file: FileId,
+    node: &SyntaxNode,
+    visibility: Visibility,
+) -> Result<RecordDeclaration, LoweringError> {
     let body = required_child(file, node, SyntaxKind::RecordBody)?;
     let fields = body
         .children()
@@ -178,6 +319,7 @@ fn lower_record(file: FileId, node: &SyntaxNode) -> Result<RecordDeclaration, Lo
 
     Ok(RecordDeclaration {
         name: lower_direct_name(file, node)?,
+        visibility,
         fields,
         span: node_span(file, node),
     })
@@ -194,7 +336,11 @@ fn lower_record_field(
     })
 }
 
-fn lower_function(file: FileId, node: &SyntaxNode) -> Result<Function, LoweringError> {
+fn lower_function(
+    file: FileId,
+    node: &SyntaxNode,
+    visibility: Visibility,
+) -> Result<Function, LoweringError> {
     let name = lower_direct_name(file, node)?;
     let parameters = child(node, SyntaxKind::ParameterList)
         .map(|parameters| {
@@ -211,6 +357,7 @@ fn lower_function(file: FileId, node: &SyntaxNode) -> Result<Function, LoweringE
 
     Ok(Function {
         name,
+        visibility,
         parameters,
         return_type,
         body,
@@ -498,6 +645,13 @@ fn lower_boolean(file: FileId, node: &SyntaxNode) -> Result<Expression, Lowering
 fn lower_string(file: FileId, node: &SyntaxNode) -> Result<Expression, LoweringError> {
     let token = required_direct_token(file, node, SyntaxKind::String)?;
     let span = token_span(file, &token);
+    let value = decode_string_token(file, &token)?;
+
+    Ok(Expression::String { value, span })
+}
+
+fn decode_string_token(file: FileId, token: &SyntaxToken) -> Result<String, LoweringError> {
+    let span = token_span(file, token);
     let text = token.text();
     let contents = text
         .strip_prefix('"')
@@ -523,7 +677,7 @@ fn lower_string(file: FileId, node: &SyntaxNode) -> Result<Expression, LoweringE
         });
     }
 
-    Ok(Expression::String { value, span })
+    Ok(value)
 }
 
 fn lower_array(file: FileId, node: &SyntaxNode) -> Result<Expression, LoweringError> {

@@ -5,6 +5,8 @@ use nexa_span::SourceSpan;
 pub struct Program {
     /// The stable identity of the module that owns these declarations.
     pub module: ModuleId,
+    /// All named imports in source order.
+    pub imports: Vec<ImportDeclaration>,
     /// All top-level nominal record declarations in source order.
     pub records: Vec<RecordDeclaration>,
     /// All top-level nominal tagged union declarations in source order.
@@ -13,6 +15,28 @@ pub struct Program {
     pub functions: Vec<Function>,
     /// The source range covered by the source file node.
     pub span: SourceSpan,
+}
+
+/// One source-level named import before module resolution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportDeclaration {
+    /// Imported names in source order.
+    pub names: Vec<Name>,
+    /// The decoded import path before semantic path validation.
+    pub path: String,
+    /// The exact range of the quoted path token.
+    pub path_span: SourceSpan,
+    /// The import declaration's full source range.
+    pub span: SourceSpan,
+}
+
+/// Whether a top-level declaration is visible to importing modules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Visibility {
+    /// Visible only inside the defining module.
+    Private,
+    /// Available for explicit named import from another module.
+    Exported,
 }
 
 /// A stable first-discovery identifier for one source module.
@@ -97,6 +121,8 @@ impl FunctionId {
 pub struct RecordDeclaration {
     /// The declared record name.
     pub name: Name,
+    /// The declaration's module visibility.
+    pub visibility: Visibility,
     /// Fields in declaration order.
     pub fields: Vec<RecordFieldDeclaration>,
     /// The declaration's full source range.
@@ -119,6 +145,8 @@ pub struct RecordFieldDeclaration {
 pub struct UnionDeclaration {
     /// The declared union name.
     pub name: Name,
+    /// The declaration's module visibility.
+    pub visibility: Visibility,
     /// Variants in declaration order.
     pub variants: Vec<UnionVariantDeclaration>,
     /// The declaration's full source range.
@@ -152,6 +180,8 @@ pub struct VariantPayloadDeclaration {
 pub struct Function {
     /// The declared function name.
     pub name: Name,
+    /// The declaration's module visibility.
+    pub visibility: Visibility,
     /// Function parameters in declaration order.
     pub parameters: Vec<Parameter>,
     /// The declared result type.
