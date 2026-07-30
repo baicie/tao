@@ -1,0 +1,2 @@
+import { absent } from "./private_library.nexa";
+function main(): Unit {}

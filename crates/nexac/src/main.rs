@@ -1,15 +1,19 @@
 #![forbid(unsafe_code)]
 //! Nexa compiler command-line entry point.
 
+mod provider;
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use nexa_compiler::{check, run_with_args, CheckResult, RunResult, RuntimeError};
+use nexa_compiler::{check_session, run_session_with_args, CompilerSession, RuntimeError};
 use nexa_diagnostics::{Diagnostic, Severity};
 use nexa_parser::{parse_source, Parse};
 use nexa_source::SourceMap;
 use nexa_span::FileId;
+
+use crate::provider::FileSystemSourceProvider;
 
 #[derive(Debug, Parser)]
 #[command(name = "nexac", version, about = "Nexa bootstrap compiler")]
@@ -59,10 +63,11 @@ fn main() -> Result<()> {
             }
         }
         Command::Check { file } => {
-            let mut sources = SourceMap::default();
-            let result = check_file(&mut sources, &file)?;
+            let session = CompilerSession::build(FileSystemSourceProvider, &file)
+                .with_context(|| format!("failed to load {}", file.display()))?;
+            let result = check_session(&session);
 
-            emit_diagnostics(&sources, result.diagnostics());
+            emit_diagnostics(session.sources(), result.diagnostics());
 
             if !result.is_ok() {
                 bail!(
@@ -74,17 +79,18 @@ fn main() -> Result<()> {
             println!("ok");
         }
         Command::Run { file, arguments } => {
-            let mut sources = SourceMap::default();
-            let result = run_file(&mut sources, &file, &arguments)?;
+            let session = CompilerSession::build(FileSystemSourceProvider, &file)
+                .with_context(|| format!("failed to load {}", file.display()))?;
+            let result = run_session_with_args(&session, &arguments);
 
-            emit_diagnostics(&sources, result.diagnostics());
+            emit_diagnostics(session.sources(), result.diagnostics());
 
             for line in result.output() {
                 println!("{line}");
             }
 
             if let Some(runtime_error) = result.runtime_error() {
-                emit_runtime_error(&sources, runtime_error);
+                emit_runtime_error(session.sources(), runtime_error);
                 bail!("run failed: {runtime_error}");
             }
             if !result.is_ok() {
@@ -108,20 +114,6 @@ fn parse_file(sources: &mut SourceMap, path: &Path) -> Result<Parse> {
     let source = source_text(sources, file)?;
 
     Ok(parse_source(file, source))
-}
-
-fn check_file(sources: &mut SourceMap, path: &Path) -> Result<CheckResult> {
-    let file = register_source(sources, path)?;
-    let source = source_text(sources, file)?;
-
-    Ok(check(file, source))
-}
-
-fn run_file(sources: &mut SourceMap, path: &Path, arguments: &[String]) -> Result<RunResult> {
-    let file = register_source(sources, path)?;
-    let source = source_text(sources, file)?;
-
-    Ok(run_with_args(file, source, arguments))
 }
 
 fn register_source(sources: &mut SourceMap, path: &Path) -> Result<FileId> {

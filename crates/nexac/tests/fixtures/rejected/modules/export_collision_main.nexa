@@ -1,0 +1,2 @@
+import { Item } from "./export_collision_library.nexa";
+function main(): Unit {}

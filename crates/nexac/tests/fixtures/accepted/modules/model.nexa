@@ -1,0 +1,13 @@
+export type Box = { value: Int; };
+export type Choice = | None() | Some(value: Box);
+
+export function make(value: Int): Choice {
+  return Choice.Some({ value: value });
+}
+
+export function read(choice: Choice): Int {
+  return match (choice) {
+    case Choice.None() => 0;
+    case Choice.Some(box) => box.value;
+  };
+}

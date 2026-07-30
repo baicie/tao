@@ -589,6 +589,126 @@ fn nexac_parse_reports_invalid_syntax() -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
+#[test]
+fn nexac_check_and_run_execute_a_multi_file_module_graph() -> Result<(), Box<dyn std::error::Error>>
+{
+    let entry = fixture("accepted/modules/main.nexa");
+    let checked = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("check")
+        .arg(&entry)
+        .output()?;
+    assert!(
+        checked.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&checked.stdout), "ok\n");
+
+    let run = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("run")
+        .arg(entry)
+        .output()?;
+    assert!(
+        run.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n");
+
+    Ok(())
+}
+
+#[test]
+fn nexac_parse_does_not_load_a_syntactically_valid_import() -> Result<(), Box<dyn std::error::Error>>
+{
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("parse")
+        .arg(fixture("accepted/parse_missing_import.nexa"))
+        .output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(stdout.contains("ImportDeclaration@"), "stdout: {stdout}");
+
+    Ok(())
+}
+
+#[test]
+fn nexac_check_reports_each_module_diagnostic_class() -> Result<(), Box<dyn std::error::Error>> {
+    for (fixture_path, code) in [
+        ("rejected/modules/missing_main.nexa", "E4001"),
+        ("rejected/modules/cycle_left.nexa", "E4002"),
+        ("rejected/modules/unknown_main.nexa", "E4003"),
+        ("rejected/modules/private_main.nexa", "E4004"),
+        ("rejected/modules/export_collision_main.nexa", "E4005"),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+            .arg("check")
+            .arg(fixture(fixture_path))
+            .output()?;
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        assert!(!output.status.success(), "fixture: {fixture_path}");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+        assert!(stderr.contains(code), "fixture: {fixture_path}; {stderr}");
+    }
+
+    Ok(())
+}
+
+#[test]
+fn nexac_run_renders_dependency_runtime_locations_and_prior_output(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("run")
+        .arg(fixture("rejected/modules/runtime_main.nexa"))
+        .output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "7\n8\n");
+    assert!(stderr.contains("division by zero"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("runtime_library.nexa:3:19"),
+        "stderr: {stderr}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn nexac_run_does_not_select_an_imported_main_as_entry() -> Result<(), Box<dyn std::error::Error>> {
+    let entry = fixture("rejected/modules/no_entry_main.nexa");
+    let checked = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("check")
+        .arg(&entry)
+        .output()?;
+    assert!(
+        checked.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&checked.stdout), "ok\n");
+
+    let run = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("run")
+        .arg(entry)
+        .output()?;
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(!run.status.success());
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+    assert!(
+        stderr.contains("program has no `main` entry point"),
+        "stderr: {stderr}"
+    );
+
+    Ok(())
+}
+
 fn fixture(path: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")

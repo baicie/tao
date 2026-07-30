@@ -1,0 +1,5 @@
+import { Shared } from "./shared.nexa";
+
+export function readRight(value: Shared): Int {
+  return value.value;
+}

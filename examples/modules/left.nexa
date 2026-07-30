@@ -1,0 +1,5 @@
+import { Shared, make } from "./shared.nexa";
+
+export function makeLeft(): Shared {
+  return make(42);
+}

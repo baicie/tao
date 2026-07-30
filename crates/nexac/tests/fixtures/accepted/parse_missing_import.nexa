@@ -1,0 +1,2 @@
+import { value } from "./does_not_exist.nexa";
+function main(): Unit {}

@@ -1,0 +1,6 @@
+import { Box, Choice, make, read } from "./model.nexa";
+
+function main(): Unit {
+  const choice: Choice = make(42);
+  print(read(choice));
+}

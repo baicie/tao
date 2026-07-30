@@ -1,0 +1,6 @@
+import { makeLeft } from "./left.nexa";
+import { readRight } from "./right.nexa";
+
+function main(): Unit {
+  print(readRight(makeLeft()));
+}
