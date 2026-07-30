@@ -156,6 +156,45 @@ const IMPORT_LIST_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::FunctionKw,
     SyntaxKind::TypeKw,
 ];
+const TYPE_PARAMETER_RECOVERY: &[SyntaxKind] = &[
+    SyntaxKind::Ident,
+    SyntaxKind::Comma,
+    SyntaxKind::Gt,
+    SyntaxKind::GtEq,
+    SyntaxKind::LParen,
+    SyntaxKind::LBrace,
+    SyntaxKind::RBrace,
+    SyntaxKind::Colon,
+    SyntaxKind::Eq,
+    SyntaxKind::Semicolon,
+    SyntaxKind::ImportKw,
+    SyntaxKind::ExportKw,
+    SyntaxKind::FunctionKw,
+    SyntaxKind::TypeKw,
+];
+const TYPE_ARGUMENT_RECOVERY: &[SyntaxKind] = &[
+    SyntaxKind::Ident,
+    SyntaxKind::IntKw,
+    SyntaxKind::BoolKw,
+    SyntaxKind::StringKw,
+    SyntaxKind::UnitKw,
+    SyntaxKind::Comma,
+    SyntaxKind::Gt,
+    SyntaxKind::GtEq,
+    SyntaxKind::RBracket,
+    SyntaxKind::RParen,
+    SyntaxKind::LBrace,
+    SyntaxKind::RBrace,
+    SyntaxKind::Colon,
+    SyntaxKind::Eq,
+    SyntaxKind::Semicolon,
+    SyntaxKind::Pipe,
+    SyntaxKind::FatArrow,
+    SyntaxKind::ImportKw,
+    SyntaxKind::ExportKw,
+    SyntaxKind::FunctionKw,
+    SyntaxKind::TypeKw,
+];
 
 pub(super) fn parse_tokens(
     file: FileId,
@@ -167,6 +206,7 @@ pub(super) fn parse_tokens(
         source_len,
         tokens,
         position: 0,
+        pending_split_eq: false,
         builder: GreenNodeBuilder::new(),
         diagnostics: lexical_diagnostics(file, tokens),
     }
@@ -191,6 +231,7 @@ struct Parser<'tokens> {
     source_len: usize,
     tokens: &'tokens [Token],
     position: usize,
+    pending_split_eq: bool,
     builder: GreenNodeBuilder<'static>,
     diagnostics: Vec<Diagnostic>,
 }
@@ -325,6 +366,7 @@ impl Parser<'_> {
             .start_node(SyntaxKind::FunctionDeclaration.into());
         self.expect(SyntaxKind::FunctionKw, "expected `function`");
         self.expect(SyntaxKind::Ident, "expected function name");
+        self.parse_type_parameter_list();
         self.expect(SyntaxKind::LParen, "expected `(` after function name");
         self.parse_parameter_list();
         self.expect(SyntaxKind::RParen, "expected `)` after parameters");
@@ -339,6 +381,7 @@ impl Parser<'_> {
             .start_node(SyntaxKind::RecordDeclaration.into());
         self.expect(SyntaxKind::TypeKw, "expected `type`");
         self.expect(SyntaxKind::Ident, "expected record name");
+        self.parse_type_parameter_list();
         self.expect(SyntaxKind::Eq, "expected `=` after record name");
         self.parse_record_body();
         if !self.expect(
@@ -407,6 +450,7 @@ impl Parser<'_> {
         self.builder.start_node(SyntaxKind::UnionDeclaration.into());
         self.expect(SyntaxKind::TypeKw, "expected `type`");
         self.expect(SyntaxKind::Ident, "expected union name");
+        self.parse_type_parameter_list();
         self.expect(SyntaxKind::Eq, "expected `=` after union name");
         self.skip_trivia();
 
@@ -597,13 +641,85 @@ impl Parser<'_> {
         self.builder.finish_node();
     }
 
+    fn parse_type_parameter_list(&mut self) {
+        self.skip_trivia();
+        if !self.at(SyntaxKind::Lt) {
+            return;
+        }
+
+        self.builder
+            .start_node(SyntaxKind::TypeParameterList.into());
+        self.bump();
+        self.skip_trivia();
+
+        if self.at_type_list_close() {
+            self.error_at_current("expected type parameter");
+            self.bump_type_list_close();
+            self.builder.finish_node();
+            return;
+        }
+
+        loop {
+            let position = self.position;
+            self.builder.start_node(SyntaxKind::TypeParameter.into());
+            self.expect(SyntaxKind::Ident, "expected type parameter");
+            self.builder.finish_node();
+
+            if self.position == position {
+                self.recover_to(TYPE_PARAMETER_RECOVERY);
+            }
+
+            self.skip_trivia();
+            if self.at(SyntaxKind::Comma) {
+                self.bump();
+                self.skip_trivia();
+                if self.at_type_list_close() {
+                    self.error_at_current("expected type parameter after `,`");
+                    break;
+                }
+                if self.type_parameter_list_is_finished() {
+                    self.error_at_current("expected type parameter after `,`");
+                    break;
+                }
+                continue;
+            }
+            if self.at_type_list_close() || self.type_parameter_list_is_finished() {
+                break;
+            }
+            if self.at(SyntaxKind::Ident) {
+                self.error_at_current("expected `,` or `>` after type parameter");
+                continue;
+            }
+
+            self.error_at_current("expected `,` or `>` after type parameter");
+            self.recover_to(TYPE_PARAMETER_RECOVERY);
+            if self.at(SyntaxKind::Comma) {
+                self.bump();
+                self.skip_trivia();
+                if self.at_type_list_close() {
+                    self.error_at_current("expected type parameter after `,`");
+                    break;
+                }
+                continue;
+            }
+            if self.at(SyntaxKind::Ident) {
+                continue;
+            }
+            break;
+        }
+
+        self.expect_type_list_close("expected `>` after type parameters");
+        self.builder.finish_node();
+    }
+
     fn parse_type(&mut self) {
         self.skip_trivia();
         let checkpoint = self.builder.checkpoint();
         self.builder.start_node(SyntaxKind::Type.into());
 
+        let current = self.current();
         let parsed = if matches!(
-            self.current(),
+            current,
             Some(
                 SyntaxKind::IntKw
                     | SyntaxKind::BoolKw
@@ -619,6 +735,13 @@ impl Parser<'_> {
             false
         };
 
+        if parsed
+            && current == Some(SyntaxKind::Ident)
+            && self.nth_non_trivia(0) == Some(SyntaxKind::Lt)
+        {
+            self.parse_type_argument_list();
+        }
+
         self.builder.finish_node();
 
         while parsed && self.nth_non_trivia(0) == Some(SyntaxKind::LBracket) {
@@ -628,6 +751,69 @@ impl Parser<'_> {
             self.expect(SyntaxKind::RBracket, "expected `]` after array type");
             self.builder.finish_node();
         }
+    }
+
+    fn parse_type_argument_list(&mut self) {
+        self.skip_trivia();
+        self.builder.start_node(SyntaxKind::TypeArgumentList.into());
+        self.expect(SyntaxKind::Lt, "expected `<` before type arguments");
+        self.skip_trivia();
+
+        if self.at_type_list_close() {
+            self.error_at_current("expected type argument");
+            self.bump_type_list_close();
+            self.builder.finish_node();
+            return;
+        }
+
+        loop {
+            let position = self.position;
+            self.parse_type();
+            if self.position == position {
+                self.recover_to(TYPE_ARGUMENT_RECOVERY);
+            }
+
+            self.skip_trivia();
+            if self.at(SyntaxKind::Comma) {
+                self.bump();
+                self.skip_trivia();
+                if self.at_type_list_close() {
+                    self.error_at_current("expected type argument after `,`");
+                    break;
+                }
+                if self.type_argument_list_is_finished() {
+                    self.error_at_current("expected type argument after `,`");
+                    break;
+                }
+                continue;
+            }
+            if self.at_type_list_close() || self.type_argument_list_is_finished() {
+                break;
+            }
+            if self.current().is_some_and(is_type_start) {
+                self.error_at_current("expected `,` or `>` after type argument");
+                continue;
+            }
+
+            self.error_at_current("expected `,` or `>` after type argument");
+            self.recover_to(TYPE_ARGUMENT_RECOVERY);
+            if self.at(SyntaxKind::Comma) {
+                self.bump();
+                self.skip_trivia();
+                if self.at_type_list_close() {
+                    self.error_at_current("expected type argument after `,`");
+                    break;
+                }
+                continue;
+            }
+            if self.current().is_some_and(is_type_start) {
+                continue;
+            }
+            break;
+        }
+
+        self.expect_type_list_close("expected `>` after type arguments");
+        self.builder.finish_node();
     }
 
     fn parse_block(&mut self) {
@@ -1315,6 +1501,30 @@ impl Parser<'_> {
         }
     }
 
+    fn expect_type_list_close(&mut self, message: &'static str) -> bool {
+        self.skip_trivia();
+        if self.at_type_list_close() {
+            self.bump_type_list_close();
+            true
+        } else {
+            self.error_at_current(message);
+            false
+        }
+    }
+
+    fn at_type_list_close(&self) -> bool {
+        matches!(self.current(), Some(SyntaxKind::Gt | SyntaxKind::GtEq))
+    }
+
+    fn bump_type_list_close(&mut self) {
+        if self.at(SyntaxKind::GtEq) {
+            self.builder.token(SyntaxKind::Gt.into(), ">");
+            self.pending_split_eq = true;
+        } else {
+            self.bump();
+        }
+    }
+
     fn recover_statement(&mut self) {
         self.recover_to(STATEMENT_RECOVERY);
         if self.at(SyntaxKind::Semicolon) {
@@ -1354,10 +1564,7 @@ impl Parser<'_> {
     }
 
     fn error_at_current(&mut self, message: &'static str) {
-        let range = self.tokens.get(self.position).map_or_else(
-            || TextRange::new(self.source_len, self.source_len),
-            Token::range,
-        );
+        let range = self.current_range();
         self.diagnostics.push(
             Diagnostic::error(PARSE_ERROR, message)
                 .with_label(Label::new(SourceSpan::new(self.file, range), message)),
@@ -1365,7 +1572,23 @@ impl Parser<'_> {
     }
 
     fn current(&self) -> Option<SyntaxKind> {
-        self.tokens.get(self.position).map(Token::kind)
+        if self.pending_split_eq {
+            Some(SyntaxKind::Eq)
+        } else {
+            self.tokens.get(self.position).map(Token::kind)
+        }
+    }
+
+    fn current_range(&self) -> TextRange {
+        let Some(token) = self.tokens.get(self.position) else {
+            return TextRange::new(self.source_len, self.source_len);
+        };
+        let range = token.range();
+        if self.pending_split_eq {
+            TextRange::new(range.start() + 1, range.end())
+        } else {
+            range
+        }
     }
 
     fn at(&self, kind: SyntaxKind) -> bool {
@@ -1388,6 +1611,49 @@ impl Parser<'_> {
         )
     }
 
+    fn type_parameter_list_is_finished(&self) -> bool {
+        matches!(
+            self.current(),
+            None | Some(
+                SyntaxKind::Gt
+                    | SyntaxKind::GtEq
+                    | SyntaxKind::LParen
+                    | SyntaxKind::LBrace
+                    | SyntaxKind::RBrace
+                    | SyntaxKind::Colon
+                    | SyntaxKind::Eq
+                    | SyntaxKind::Semicolon
+                    | SyntaxKind::ImportKw
+                    | SyntaxKind::ExportKw
+                    | SyntaxKind::FunctionKw
+                    | SyntaxKind::TypeKw
+            )
+        )
+    }
+
+    fn type_argument_list_is_finished(&self) -> bool {
+        matches!(
+            self.current(),
+            None | Some(
+                SyntaxKind::Gt
+                    | SyntaxKind::GtEq
+                    | SyntaxKind::RBracket
+                    | SyntaxKind::RParen
+                    | SyntaxKind::LBrace
+                    | SyntaxKind::RBrace
+                    | SyntaxKind::Colon
+                    | SyntaxKind::Eq
+                    | SyntaxKind::Semicolon
+                    | SyntaxKind::Pipe
+                    | SyntaxKind::FatArrow
+                    | SyntaxKind::ImportKw
+                    | SyntaxKind::ExportKw
+                    | SyntaxKind::FunctionKw
+                    | SyntaxKind::TypeKw
+            )
+        )
+    }
+
     fn at_assignment_statement(&self) -> bool {
         self.nth_non_trivia(0) == Some(SyntaxKind::Ident)
             && self.nth_non_trivia(1) == Some(SyntaxKind::Eq)
@@ -1395,10 +1661,34 @@ impl Parser<'_> {
 
     fn type_declaration_is_union(&self) -> bool {
         let mut offset = 1;
+        let mut close_includes_equals = false;
         if self.nth_non_trivia(offset) == Some(SyntaxKind::Ident) {
             offset += 1;
         }
-        if self.nth_non_trivia(offset) == Some(SyntaxKind::Eq) {
+        if self.nth_non_trivia(offset) == Some(SyntaxKind::Lt) {
+            offset += 1;
+            while let Some(kind) = self.nth_non_trivia(offset) {
+                match kind {
+                    SyntaxKind::Gt => {
+                        offset += 1;
+                        break;
+                    }
+                    SyntaxKind::GtEq => {
+                        offset += 1;
+                        close_includes_equals = true;
+                        break;
+                    }
+                    SyntaxKind::Eq
+                    | SyntaxKind::Semicolon
+                    | SyntaxKind::ImportKw
+                    | SyntaxKind::ExportKw
+                    | SyntaxKind::FunctionKw
+                    | SyntaxKind::TypeKw => break,
+                    _ => offset += 1,
+                }
+            }
+        }
+        if !close_includes_equals && self.nth_non_trivia(offset) == Some(SyntaxKind::Eq) {
             offset += 1;
         }
 
@@ -1409,6 +1699,16 @@ impl Parser<'_> {
     }
 
     fn nth_non_trivia(&self, offset: usize) -> Option<SyntaxKind> {
+        if self.pending_split_eq {
+            if offset == 0 {
+                return Some(SyntaxKind::Eq);
+            }
+            return self.tokens[self.position + 1..]
+                .iter()
+                .filter(|token| !token.kind().is_trivia())
+                .nth(offset - 1)
+                .map(Token::kind);
+        }
         self.tokens[self.position..]
             .iter()
             .filter(|token| !token.kind().is_trivia())
@@ -1417,8 +1717,25 @@ impl Parser<'_> {
     }
 
     fn bump(&mut self) {
+        if self.pending_split_eq {
+            self.builder.token(SyntaxKind::Eq.into(), "=");
+            self.pending_split_eq = false;
+            self.position += 1;
+            return;
+        }
         let token = &self.tokens[self.position];
         self.builder.token(token.kind().into(), token.text());
         self.position += 1;
     }
+}
+
+const fn is_type_start(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::IntKw
+            | SyntaxKind::BoolKw
+            | SyntaxKind::StringKw
+            | SyntaxKind::UnitKw
+            | SyntaxKind::Ident
+    )
 }

@@ -203,6 +203,12 @@ pub enum SyntaxKind {
     ImportList = 96,
     /// An exported top-level function, record, or union declaration.
     ExportedDeclaration = 97,
+    /// The declared type parameters on a generic declaration.
+    TypeParameterList = 98,
+    /// One declared generic type parameter.
+    TypeParameter = 99,
+    /// The type arguments applied to a named type reference.
+    TypeArgumentList = 100,
 }
 
 impl SyntaxKind {
@@ -312,6 +318,9 @@ impl SyntaxKind {
             95 => Self::ImportDeclaration,
             96 => Self::ImportList,
             97 => Self::ExportedDeclaration,
+            98 => Self::TypeParameterList,
+            99 => Self::TypeParameter,
+            100 => Self::TypeArgumentList,
             _ => unreachable!("invalid Nexa syntax kind: {raw}"),
         }
     }
@@ -962,6 +971,9 @@ mod tests {
             SyntaxKind::ImportDeclaration,
             SyntaxKind::ImportList,
             SyntaxKind::ExportedDeclaration,
+            SyntaxKind::TypeParameterList,
+            SyntaxKind::TypeParameter,
+            SyntaxKind::TypeArgumentList,
         ];
 
         for kind in kinds {
