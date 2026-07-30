@@ -1,0 +1,5 @@
+type Box<T> = { value: T; };
+
+function main(): Unit {
+  const value: Box = { value: 42 };
+}

@@ -1,0 +1,18 @@
+import { Box, Option, Result, evaluate } from "./model.nexa";
+
+function main(): Unit {
+  const result: Result<Option<Box<Int>>, String> = evaluate(42);
+  const failure: Result<Int, String> = Result.Err("recoverable");
+  const answer = match (result) {
+    case Result.Ok(optional) => match (optional) {
+      case Option.Some(boxed) => boxed.value;
+      case Option.None() => 0;
+    };
+    case Result.Err(error) => 0;
+  };
+  const recovered = match (failure) {
+    case Result.Ok(value) => value;
+    case Result.Err(error) => 0;
+  };
+  print(answer + recovered);
+}

@@ -1,0 +1,35 @@
+type Box<T> = {
+  value: T;
+};
+
+type Option<T> =
+  | Some(value: T)
+  | None();
+
+type Result<T, E> =
+  | Ok(value: T)
+  | Err(error: E);
+
+function box<T>(value: T): Box<T> {
+  return { value: value };
+}
+
+function some<T>(value: T): Option<T> {
+  return Option.Some(value);
+}
+
+function evaluate(value: Int): Result<Option<Box<Int>>, String> {
+  return Result.Ok(some(box(value)));
+}
+
+function main(): Unit {
+  const result: Result<Option<Box<Int>>, String> = evaluate(42);
+  const answer = match (result) {
+    case Result.Ok(optional) => match (optional) {
+      case Option.Some(boxed) => boxed.value;
+      case Option.None() => 0;
+    };
+    case Result.Err(error) => 0;
+  };
+  print(answer);
+}

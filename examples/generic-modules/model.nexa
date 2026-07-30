@@ -1,0 +1,23 @@
+export type Box<T> = {
+  value: T;
+};
+
+export type Option<T> =
+  | Some(value: T)
+  | None();
+
+export type Result<T, E> =
+  | Ok(value: T)
+  | Err(error: E);
+
+export function box<T>(value: T): Box<T> {
+  return { value: value };
+}
+
+export function some<T>(value: T): Option<T> {
+  return Option.Some(value);
+}
+
+export function evaluate(value: Int): Result<Option<Box<Int>>, String> {
+  return Result.Ok(some(box(value)));
+}

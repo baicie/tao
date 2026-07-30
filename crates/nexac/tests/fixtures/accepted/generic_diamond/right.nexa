@@ -1,0 +1,5 @@
+import { Box } from "./core.nexa";
+
+export function read(box: Box<Int>): Int {
+  return box.value;
+}

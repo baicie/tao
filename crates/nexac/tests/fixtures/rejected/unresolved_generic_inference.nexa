@@ -1,0 +1,5 @@
+type Option<T> = | Some(value: T) | None();
+
+function main(): Unit {
+  const value = Option.None();
+}

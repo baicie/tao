@@ -1,0 +1,5 @@
+import { Box } from "./core.nexa";
+
+export function make(value: Int): Box<Int> {
+  return { value: value };
+}

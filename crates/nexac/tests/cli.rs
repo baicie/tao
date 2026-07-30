@@ -203,6 +203,131 @@ fn nexac_check_accepts_recursive_tagged_unions_and_exhaustive_match(
 }
 
 #[test]
+fn nexac_check_and_run_execute_generic_records_unions_and_error_values(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = fixture("accepted/generics.nexa");
+    let checked = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("check")
+        .arg(&source)
+        .output()?;
+
+    assert!(
+        checked.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&checked.stdout), "ok\n");
+
+    let run = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("run")
+        .arg(source)
+        .output()?;
+
+    assert!(
+        run.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n");
+
+    Ok(())
+}
+
+#[test]
+fn nexac_check_and_run_execute_the_multi_file_generic_conformance_program(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let entry = fixture("accepted/generic_modules/main.nexa");
+    let checked = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("check")
+        .arg(&entry)
+        .output()?;
+
+    assert!(
+        checked.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&checked.stdout), "ok\n");
+
+    let run = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("run")
+        .arg(entry)
+        .output()?;
+
+    assert!(
+        run.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "42\nnexa\n2\n");
+
+    Ok(())
+}
+
+#[test]
+fn nexac_check_and_run_preserve_one_generic_definition_across_a_diamond(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let entry = fixture("accepted/generic_diamond/main.nexa");
+    let checked = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("check")
+        .arg(&entry)
+        .output()?;
+
+    assert!(
+        checked.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&checked.stdout), "ok\n");
+
+    let run = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("run")
+        .arg(entry)
+        .output()?;
+
+    assert!(
+        run.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n");
+
+    Ok(())
+}
+
+#[test]
+fn nexac_check_rejects_a_missing_generic_type_argument() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/generic_type_arity.nexa", "E2003", ":4:16:")
+}
+
+#[test]
+fn nexac_check_rejects_an_unconstrained_type_parameter() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at(
+        "rejected/unconstrained_type_parameter.nexa",
+        "E3008",
+        ":1:14:",
+    )
+}
+
+#[test]
+fn nexac_check_rejects_unresolved_generic_inference() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at(
+        "rejected/unresolved_generic_inference.nexa",
+        "E3009",
+        ":4:17:",
+    )
+}
+
+#[test]
+fn nexac_check_rejects_expanding_generic_recursion() -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at(
+        "rejected/expanding_generic_recursion.nexa",
+        "E3010",
+        ":3:17:",
+    )
+}
+
+#[test]
 fn nexac_check_rejects_a_missing_record_field() -> Result<(), Box<dyn std::error::Error>> {
     assert_check_rejects_at("rejected/missing_record_field.nexa", "E2006", ":3:22:")
 }

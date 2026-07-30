@@ -36,6 +36,117 @@ function main(): Unit {
 }
 
 #[test]
+fn interpreter_erases_generic_function_instances_to_one_mir_body(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"function identity<T>(value: T): T {
+  return value;
+}
+
+function main(): Unit {
+  print(identity(42));
+  print(identity("nexa"));
+}"#,
+    )?;
+    let execution = run(&program)?;
+    let identity_count = program
+        .functions()
+        .iter()
+        .filter(|function| function.name() == "identity")
+        .count();
+
+    assert_eq!(execution.output(), ["42", "nexa"]);
+    assert_eq!(identity_count, 1);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_executes_generic_record_instances_with_one_definition_layout(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"type Box<T> = { value: T; };
+
+function unbox<T>(box: Box<T>): T {
+  return box.value;
+}
+
+function main(): Unit {
+  const number: Box<Int> = { value: 42 };
+  const text: Box<String> = { value: "nexa" };
+  print(unbox(number));
+  print(unbox(text));
+}"#,
+    )?;
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["42", "nexa"]);
+    assert_eq!(program.records().len(), 1);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_executes_ordinary_generic_option_and_result_matches(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"type Option<T> = | Some(value: T) | None();
+type Result<T, E> = | Ok(value: T) | Err(error: E);
+
+function read(value: Result<Option<Int>, String>): Int {
+  return match (value) {
+    case Result.Ok(optional) => match (optional) {
+      case Option.Some(number) => number;
+      case Option.None() => 0;
+    };
+    case Result.Err(message) => 0;
+  };
+}
+
+function main(): Unit {
+  const some: Result<Option<Int>, String> = Result.Ok(Option.Some(42));
+  const none: Result<Option<Int>, String> = Result.Ok(Option.None());
+  const error: Result<Option<Int>, String> = Result.Err("failed");
+  print(read(some));
+  print(read(none));
+  print(read(error));
+}"#,
+    )?;
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["42", "0", "0"]);
+    assert_eq!(program.unions().len(), 2);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_executes_regular_recursive_generic_lists() -> Result<(), Box<dyn std::error::Error>>
+{
+    let program = compile(
+        r#"type List<T> = | Empty() | Node(head: T, tail: List<T>);
+
+function firstOr<T>(values: List<T>, fallback: T): T {
+  return match (values) {
+    case List.Empty() => fallback;
+    case List.Node(head, tail) => head;
+  };
+}
+
+function main(): Unit {
+  const values: List<Int> = List.Node(42, List.Empty());
+  print(firstOr(values, 0));
+}"#,
+    )?;
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["42"]);
+    assert_eq!(program.unions().len(), 1);
+
+    Ok(())
+}
+
+#[test]
 fn interpreter_uses_lexically_scoped_mutable_local_slots() -> Result<(), Box<dyn std::error::Error>>
 {
     let program = compile(
@@ -770,7 +881,10 @@ function main(): Unit {}"#,
                 (FieldId::new(RecordId::new(0), 1), "age", Type::Int)
             ],
             RecordId::new(1),
-            Some(&Type::Record(RecordId::new(0)))
+            Some(&Type::Record {
+                definition: RecordId::new(0),
+                arguments: Box::new([]),
+            })
         )
     );
 
@@ -845,7 +959,13 @@ function main(): Unit {}"#,
                 right_same,
                 vec![
                     (PayloadId::new(right_same, 0), Type::Bool),
-                    (PayloadId::new(right_same, 1), Type::Union(left_id)),
+                    (
+                        PayloadId::new(right_same, 1),
+                        Type::Union {
+                            definition: left_id,
+                            arguments: Box::new([]),
+                        },
+                    ),
                 ],
             )),
         )

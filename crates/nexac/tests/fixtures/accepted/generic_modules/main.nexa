@@ -1,0 +1,36 @@
+import { List, Maybe, Option, Result, length } from "./core.nexa";
+import { left } from "./left.nexa";
+import { right } from "./right.nexa";
+
+function main(): Unit {
+  const number = left();
+  const text = right();
+  const present: Option<Int> = Option.Some(number.value);
+  const absent: Option<Int> = Option.None();
+  const success: Result<Int, String> = Result.Ok(match (present) {
+    case Option.Some(value) => value;
+    case Option.None() => 0;
+  });
+  const failure: Result<Int, String> = Result.Err("failed");
+  const maybe: Maybe<String> = Maybe.Some(text.value);
+  const values: List<Int> = List.Node(1, List.Node(2, List.Empty()));
+  const answer = match (success) {
+    case Result.Ok(value) => value;
+    case Result.Err(error) => 0;
+  };
+  const recovered = match (failure) {
+    case Result.Ok(value) => value;
+    case Result.Err(error) => 0;
+  };
+  const missing = match (absent) {
+    case Option.Some(value) => value;
+    case Option.None() => 0;
+  };
+  const label = match (maybe) {
+    case Maybe.Some(value) => value;
+    case Maybe.None() => "missing";
+  };
+  print(answer + recovered + missing);
+  print(label);
+  print(length(values));
+}

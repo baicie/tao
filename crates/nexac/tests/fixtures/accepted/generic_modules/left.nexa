@@ -1,0 +1,5 @@
+import { Box, box, identity } from "./core.nexa";
+
+export function left(): Box<Int> {
+  return box(identity(40) + 2);
+}

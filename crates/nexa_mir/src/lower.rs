@@ -1,10 +1,11 @@
 use std::fmt::{Display, Formatter};
 
 use nexa_hir::{
-    BinaryOperator, Block, Builtin, Expression, FieldId, Function, FunctionId as HirFunctionId,
-    IfStatement, MatchArm, MatchArmFacts, MatchPattern, Name, NameResolution, PayloadId,
-    RecordFacts, RecordFieldInitializer, RecordId, ReturnStatement, Statement, Type, TypedProgram,
-    UnionFacts, UnionId, VariantId, WhileStatement,
+    BinaryOperator, Block, Builtin, CallFacts, Expression, FieldId, Function,
+    FunctionId as HirFunctionId, IfStatement, MatchArm, MatchArmFacts, MatchPattern, Name,
+    NameResolution, PayloadId, RecordFacts, RecordFieldInitializer, RecordId, ReturnStatement,
+    Statement, Type, TypeParameterFacts, TypeParameterId, TypedProgram, UnionFacts, UnionId,
+    VariantConstructionFacts, VariantId, WhileStatement,
 };
 use nexa_span::SourceSpan;
 
@@ -274,6 +275,11 @@ fn lower_function(
             .iter()
             .map(|local| LocalId(local.index()))
             .collect(),
+        type_parameters: facts
+            .type_parameters()
+            .iter()
+            .map(TypeParameterFacts::id)
+            .collect(),
         hir_local_count: facts.local_count(),
         next_local: facts.local_count(),
         blocks: Vec::new(),
@@ -328,6 +334,7 @@ struct PendingBlock {
 struct FunctionLowerer<'typed> {
     typed: &'typed TypedProgram,
     parameters: Vec<LocalId>,
+    type_parameters: Vec<TypeParameterId>,
     hir_local_count: usize,
     next_local: usize,
     blocks: Vec<PendingBlock>,
@@ -661,7 +668,7 @@ impl FunctionLowerer<'_> {
                 }
                 Some(NameResolution::Field(field)) => {
                     let record = match self.typed.expression_type(object.span()) {
-                        Some(Type::Record(record)) => *record,
+                        Some(Type::Record { definition, .. }) => *definition,
                         Some(ty) => {
                             return Err(error(
                                 object.span(),
@@ -777,7 +784,7 @@ impl FunctionLowerer<'_> {
         mut current: BasicBlockId,
     ) -> Result<(BasicBlockId, MirExpression), MirLoweringError> {
         let record = match self.typed.expression_type(span) {
-            Some(Type::Record(record)) => *record,
+            Some(Type::Record { definition, .. }) => *definition,
             Some(ty) => {
                 return Err(error(
                     span,
@@ -879,7 +886,22 @@ impl FunctionLowerer<'_> {
             .cloned()
             .ok_or_else(|| error(span, "match expression has no typed HIR dispatch facts"))?;
         let union = facts.union();
-        if self.typed.expression_type(scrutinee.span()) != Some(&Type::Union(union)) {
+        let union_facts = self
+            .typed
+            .union_facts(union)
+            .ok_or_else(|| error(span, "match expression references a missing union layout"))?;
+        self.validate_type_arguments(
+            union_facts.type_parameters(),
+            facts.type_arguments(),
+            span,
+            "match expression",
+        )?;
+        let expected_scrutinee = Type::Union {
+            definition: union,
+            arguments: facts.type_arguments().to_vec().into_boxed_slice(),
+        };
+        let actual_scrutinee = self.expression_type(scrutinee, "match scrutinee")?;
+        if actual_scrutinee != &expected_scrutinee {
             return Err(error(
                 scrutinee.span(),
                 "match scrutinee type does not agree with its typed HIR dispatch facts",
@@ -892,10 +914,7 @@ impl FunctionLowerer<'_> {
             ));
         }
 
-        let variant_payloads = self
-            .typed
-            .union_facts(union)
-            .ok_or_else(|| error(span, "match expression references a missing union layout"))?
+        let variant_payloads = union_facts
             .variants()
             .iter()
             .map(|variant| {
@@ -1165,7 +1184,8 @@ impl FunctionLowerer<'_> {
         span: SourceSpan,
         mut current: BasicBlockId,
     ) -> Result<(BasicBlockId, MirExpression), MirLoweringError> {
-        if let Some(construction) = self.typed.variant_construction(span).copied() {
+        if let Some(construction) = self.typed.variant_construction(span).cloned() {
+            self.validate_variant_construction_facts(&construction, arguments, span)?;
             return self.lower_variant_construction(
                 callee,
                 arguments,
@@ -1180,8 +1200,31 @@ impl FunctionLowerer<'_> {
             return Err(error(callee.span(), "non-name call reached MIR lowering"));
         };
         let callee = match self.typed.name_resolution(name.span) {
-            Some(NameResolution::Function(function)) => Callee::Function(function),
-            Some(NameResolution::Builtin(Builtin::Print)) => Callee::Print,
+            Some(NameResolution::Function(resolved_function)) => {
+                let call = self.typed.call_facts(span).ok_or_else(|| {
+                    error(
+                        span,
+                        "source function call has no typed HIR instantiation facts",
+                    )
+                })?;
+                if call.function() != resolved_function {
+                    return Err(error(
+                        span,
+                        "function call does not agree with its typed HIR name resolution",
+                    ));
+                }
+                self.validate_call_facts(call, arguments, span)?;
+                Callee::Function(call.function())
+            }
+            Some(NameResolution::Builtin(Builtin::Print)) => {
+                if self.typed.call_facts(span).is_some() {
+                    return Err(error(
+                        span,
+                        "print call unexpectedly has source function instantiation facts",
+                    ));
+                }
+                Callee::Print
+            }
             Some(NameResolution::Local(_)) => {
                 return Err(error(
                     name.span,
@@ -1193,7 +1236,8 @@ impl FunctionLowerer<'_> {
                 | NameResolution::Field(_)
                 | NameResolution::Union(_)
                 | NameResolution::Variant(_)
-                | NameResolution::Payload(_),
+                | NameResolution::Payload(_)
+                | NameResolution::TypeParameter(_),
             ) => {
                 return Err(error(
                     name.span,
@@ -1231,6 +1275,226 @@ impl FunctionLowerer<'_> {
                 span,
             },
         )
+    }
+
+    fn validate_call_facts(
+        &self,
+        call: &CallFacts,
+        arguments: &[Expression],
+        span: SourceSpan,
+    ) -> Result<(), MirLoweringError> {
+        let function = self.typed.function_facts(call.function()).ok_or_else(|| {
+            error(
+                span,
+                "function call references missing typed HIR function facts",
+            )
+        })?;
+        self.validate_type_arguments(
+            function.type_parameters(),
+            call.type_arguments(),
+            span,
+            "function call",
+        )?;
+        if arguments.len() != function.parameter_types().len() {
+            return Err(error(
+                span,
+                "function call has inconsistent typed HIR argument count",
+            ));
+        }
+
+        for (index, (argument, parameter)) in
+            arguments.iter().zip(function.parameter_types()).enumerate()
+        {
+            let actual = self.expression_type(argument, "function call argument")?;
+            let expected = instantiate_type(
+                parameter,
+                function.type_parameters(),
+                call.type_arguments(),
+                span,
+                "function",
+            )?;
+            if actual != &expected {
+                return Err(error(
+                    span,
+                    format!(
+                        "function call argument {index} does not agree with its typed HIR instantiation facts"
+                    ),
+                ));
+            }
+        }
+
+        let actual = self
+            .typed
+            .expression_type(span)
+            .ok_or_else(|| error(span, "function call has no typed HIR result type"))?;
+        let expected = instantiate_type(
+            function.return_type(),
+            function.type_parameters(),
+            call.type_arguments(),
+            span,
+            "function",
+        )?;
+        if actual != &expected {
+            return Err(error(
+                span,
+                "function call result does not agree with its typed HIR instantiation facts",
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn validate_variant_construction_facts(
+        &self,
+        construction: &VariantConstructionFacts,
+        arguments: &[Expression],
+        span: SourceSpan,
+    ) -> Result<(), MirLoweringError> {
+        let union = self
+            .typed
+            .union_facts(construction.union())
+            .ok_or_else(|| {
+                error(
+                    span,
+                    "variant construction references a missing union definition",
+                )
+            })?;
+        self.validate_type_arguments(
+            union.type_parameters(),
+            construction.type_arguments(),
+            span,
+            "variant construction",
+        )?;
+        let expected_type = Type::Union {
+            definition: construction.union(),
+            arguments: construction.type_arguments().to_vec().into_boxed_slice(),
+        };
+        let actual_type = self
+            .typed
+            .expression_type(span)
+            .ok_or_else(|| error(span, "variant construction has no typed HIR result type"))?;
+        self.validate_type(actual_type, span, "variant construction")?;
+        if actual_type != &expected_type {
+            return Err(error(
+                span,
+                "variant construction type does not agree with its typed HIR instantiation facts",
+            ));
+        }
+
+        let variant = union
+            .variants()
+            .get(construction.variant().index())
+            .filter(|variant| variant.id() == construction.variant())
+            .ok_or_else(|| {
+                error(
+                    span,
+                    "variant construction references a missing variant definition",
+                )
+            })?;
+        if arguments.len() != variant.payloads().len() {
+            return Err(error(
+                span,
+                "variant construction has inconsistent typed HIR payload count",
+            ));
+        }
+        for (index, (argument, payload)) in arguments.iter().zip(variant.payloads()).enumerate() {
+            let actual = self.expression_type(argument, "variant construction payload")?;
+            let expected = instantiate_type(
+                payload.ty(),
+                union.type_parameters(),
+                construction.type_arguments(),
+                span,
+                "union",
+            )?;
+            if actual != &expected {
+                return Err(error(
+                    span,
+                    format!(
+                        "variant construction payload {index} does not agree with its typed HIR instantiation facts"
+                    ),
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_type_arguments(
+        &self,
+        parameters: &[TypeParameterFacts],
+        arguments: &[Type],
+        span: SourceSpan,
+        role: &str,
+    ) -> Result<(), MirLoweringError> {
+        if parameters.len() != arguments.len() {
+            return Err(error(
+                span,
+                format!("{role} has inconsistent typed HIR type-argument count"),
+            ));
+        }
+        for argument in arguments {
+            self.validate_type(argument, span, role)?;
+        }
+        Ok(())
+    }
+
+    fn validate_type(
+        &self,
+        ty: &Type,
+        span: SourceSpan,
+        role: &str,
+    ) -> Result<(), MirLoweringError> {
+        match ty {
+            Type::Parameter(parameter) => {
+                if self.type_parameters.contains(parameter) {
+                    Ok(())
+                } else {
+                    Err(error(
+                        span,
+                        format!("{role} contains a foreign typed HIR type parameter"),
+                    ))
+                }
+            }
+            Type::Array(element) => self.validate_type(element, span, role),
+            Type::Record {
+                definition,
+                arguments,
+            } => {
+                let record = self.typed.record_facts(*definition).ok_or_else(|| {
+                    error(
+                        span,
+                        format!("{role} references a missing record definition"),
+                    )
+                })?;
+                self.validate_type_arguments(record.type_parameters(), arguments, span, role)
+            }
+            Type::Union {
+                definition,
+                arguments,
+            } => {
+                let union = self.typed.union_facts(*definition).ok_or_else(|| {
+                    error(
+                        span,
+                        format!("{role} references a missing union definition"),
+                    )
+                })?;
+                self.validate_type_arguments(union.type_parameters(), arguments, span, role)
+            }
+            Type::Int | Type::Bool | Type::String | Type::Unit => Ok(()),
+        }
+    }
+
+    fn expression_type(
+        &self,
+        expression: &Expression,
+        role: &str,
+    ) -> Result<&Type, MirLoweringError> {
+        let ty = self
+            .typed
+            .expression_type(expression.span())
+            .ok_or_else(|| error(expression.span(), format!("{role} has no typed HIR type")))?;
+        self.validate_type(ty, expression.span(), role)?;
+        Ok(ty)
     }
 
     fn lower_variant_construction(
@@ -1443,5 +1707,62 @@ fn error(span: SourceSpan, message: impl Into<String>) -> MirLoweringError {
     MirLoweringError {
         message: message.into(),
         span,
+    }
+}
+
+fn instantiate_type(
+    ty: &Type,
+    parameters: &[TypeParameterFacts],
+    arguments: &[Type],
+    span: SourceSpan,
+    role: &str,
+) -> Result<Type, MirLoweringError> {
+    match ty {
+        Type::Parameter(parameter) => {
+            let index = parameters
+                .iter()
+                .position(|candidate| candidate.id() == *parameter)
+                .ok_or_else(|| {
+                    error(
+                        span,
+                        format!("{role} signature contains an unrelated typed HIR type parameter"),
+                    )
+                })?;
+            arguments.get(index).cloned().ok_or_else(|| {
+                error(
+                    span,
+                    format!("{role} signature substitution is missing a typed HIR type argument"),
+                )
+            })
+        }
+        Type::Array(element) => Ok(Type::Array(Box::new(instantiate_type(
+            element, parameters, arguments, span, role,
+        )?))),
+        Type::Record {
+            definition,
+            arguments: nested,
+        } => Ok(Type::Record {
+            definition: *definition,
+            arguments: nested
+                .iter()
+                .map(|argument| instantiate_type(argument, parameters, arguments, span, role))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_boxed_slice(),
+        }),
+        Type::Union {
+            definition,
+            arguments: nested,
+        } => Ok(Type::Union {
+            definition: *definition,
+            arguments: nested
+                .iter()
+                .map(|argument| instantiate_type(argument, parameters, arguments, span, role))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_boxed_slice(),
+        }),
+        Type::Int => Ok(Type::Int),
+        Type::Bool => Ok(Type::Bool),
+        Type::String => Ok(Type::String),
+        Type::Unit => Ok(Type::Unit),
     }
 }
