@@ -191,6 +191,18 @@ pub enum SyntaxKind {
     VariantPattern = 90,
     /// The bindings introduced by a union variant pattern.
     PatternBindingList = 91,
+    /// The `import` keyword.
+    ImportKw = 92,
+    /// The `export` keyword.
+    ExportKw = 93,
+    /// The `from` keyword.
+    FromKw = 94,
+    /// A top-level named import declaration.
+    ImportDeclaration = 95,
+    /// The comma-separated names in an import declaration.
+    ImportList = 96,
+    /// An exported top-level function, record, or union declaration.
+    ExportedDeclaration = 97,
 }
 
 impl SyntaxKind {
@@ -294,6 +306,12 @@ impl SyntaxKind {
             89 => Self::MatchArm,
             90 => Self::VariantPattern,
             91 => Self::PatternBindingList,
+            92 => Self::ImportKw,
+            93 => Self::ExportKw,
+            94 => Self::FromKw,
+            95 => Self::ImportDeclaration,
+            96 => Self::ImportList,
+            97 => Self::ExportedDeclaration,
             _ => unreachable!("invalid Nexa syntax kind: {raw}"),
         }
     }
@@ -453,6 +471,9 @@ fn keyword_kind(kind: SyntaxKind, text: &str) -> SyntaxKind {
         "match" => SyntaxKind::MatchKw,
         "case" => SyntaxKind::CaseKw,
         "default" => SyntaxKind::DefaultKw,
+        "import" => SyntaxKind::ImportKw,
+        "export" => SyntaxKind::ExportKw,
+        "from" => SyntaxKind::FromKw,
         _ => SyntaxKind::Ident,
     }
 }
@@ -710,6 +731,27 @@ mod tests {
     }
 
     #[test]
+    fn tokenizes_module_keywords_without_reserving_adjacent_identifiers() {
+        let tokens = tokenize("import imported export exported from fromValue");
+
+        assert_eq!(
+            tokens
+                .iter()
+                .filter(|token| !token.kind().is_trivia())
+                .map(|token| (token.kind(), token.text()))
+                .collect::<Vec<_>>(),
+            [
+                (SyntaxKind::ImportKw, "import"),
+                (SyntaxKind::Ident, "imported"),
+                (SyntaxKind::ExportKw, "export"),
+                (SyntaxKind::Ident, "exported"),
+                (SyntaxKind::FromKw, "from"),
+                (SyntaxKind::Ident, "fromValue"),
+            ]
+        );
+    }
+
+    #[test]
     fn tokenizes_string_types_literals_and_array_punctuation() {
         let tokens = tokenize(r#"String[] = ["line\n\"quote\"\\tail"].length"#);
 
@@ -914,6 +956,12 @@ mod tests {
             SyntaxKind::MatchArm,
             SyntaxKind::VariantPattern,
             SyntaxKind::PatternBindingList,
+            SyntaxKind::ImportKw,
+            SyntaxKind::ExportKw,
+            SyntaxKind::FromKw,
+            SyntaxKind::ImportDeclaration,
+            SyntaxKind::ImportList,
+            SyntaxKind::ExportedDeclaration,
         ];
 
         for kind in kinds {

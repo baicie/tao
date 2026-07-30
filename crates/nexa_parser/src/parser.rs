@@ -4,7 +4,12 @@ use nexa_syntax::{SyntaxKind, Token};
 use rowan::{GreenNode, GreenNodeBuilder};
 
 const PARSE_ERROR: DiagnosticCode = DiagnosticCode::new("E1001");
-const TOP_LEVEL_RECOVERY: &[SyntaxKind] = &[SyntaxKind::FunctionKw, SyntaxKind::TypeKw];
+const TOP_LEVEL_RECOVERY: &[SyntaxKind] = &[
+    SyntaxKind::ImportKw,
+    SyntaxKind::ExportKw,
+    SyntaxKind::FunctionKw,
+    SyntaxKind::TypeKw,
+];
 const STATEMENT_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::Semicolon,
     SyntaxKind::RBrace,
@@ -18,6 +23,8 @@ const STATEMENT_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::ContinueKw,
     SyntaxKind::ReturnKw,
     SyntaxKind::MatchKw,
+    SyntaxKind::ImportKw,
+    SyntaxKind::ExportKw,
     SyntaxKind::TypeKw,
 ];
 const ARRAY_RECOVERY: &[SyntaxKind] = &[
@@ -38,12 +45,16 @@ const ARRAY_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::MatchKw,
     SyntaxKind::CaseKw,
     SyntaxKind::DefaultKw,
+    SyntaxKind::ImportKw,
+    SyntaxKind::ExportKw,
     SyntaxKind::TypeKw,
 ];
 const RECORD_BODY_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::Ident,
     SyntaxKind::Semicolon,
     SyntaxKind::RBrace,
+    SyntaxKind::ImportKw,
+    SyntaxKind::ExportKw,
     SyntaxKind::FunctionKw,
     SyntaxKind::TypeKw,
 ];
@@ -64,12 +75,16 @@ const RECORD_EXPRESSION_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::MatchKw,
     SyntaxKind::CaseKw,
     SyntaxKind::DefaultKw,
+    SyntaxKind::ImportKw,
+    SyntaxKind::ExportKw,
     SyntaxKind::TypeKw,
 ];
 const UNION_DECLARATION_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::Ident,
     SyntaxKind::Pipe,
     SyntaxKind::Semicolon,
+    SyntaxKind::ImportKw,
+    SyntaxKind::ExportKw,
     SyntaxKind::FunctionKw,
     SyntaxKind::TypeKw,
 ];
@@ -79,6 +94,8 @@ const VARIANT_PAYLOAD_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::RParen,
     SyntaxKind::Pipe,
     SyntaxKind::Semicolon,
+    SyntaxKind::ImportKw,
+    SyntaxKind::ExportKw,
     SyntaxKind::FunctionKw,
     SyntaxKind::TypeKw,
 ];
@@ -95,6 +112,8 @@ const MATCH_BODY_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::ContinueKw,
     SyntaxKind::ReturnKw,
     SyntaxKind::MatchKw,
+    SyntaxKind::ImportKw,
+    SyntaxKind::ExportKw,
     SyntaxKind::FunctionKw,
     SyntaxKind::TypeKw,
 ];
@@ -111,6 +130,8 @@ const MATCH_ARM_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::ContinueKw,
     SyntaxKind::ReturnKw,
     SyntaxKind::MatchKw,
+    SyntaxKind::ImportKw,
+    SyntaxKind::ExportKw,
     SyntaxKind::FunctionKw,
     SyntaxKind::TypeKw,
 ];
@@ -122,6 +143,18 @@ const PATTERN_BINDING_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::CaseKw,
     SyntaxKind::DefaultKw,
     SyntaxKind::RBrace,
+];
+const IMPORT_LIST_RECOVERY: &[SyntaxKind] = &[
+    SyntaxKind::Ident,
+    SyntaxKind::Comma,
+    SyntaxKind::RBrace,
+    SyntaxKind::FromKw,
+    SyntaxKind::String,
+    SyntaxKind::Semicolon,
+    SyntaxKind::ImportKw,
+    SyntaxKind::ExportKw,
+    SyntaxKind::FunctionKw,
+    SyntaxKind::TypeKw,
 ];
 
 pub(super) fn parse_tokens(
@@ -169,6 +202,10 @@ impl Parser<'_> {
         while self.current().is_some() {
             if self.current().is_some_and(SyntaxKind::is_trivia) {
                 self.bump();
+            } else if self.at(SyntaxKind::ImportKw) {
+                self.parse_import_declaration();
+            } else if self.at(SyntaxKind::ExportKw) {
+                self.parse_exported_declaration();
             } else if self.at(SyntaxKind::FunctionKw) {
                 self.parse_function_declaration();
             } else if self.at(SyntaxKind::TypeKw) {
@@ -196,6 +233,91 @@ impl Parser<'_> {
         } else {
             self.parse_record_declaration();
         }
+    }
+
+    fn parse_import_declaration(&mut self) {
+        self.builder
+            .start_node(SyntaxKind::ImportDeclaration.into());
+        self.expect(SyntaxKind::ImportKw, "expected `import`");
+        self.expect(SyntaxKind::LBrace, "expected `{` after `import`");
+        self.parse_import_list();
+        self.expect(SyntaxKind::RBrace, "expected `}` after imported names");
+        self.expect(SyntaxKind::FromKw, "expected `from` after imported names");
+        self.expect(SyntaxKind::String, "expected import path string");
+        if !self.expect(
+            SyntaxKind::Semicolon,
+            "expected `;` after import declaration",
+        ) {
+            self.recover_to(TOP_LEVEL_RECOVERY);
+        }
+        self.builder.finish_node();
+    }
+
+    fn parse_import_list(&mut self) {
+        self.builder.start_node(SyntaxKind::ImportList.into());
+        self.skip_trivia();
+
+        if self.import_list_is_finished() {
+            self.error_at_current("expected imported name");
+            self.builder.finish_node();
+            return;
+        }
+
+        loop {
+            if self.at(SyntaxKind::Ident) {
+                self.bump();
+            } else {
+                self.error_at_current("expected imported name");
+                self.recover_to(IMPORT_LIST_RECOVERY);
+                if self.at(SyntaxKind::Comma) {
+                    self.bump();
+                    self.skip_trivia();
+                }
+                if self.import_list_is_finished() {
+                    break;
+                }
+                if !self.at(SyntaxKind::Ident) {
+                    continue;
+                }
+                self.bump();
+            }
+
+            self.skip_trivia();
+            if self.at(SyntaxKind::Comma) {
+                self.bump();
+                self.skip_trivia();
+                if self.import_list_is_finished() {
+                    self.error_at_current("expected imported name after `,`");
+                    break;
+                }
+                continue;
+            }
+            if self.at(SyntaxKind::Ident) {
+                self.error_at_current("expected `,` or `}` after imported name");
+                continue;
+            }
+            break;
+        }
+
+        self.builder.finish_node();
+    }
+
+    fn parse_exported_declaration(&mut self) {
+        self.builder
+            .start_node(SyntaxKind::ExportedDeclaration.into());
+        self.expect(SyntaxKind::ExportKw, "expected `export`");
+        self.skip_trivia();
+
+        match self.current() {
+            Some(SyntaxKind::FunctionKw) => self.parse_function_declaration(),
+            Some(SyntaxKind::TypeKw) => self.parse_type_declaration(),
+            _ => {
+                self.error_at_current("expected `function` or `type` after `export`");
+                self.recover_to(TOP_LEVEL_RECOVERY);
+            }
+        }
+
+        self.builder.finish_node();
     }
 
     fn parse_function_declaration(&mut self) {
@@ -243,7 +365,12 @@ impl Parser<'_> {
                     break;
                 }
                 Some(SyntaxKind::Ident) => self.parse_record_field_declaration(),
-                Some(SyntaxKind::FunctionKw | SyntaxKind::TypeKw) => {
+                Some(
+                    SyntaxKind::ImportKw
+                    | SyntaxKind::ExportKw
+                    | SyntaxKind::FunctionKw
+                    | SyntaxKind::TypeKw,
+                ) => {
                     self.error_at_current("expected `}` after record fields");
                     break;
                 }
@@ -296,7 +423,13 @@ impl Parser<'_> {
                     self.parse_union_variant();
                     parsed_variant = true;
                 }
-                Some(SyntaxKind::Semicolon | SyntaxKind::FunctionKw | SyntaxKind::TypeKw)
+                Some(
+                    SyntaxKind::Semicolon
+                    | SyntaxKind::ImportKw
+                    | SyntaxKind::ExportKw
+                    | SyntaxKind::FunctionKw
+                    | SyntaxKind::TypeKw,
+                )
                 | None => {
                     if !parsed_variant {
                         self.error_at_current("expected union variant");
@@ -323,8 +456,13 @@ impl Parser<'_> {
                 self.skip_trivia();
                 if matches!(
                     self.current(),
-                    Some(SyntaxKind::Semicolon | SyntaxKind::FunctionKw | SyntaxKind::TypeKw)
-                        | None
+                    Some(
+                        SyntaxKind::Semicolon
+                            | SyntaxKind::ImportKw
+                            | SyntaxKind::ExportKw
+                            | SyntaxKind::FunctionKw
+                            | SyntaxKind::TypeKw
+                    ) | None
                 ) {
                     self.error_at_current("expected union variant after `|`");
                     break;
@@ -518,7 +656,12 @@ impl Parser<'_> {
                     self.error_at_current("unexpected `else`");
                     self.bump();
                 }
-                Some(SyntaxKind::FunctionKw | SyntaxKind::TypeKw) => {
+                Some(
+                    SyntaxKind::ImportKw
+                    | SyntaxKind::ExportKw
+                    | SyntaxKind::FunctionKw
+                    | SyntaxKind::TypeKw,
+                ) => {
                     self.error_at_current("expected `}` to close block");
                     break;
                 }
@@ -1018,6 +1161,8 @@ impl Parser<'_> {
                     | SyntaxKind::ContinueKw
                     | SyntaxKind::ReturnKw
                     | SyntaxKind::MatchKw
+                    | SyntaxKind::ImportKw
+                    | SyntaxKind::ExportKw
                     | SyntaxKind::FunctionKw
                     | SyntaxKind::TypeKw,
                 ) => {
@@ -1149,7 +1294,7 @@ impl Parser<'_> {
         }
 
         while let Some(kind) = self.current() {
-            if matches!(kind, SyntaxKind::FunctionKw | SyntaxKind::TypeKw) {
+            if TOP_LEVEL_RECOVERY.contains(&kind) {
                 break;
             }
             self.bump();
@@ -1225,6 +1370,22 @@ impl Parser<'_> {
 
     fn at(&self, kind: SyntaxKind) -> bool {
         self.current() == Some(kind)
+    }
+
+    fn import_list_is_finished(&self) -> bool {
+        matches!(
+            self.current(),
+            None | Some(
+                SyntaxKind::RBrace
+                    | SyntaxKind::FromKw
+                    | SyntaxKind::String
+                    | SyntaxKind::Semicolon
+                    | SyntaxKind::ImportKw
+                    | SyntaxKind::ExportKw
+                    | SyntaxKind::FunctionKw
+                    | SyntaxKind::TypeKw
+            )
+        )
     }
 
     fn at_assignment_statement(&self) -> bool {
