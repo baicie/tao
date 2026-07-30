@@ -7,6 +7,7 @@ use nexa_span::SourceSpan;
 /// A complete Nexa program in resolved middle intermediate representation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MirProgram {
+    pub(crate) modules: Vec<ModuleId>,
     pub(crate) entry_module: ModuleId,
     pub(crate) entry: Option<FunctionId>,
     pub(crate) records: Vec<MirRecord>,
@@ -16,6 +17,12 @@ pub struct MirProgram {
 }
 
 impl MirProgram {
+    /// Returns modules in deterministic compiler-session discovery order.
+    #[must_use]
+    pub fn modules(&self) -> &[ModuleId] {
+        &self.modules
+    }
+
     /// Returns the compiler session's entry-module identity.
     #[must_use]
     pub const fn entry_module(&self) -> ModuleId {
@@ -44,6 +51,24 @@ impl MirProgram {
     #[must_use]
     pub fn functions(&self) -> &[MirFunction] {
         &self.functions
+    }
+
+    /// Returns one function by its complete module-owned identity.
+    #[must_use]
+    pub fn function(&self, id: FunctionId) -> Option<&MirFunction> {
+        self.functions.iter().find(|function| function.id == id)
+    }
+
+    /// Returns one record layout by its complete module-owned identity.
+    #[must_use]
+    pub fn record(&self, id: RecordId) -> Option<&MirRecord> {
+        self.records.iter().find(|record| record.id == id)
+    }
+
+    /// Returns one union layout by its complete module-owned identity.
+    #[must_use]
+    pub fn union(&self, id: UnionId) -> Option<&MirUnion> {
+        self.unions.iter().find(|union| union.id == id)
     }
 
     /// Returns the source range covered by the program.

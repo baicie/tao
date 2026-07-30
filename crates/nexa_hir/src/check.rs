@@ -4,10 +4,11 @@ use nexa_diagnostics::{Diagnostic, DiagnosticCode, Label};
 use nexa_span::SourceSpan;
 
 use crate::{
-    AssignmentStatement, BinaryOperator, Block, ConstDeclaration, Expression, FieldId, Function,
-    FunctionId, IfStatement, LetDeclaration, MatchArm, MatchPattern, Name, PayloadId, Program,
-    RecordFieldInitializer, RecordId, ReturnStatement, Statement, Type, TypeReference,
-    TypeReferenceKind, UnaryOperator, UnionId, VariantId, WhileStatement,
+    AssignmentStatement, BinaryOperator, Block, ConstDeclaration, DefId, Expression, FieldId,
+    Function, FunctionId, IfStatement, LetDeclaration, MatchArm, MatchPattern, ModuleId, Name,
+    PayloadId, Program, RecordFieldInitializer, RecordId, ReturnStatement, Statement, Type,
+    TypeReference, TypeReferenceKind, UnaryOperator, UnionId, VariantId, Visibility,
+    WhileStatement,
 };
 
 const UNDEFINED_NAME: DiagnosticCode = DiagnosticCode::new("E2001");
@@ -23,6 +24,47 @@ const INVALID_LOOP_CONTROL: DiagnosticCode = DiagnosticCode::new("E3004");
 const RECURSIVE_TYPE: DiagnosticCode = DiagnosticCode::new("E3005");
 const NON_EXHAUSTIVE_MATCH: DiagnosticCode = DiagnosticCode::new("E3006");
 const UNREACHABLE_ARM: DiagnosticCode = DiagnosticCode::new("E3007");
+const MISSING_EXPORT: DiagnosticCode = DiagnosticCode::new("E4003");
+const PRIVATE_EXPORT: DiagnosticCode = DiagnosticCode::new("E4004");
+const EXPORT_COLLISION: DiagnosticCode = DiagnosticCode::new("E4005");
+
+/// One source import whose target module was resolved by the compiler session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ResolvedImport {
+    importer: ModuleId,
+    path_span: SourceSpan,
+    target: ModuleId,
+}
+
+impl ResolvedImport {
+    /// Creates a resolved edge for the import identified by its path span.
+    #[must_use]
+    pub const fn new(importer: ModuleId, path_span: SourceSpan, target: ModuleId) -> Self {
+        Self {
+            importer,
+            path_span,
+            target,
+        }
+    }
+
+    /// Returns the module containing the import declaration.
+    #[must_use]
+    pub const fn importer(self) -> ModuleId {
+        self.importer
+    }
+
+    /// Returns the exact path-literal span that identifies the import.
+    #[must_use]
+    pub const fn path_span(self) -> SourceSpan {
+        self.path_span
+    }
+
+    /// Returns the module selected by source resolution.
+    #[must_use]
+    pub const fn target(self) -> ModuleId {
+        self.target
+    }
+}
 
 /// The semantic result of type checking a lowered program.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,7 +96,8 @@ impl Analysis {
 /// A HIR program proven to satisfy the Language Core static type rules.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypedProgram {
-    program: Program,
+    modules: Vec<Program>,
+    entry_index: usize,
     expression_types: HashMap<SourceSpan, Type>,
     name_resolutions: HashMap<SourceSpan, NameResolution>,
     records: Vec<RecordFacts>,
@@ -68,7 +111,33 @@ impl TypedProgram {
     /// Returns the validated underlying HIR program.
     #[must_use]
     pub fn program(&self) -> &Program {
-        &self.program
+        &self.modules[self.entry_index]
+    }
+
+    /// Returns every checked module in compiler-session order.
+    #[must_use]
+    pub fn modules(&self) -> &[Program] {
+        &self.modules
+    }
+
+    /// Returns the stable identity of the entry module.
+    #[must_use]
+    pub const fn entry(&self) -> ModuleId {
+        ModuleId::ENTRY
+    }
+
+    /// Returns a checked module by its stable identity.
+    #[must_use]
+    pub fn module(&self, module: ModuleId) -> Option<&Program> {
+        self.modules.iter().find(|program| program.module == module)
+    }
+
+    /// Returns a checked source function by its module-aware identity.
+    #[must_use]
+    pub fn function(&self, function: FunctionId) -> Option<&Function> {
+        self.module(function.module())?
+            .functions
+            .get(function.index())
     }
 
     /// Returns the resolved type for a value expression at `span`.
@@ -520,36 +589,93 @@ impl FactBuilder {
 /// Resolves names and validates static semantics for a lowered program.
 #[must_use]
 pub fn type_check(program: &Program) -> Analysis {
+    type_check_modules(std::slice::from_ref(program), &[])
+}
+
+/// Resolves imports and validates static semantics for a complete module graph.
+#[must_use]
+pub fn type_check_modules(programs: &[Program], links: &[ResolvedImport]) -> Analysis {
     let mut diagnostics = Vec::new();
     let mut facts = FactBuilder::default();
-    let type_symbols = collect_type_names(program, &mut diagnostics, &mut facts);
-    let records = collect_record_facts(program, &type_symbols, &mut diagnostics, &mut facts);
-    let unions = collect_union_facts(program, &type_symbols, &mut diagnostics, &mut facts);
-    reject_recursive_records(&records, &mut diagnostics);
-    let functions =
-        collect_function_signatures(program, &type_symbols, &mut diagnostics, &mut facts);
+    let local_modules = programs
+        .iter()
+        .map(|program| {
+            (
+                program.module,
+                collect_local_module_catalog(program, &mut diagnostics, &mut facts),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    let environments = resolve_module_environments(
+        programs,
+        links,
+        &local_modules,
+        &mut diagnostics,
+        &mut facts,
+    );
 
-    for (index, function) in program.functions.iter().enumerate() {
-        check_function(
-            function,
-            FunctionId::in_module(program.module, index),
-            &functions,
-            &type_symbols,
-            &records,
-            &unions,
+    let mut records = Vec::new();
+    for program in programs {
+        let Some(environment) = environments.get(&program.module) else {
+            continue;
+        };
+        records.extend(collect_record_facts(
+            program,
+            &environment.types,
             &mut diagnostics,
             &mut facts,
-        );
+        ));
     }
 
-    diagnostics.sort_by_key(diagnostic_position);
+    let mut unions = Vec::new();
+    for program in programs {
+        let Some(environment) = environments.get(&program.module) else {
+            continue;
+        };
+        unions.extend(collect_union_facts(
+            program,
+            &environment.types,
+            &mut diagnostics,
+            &mut facts,
+        ));
+    }
+
+    reject_recursive_records(&records, &mut diagnostics);
+    let functions =
+        collect_function_signatures(programs, &environments, &mut diagnostics, &mut facts);
+
+    for program in programs {
+        let Some(environment) = environments.get(&program.module) else {
+            continue;
+        };
+        for (index, function) in program.functions.iter().enumerate() {
+            check_function(
+                function,
+                FunctionId::in_module(program.module, index),
+                &functions,
+                &environment.types,
+                &records,
+                &unions,
+                &mut diagnostics,
+                &mut facts,
+            );
+        }
+    }
+
+    diagnostics.sort_by(|left, right| diagnostic_position(left).cmp(&diagnostic_position(right)));
     facts.records = records;
     facts.unions = unions;
+    let entry_index = programs
+        .iter()
+        .position(|program| program.module == ModuleId::ENTRY);
     let typed = diagnostics
         .iter()
         .all(|diagnostic| diagnostic.severity() != nexa_diagnostics::Severity::Error)
-        .then(|| TypedProgram {
-            program: program.clone(),
+        .then_some(entry_index)
+        .flatten()
+        .map(|entry_index| TypedProgram {
+            modules: programs.to_vec(),
+            entry_index,
             expression_types: facts.expression_types,
             name_resolutions: facts.name_resolutions,
             records: facts.records,
@@ -583,10 +709,10 @@ impl TypeSymbol {
         }
     }
 
-    const fn kind_name(self) -> &'static str {
+    const fn definition(self) -> DefId {
         match self {
-            Self::Record(_) => "record",
-            Self::Union(_) => "union",
+            Self::Record(record) => DefId::Record(record),
+            Self::Union(union) => DefId::Union(union),
         }
     }
 }
@@ -599,11 +725,37 @@ struct TypeEntry {
 
 type TypeCatalog = HashMap<String, TypeEntry>;
 
-fn collect_type_names(
-    program: &Program,
-    diagnostics: &mut Vec<Diagnostic>,
-    facts: &mut FactBuilder,
-) -> TypeCatalog {
+#[derive(Debug, Clone, Copy)]
+struct FunctionNameEntry {
+    id: FunctionId,
+    name_span: SourceSpan,
+}
+
+type FunctionNameCatalog = HashMap<String, FunctionNameEntry>;
+
+#[derive(Debug, Clone, Copy)]
+struct ExportEntry {
+    definition: DefId,
+    name_span: SourceSpan,
+}
+
+struct LocalModuleCatalog {
+    declared_names: HashMap<String, SourceSpan>,
+    exports: HashMap<String, ExportEntry>,
+}
+
+struct ModuleEnvironment {
+    types: TypeCatalog,
+    functions: FunctionNameCatalog,
+}
+
+struct BindingEvent {
+    name: String,
+    span: SourceSpan,
+    definition: DefId,
+}
+
+fn collect_type_names(program: &Program, facts: &mut FactBuilder) -> TypeCatalog {
     let mut declarations = program
         .records
         .iter()
@@ -627,24 +779,7 @@ fn collect_type_names(
     for (name, symbol) in declarations {
         facts.record_name(name.span, symbol.resolution());
 
-        if let Some(previous) = types.get(&name.text).copied() {
-            let description = if previous.symbol.kind_name() == symbol.kind_name() {
-                symbol.kind_name()
-            } else {
-                "type"
-            };
-            diagnostics.push(
-                Diagnostic::error(
-                    DUPLICATE_NAME,
-                    format!("duplicate {description} `{}`", name.text),
-                )
-                .with_label(Label::primary(
-                    name.span,
-                    format!("duplicate {description}"),
-                ))
-                .with_label(Label::secondary(previous.name_span, "first declared here")),
-            );
-        } else {
+        if !types.contains_key(&name.text) {
             types.insert(
                 name.text.clone(),
                 TypeEntry {
@@ -656,6 +791,334 @@ fn collect_type_names(
     }
 
     types
+}
+
+fn collect_local_module_catalog(
+    program: &Program,
+    diagnostics: &mut Vec<Diagnostic>,
+    facts: &mut FactBuilder,
+) -> LocalModuleCatalog {
+    let types = collect_type_names(program, facts);
+    let functions = collect_function_names(program, facts);
+    let declared_names = collect_declared_names(program);
+    let exports = collect_exports(program, &types, &functions, diagnostics);
+
+    LocalModuleCatalog {
+        declared_names,
+        exports,
+    }
+}
+
+fn collect_function_names(program: &Program, facts: &mut FactBuilder) -> FunctionNameCatalog {
+    let mut functions = FunctionNameCatalog::new();
+
+    for (index, function) in program.functions.iter().enumerate() {
+        let id = FunctionId::in_module(program.module, index);
+        facts.record_name(function.name.span, NameResolution::Function(id));
+        if !functions.contains_key(&function.name.text) {
+            functions.insert(
+                function.name.text.clone(),
+                FunctionNameEntry {
+                    id,
+                    name_span: function.name.span,
+                },
+            );
+        }
+    }
+
+    functions
+}
+
+fn collect_declared_names(program: &Program) -> HashMap<String, SourceSpan> {
+    let mut declarations = program
+        .records
+        .iter()
+        .map(|record| &record.name)
+        .chain(program.unions.iter().map(|union| &union.name))
+        .chain(program.functions.iter().map(|function| &function.name))
+        .collect::<Vec<_>>();
+    declarations.sort_by_key(|name| span_position(name.span));
+
+    let mut names = HashMap::new();
+    for name in declarations {
+        names.entry(name.text.clone()).or_insert(name.span);
+    }
+    names
+}
+
+fn collect_exports(
+    program: &Program,
+    types: &TypeCatalog,
+    functions: &FunctionNameCatalog,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> HashMap<String, ExportEntry> {
+    let record_exports = program
+        .records
+        .iter()
+        .enumerate()
+        .filter(|(_, record)| record.visibility == Visibility::Exported)
+        .filter_map(|(index, record)| {
+            let definition = DefId::Record(RecordId::in_module(program.module, index));
+            types
+                .get(&record.name.text)
+                .is_some_and(|entry| entry.symbol.definition() == definition)
+                .then_some((&record.name, definition))
+        });
+    let union_exports = program
+        .unions
+        .iter()
+        .enumerate()
+        .filter(|(_, union)| union.visibility == Visibility::Exported)
+        .filter_map(|(index, union)| {
+            let definition = DefId::Union(UnionId::in_module(program.module, index));
+            types
+                .get(&union.name.text)
+                .is_some_and(|entry| entry.symbol.definition() == definition)
+                .then_some((&union.name, definition))
+        });
+    let function_exports = program
+        .functions
+        .iter()
+        .enumerate()
+        .filter(|(_, function)| function.visibility == Visibility::Exported)
+        .filter_map(|(index, function)| {
+            let definition = DefId::Function(FunctionId::in_module(program.module, index));
+            functions
+                .get(&function.name.text)
+                .is_some_and(|entry| entry.id == FunctionId::in_module(program.module, index))
+                .then_some((&function.name, definition))
+        });
+    let mut declarations = record_exports
+        .chain(union_exports)
+        .chain(function_exports)
+        .collect::<Vec<_>>();
+    declarations.sort_by_key(|(name, _)| span_position(name.span));
+
+    let mut exports = HashMap::<String, ExportEntry>::new();
+    for (name, definition) in declarations {
+        if let Some(previous) = exports.get(&name.text).copied() {
+            diagnostics.push(
+                Diagnostic::error(
+                    EXPORT_COLLISION,
+                    format!("export name `{}` is ambiguous", name.text),
+                )
+                .with_label(Label::primary(name.span, "conflicting export"))
+                .with_label(Label::secondary(previous.name_span, "first exported here")),
+            );
+        } else {
+            exports.insert(
+                name.text.clone(),
+                ExportEntry {
+                    definition,
+                    name_span: name.span,
+                },
+            );
+        }
+    }
+
+    exports
+}
+
+fn resolve_module_environments(
+    programs: &[Program],
+    links: &[ResolvedImport],
+    local_modules: &HashMap<ModuleId, LocalModuleCatalog>,
+    diagnostics: &mut Vec<Diagnostic>,
+    facts: &mut FactBuilder,
+) -> HashMap<ModuleId, ModuleEnvironment> {
+    let mut targets = HashMap::new();
+    for link in links {
+        targets
+            .entry((link.importer, link.path_span))
+            .or_insert(link.target);
+    }
+
+    programs
+        .iter()
+        .filter_map(|program| {
+            let _ = local_modules.get(&program.module)?;
+            let mut bindings = program
+                .records
+                .iter()
+                .enumerate()
+                .map(|(index, record)| BindingEvent {
+                    name: record.name.text.clone(),
+                    span: record.name.span,
+                    definition: DefId::Record(RecordId::in_module(program.module, index)),
+                })
+                .chain(
+                    program
+                        .unions
+                        .iter()
+                        .enumerate()
+                        .map(|(index, union)| BindingEvent {
+                            name: union.name.text.clone(),
+                            span: union.name.span,
+                            definition: DefId::Union(UnionId::in_module(program.module, index)),
+                        }),
+                )
+                .chain(
+                    program
+                        .functions
+                        .iter()
+                        .enumerate()
+                        .map(|(index, function)| BindingEvent {
+                            name: function.name.text.clone(),
+                            span: function.name.span,
+                            definition: DefId::Function(FunctionId::in_module(
+                                program.module,
+                                index,
+                            )),
+                        }),
+                )
+                .collect::<Vec<_>>();
+
+            for import in &program.imports {
+                let Some(target) = targets.get(&(program.module, import.path_span)).copied() else {
+                    continue;
+                };
+                let Some(target_module) = local_modules.get(&target) else {
+                    continue;
+                };
+
+                for name in &import.names {
+                    if let Some(export) = target_module.exports.get(&name.text).copied() {
+                        facts.record_name(name.span, definition_resolution(export.definition));
+                        bindings.push(BindingEvent {
+                            name: name.text.clone(),
+                            span: name.span,
+                            definition: export.definition,
+                        });
+                    } else if let Some(declaration) =
+                        target_module.declared_names.get(&name.text).copied()
+                    {
+                        diagnostics.push(
+                            Diagnostic::error(
+                                PRIVATE_EXPORT,
+                                format!("`{}` is private in the imported module", name.text),
+                            )
+                            .with_label(Label::primary(name.span, "private import"))
+                            .with_label(Label::secondary(declaration, "declared private here")),
+                        );
+                    } else {
+                        diagnostics.push(
+                            Diagnostic::error(
+                                MISSING_EXPORT,
+                                format!("imported module has no declaration named `{}`", name.text),
+                            )
+                            .with_label(Label::primary(name.span, "missing imported name")),
+                        );
+                    }
+                }
+            }
+
+            bindings.sort_by_key(|binding| span_position(binding.span));
+            let mut environment = ModuleEnvironment {
+                types: TypeCatalog::new(),
+                functions: FunctionNameCatalog::new(),
+            };
+            for binding in bindings {
+                insert_module_binding(&mut environment, binding, diagnostics);
+            }
+
+            Some((program.module, environment))
+        })
+        .collect()
+}
+
+fn insert_module_binding(
+    environment: &mut ModuleEnvironment,
+    binding: BindingEvent,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match binding.definition {
+        DefId::Function(function) => {
+            let previous = environment
+                .functions
+                .get(&binding.name)
+                .map(|entry| entry.name_span);
+            if binding.name == "print" || previous.is_some() {
+                push_top_level_duplicate(
+                    diagnostics,
+                    &binding.name,
+                    binding.span,
+                    previous,
+                    "value",
+                );
+            } else {
+                environment.functions.insert(
+                    binding.name,
+                    FunctionNameEntry {
+                        id: function,
+                        name_span: binding.span,
+                    },
+                );
+            }
+        }
+        DefId::Record(record) => insert_type_binding(
+            environment,
+            binding.name,
+            binding.span,
+            TypeSymbol::Record(record),
+            diagnostics,
+        ),
+        DefId::Union(union) => insert_type_binding(
+            environment,
+            binding.name,
+            binding.span,
+            TypeSymbol::Union(union),
+            diagnostics,
+        ),
+    }
+}
+
+fn insert_type_binding(
+    environment: &mut ModuleEnvironment,
+    name: String,
+    span: SourceSpan,
+    symbol: TypeSymbol,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(previous) = environment.types.get(&name).copied() {
+        push_top_level_duplicate(diagnostics, &name, span, Some(previous.name_span), "type");
+    } else {
+        environment.types.insert(
+            name,
+            TypeEntry {
+                symbol,
+                name_span: span,
+            },
+        );
+    }
+}
+
+fn push_top_level_duplicate(
+    diagnostics: &mut Vec<Diagnostic>,
+    name: &str,
+    span: SourceSpan,
+    previous: Option<SourceSpan>,
+    namespace: &str,
+) {
+    let mut diagnostic = Diagnostic::error(
+        DUPLICATE_NAME,
+        format!("duplicate top-level {namespace} `{name}`"),
+    )
+    .with_label(Label::primary(
+        span,
+        format!("duplicate {namespace} binding"),
+    ));
+    if let Some(previous) = previous {
+        diagnostic = diagnostic.with_label(Label::secondary(previous, "first bound here"));
+    }
+    diagnostics.push(diagnostic);
+}
+
+const fn definition_resolution(definition: DefId) -> NameResolution {
+    match definition {
+        DefId::Function(function) => NameResolution::Function(function),
+        DefId::Record(record) => NameResolution::Record(record),
+        DefId::Union(union) => NameResolution::Union(union),
+    }
 }
 
 fn collect_record_facts(
@@ -877,7 +1340,7 @@ fn type_reaches_record(
             if !visited.insert(*record) {
                 return false;
             }
-            records.get(record.index()).is_some_and(|record| {
+            record_facts(records, *record).is_some_and(|record| {
                 record
                     .fields
                     .iter()
@@ -893,84 +1356,88 @@ fn type_reaches_record(
 struct FunctionSignature {
     parameters: Vec<Option<Type>>,
     return_type: Option<Type>,
-    declaration: Option<SourceSpan>,
     resolution: NameResolution,
 }
 
 struct FunctionCatalog {
-    by_name: HashMap<String, FunctionSignature>,
-    by_id: Vec<FunctionSignature>,
+    by_module: HashMap<ModuleId, HashMap<String, FunctionSignature>>,
+    by_id: HashMap<FunctionId, FunctionSignature>,
 }
 
 fn collect_function_signatures(
-    program: &Program,
-    types: &TypeCatalog,
+    programs: &[Program],
+    environments: &HashMap<ModuleId, ModuleEnvironment>,
     diagnostics: &mut Vec<Diagnostic>,
     facts: &mut FactBuilder,
 ) -> FunctionCatalog {
-    let mut functions = HashMap::new();
-    functions.insert(
-        "print".to_owned(),
-        FunctionSignature {
-            parameters: vec![Some(Type::Int)],
-            return_type: Some(Type::Unit),
-            declaration: None,
-            resolution: NameResolution::Builtin(Builtin::Print),
-        },
-    );
-    let mut by_id = Vec::with_capacity(program.functions.len());
-
-    for (index, function) in program.functions.iter().enumerate() {
-        let function_id = FunctionId::in_module(program.module, index);
-        facts.record_name(function.name.span, NameResolution::Function(function_id));
-        let signature = FunctionSignature {
-            parameters: function
-                .parameters
-                .iter()
-                .map(|parameter| resolve_type(&parameter.ty, types, diagnostics, facts))
-                .collect(),
-            return_type: resolve_type(&function.return_type, types, diagnostics, facts),
-            declaration: Some(function.name.span),
-            resolution: NameResolution::Function(function_id),
+    let mut by_id = HashMap::new();
+    for program in programs {
+        let Some(environment) = environments.get(&program.module) else {
+            continue;
         };
-
-        if let Some(previous) = functions.get(&function.name.text) {
-            let mut diagnostic = Diagnostic::error(
-                DUPLICATE_NAME,
-                format!("duplicate function `{}`", function.name.text),
-            )
-            .with_label(Label::primary(function.name.span, "duplicate function"));
-            if let Some(previous) = previous.declaration {
-                diagnostic =
-                    diagnostic.with_label(Label::secondary(previous, "first declared here"));
-            }
-            diagnostics.push(diagnostic);
-        } else {
-            functions.insert(function.name.text.clone(), signature.clone());
+        for (index, function) in program.functions.iter().enumerate() {
+            let function_id = FunctionId::in_module(program.module, index);
+            by_id.insert(
+                function_id,
+                FunctionSignature {
+                    parameters: function
+                        .parameters
+                        .iter()
+                        .map(|parameter| {
+                            resolve_type(&parameter.ty, &environment.types, diagnostics, facts)
+                        })
+                        .collect(),
+                    return_type: resolve_type(
+                        &function.return_type,
+                        &environment.types,
+                        diagnostics,
+                        facts,
+                    ),
+                    resolution: NameResolution::Function(function_id),
+                },
+            );
         }
-        by_id.push(signature);
     }
 
-    FunctionCatalog {
-        by_name: functions,
-        by_id,
-    }
+    let by_module = environments
+        .iter()
+        .map(|(module, environment)| {
+            let functions = environment
+                .functions
+                .iter()
+                .filter_map(|(name, entry)| {
+                    by_id
+                        .get(&entry.id)
+                        .cloned()
+                        .map(|signature| (name.clone(), signature))
+                })
+                .collect();
+            (*module, functions)
+        })
+        .collect();
+
+    FunctionCatalog { by_module, by_id }
 }
 
 fn check_function(
     function: &Function,
     function_id: FunctionId,
-    functions: &FunctionCatalog,
+    catalog: &FunctionCatalog,
     type_symbols: &TypeCatalog,
     records: &[RecordFacts],
     unions: &[UnionFacts],
     diagnostics: &mut Vec<Diagnostic>,
     facts: &mut FactBuilder,
 ) {
-    let signature = &functions.by_id[function_id.index()];
+    let Some(signature) = catalog.by_id.get(&function_id) else {
+        return;
+    };
+    let Some(functions) = catalog.by_module.get(&function_id.module()) else {
+        return;
+    };
     let mut checker = FunctionChecker {
         function_id,
-        functions: &functions.by_name,
+        functions,
         type_symbols,
         records,
         unions,
@@ -1021,7 +1488,8 @@ fn check_function(
         signature.return_type.is_some() && signature.parameters.iter().all(Option::is_some);
     let valid_main_parameters = signature.parameters.is_empty()
         || matches!(signature.parameters.as_slice(), [Some(Type::Array(element))] if element.as_ref() == &Type::String);
-    if function.name.text == "main"
+    if function_id.module() == ModuleId::ENTRY
+        && function.name.text == "main"
         && known_signature
         && (!valid_main_parameters || signature.return_type != Some(Type::Unit))
     {
@@ -1444,7 +1912,7 @@ impl FunctionChecker<'_> {
             );
             return None;
         };
-        let Some(record) = self.records.get(record_id.index()).cloned() else {
+        let Some(record) = record_facts(self.records, *record_id).cloned() else {
             self.error(
                 TYPE_MISMATCH,
                 span,
@@ -1548,7 +2016,7 @@ impl FunctionChecker<'_> {
             }
             None => None,
         };
-        let union = union_id.and_then(|union| self.unions.get(union.index()).cloned());
+        let union = union_id.and_then(|union| union_facts(self.unions, union).cloned());
         let mut covered = HashMap::<VariantId, SourceSpan>::new();
         let mut default_span = None;
         let mut complete_span = None;
@@ -1761,7 +2229,7 @@ impl FunctionChecker<'_> {
             );
             return None;
         };
-        let union = self.unions.get(union_id.index()).cloned()?;
+        let union = union_facts(self.unions, union_id).cloned()?;
         let Some(variant_facts) = union
             .variants
             .iter()
@@ -1785,8 +2253,8 @@ impl FunctionChecker<'_> {
     }
 
     fn union_name(&self, union: UnionId) -> String {
-        self.unions.get(union.index()).map_or_else(
-            || format!("union#{}", union.index()),
+        union_facts(self.unions, union).map_or_else(
+            || format!("union#{}:{}", union.module().index(), union.index()),
             |union| union.name.clone(),
         )
     }
@@ -1854,7 +2322,7 @@ impl FunctionChecker<'_> {
                 Some(Type::Int)
             }
             Some(Type::Record(record_id)) => {
-                let Some(record) = self.records.get(record_id.index()) else {
+                let Some(record) = record_facts(self.records, record_id) else {
                     self.error(
                         UNKNOWN_MEMBER,
                         member.span,
@@ -2202,7 +2670,7 @@ impl FunctionChecker<'_> {
             );
             return None;
         };
-        let Some(union) = self.unions.get(union_id.index()).cloned() else {
+        let Some(union) = union_facts(self.unions, union_id).cloned() else {
             for argument in arguments {
                 let _ = self.check_expression(argument);
             }
@@ -2366,23 +2834,41 @@ fn format_type(ty: &Type, records: &[RecordFacts], unions: &[UnionFacts]) -> Str
         Type::Bool => "Bool".to_owned(),
         Type::String => "String".to_owned(),
         Type::Array(element) => format!("{}[]", format_type(element, records, unions)),
-        Type::Record(record) => records.get(record.index()).map_or_else(
-            || format!("record#{}", record.index()),
+        Type::Record(record) => record_facts(records, *record).map_or_else(
+            || format!("record#{}:{}", record.module().index(), record.index()),
             |record| record.name.clone(),
         ),
-        Type::Union(union) => unions.get(union.index()).map_or_else(
-            || format!("union#{}", union.index()),
+        Type::Union(union) => union_facts(unions, *union).map_or_else(
+            || format!("union#{}:{}", union.module().index(), union.index()),
             |union| union.name.clone(),
         ),
         Type::Unit => "Unit".to_owned(),
     }
 }
 
-fn diagnostic_position(diagnostic: &Diagnostic) -> (usize, usize) {
+fn record_facts(records: &[RecordFacts], id: RecordId) -> Option<&RecordFacts> {
+    records.iter().find(|record| record.id == id)
+}
+
+fn union_facts(unions: &[UnionFacts], id: UnionId) -> Option<&UnionFacts> {
+    unions.iter().find(|union| union.id == id)
+}
+
+fn span_position(span: SourceSpan) -> (u32, usize, usize) {
+    (span.file().raw(), span.range().start(), span.range().end())
+}
+
+fn diagnostic_position(diagnostic: &Diagnostic) -> (u32, usize, usize, &str) {
     diagnostic
         .labels()
         .first()
-        .map_or((usize::MAX, usize::MAX), |label| {
-            (label.span().range().start(), label.span().range().end())
+        .map_or((u32::MAX, usize::MAX, usize::MAX, ""), |label| {
+            let span = label.span();
+            (
+                span.file().raw(),
+                span.range().start(),
+                span.range().end(),
+                diagnostic.code().as_str(),
+            )
         })
 }

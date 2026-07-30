@@ -136,7 +136,10 @@ dependencies = [
  "nexa_hir",
  "nexa_mir",
  "nexa_parser",
+ "nexa_source",
  "nexa_span",
+ "nexa_syntax",
+ "thiserror",
 ]
 
 [[package]]

@@ -127,19 +127,30 @@ pub enum SourceLoadError {
     },
 }
 
-/// Resolves, canonicalizes, and loads source requests for a compiler session.
+/// Resolves source requests and loads canonical sources for a compiler session.
 pub trait SourceProvider {
-    /// Loads one request as source bytes with a canonical identity.
+    /// Resolves and canonicalizes one source request without loading its bytes.
     ///
-    /// Providers own request resolution and canonicalization. Returned bytes
-    /// are intentionally not decoded; the compiler validates UTF-8 before
-    /// registering text with the parser.
+    /// A successfully resolved key does not imply that the source exists or is
+    /// readable. Keeping resolution separate lets a compiler session cache one
+    /// load result for equivalent requests that share a canonical key.
     ///
     /// # Errors
     ///
-    /// Returns [`SourceLoadError`] when the request cannot be resolved or its
-    /// canonical source cannot be loaded.
-    fn load(&mut self, request: SourceRequest<'_>) -> Result<ProvidedSource, SourceLoadError>;
+    /// Returns [`SourceLoadError::Resolve`] when the request cannot be mapped to
+    /// a canonical source identity.
+    fn resolve(&mut self, request: SourceRequest<'_>) -> Result<SourceKey, SourceLoadError>;
+
+    /// Loads raw bytes and a display path for one canonical source key.
+    ///
+    /// Returned bytes are intentionally not decoded; the compiler validates
+    /// UTF-8 before registering text with the parser.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SourceLoadError`] when the canonical source does not exist or
+    /// cannot be loaded.
+    fn load(&mut self, key: &SourceKey) -> Result<ProvidedSource, SourceLoadError>;
 }
 
 /// A source file registered with the compiler.
@@ -357,7 +368,7 @@ impl MemorySourceProvider {
         key
     }
 
-    fn resolve(&self, request: SourceRequest<'_>) -> SourceKey {
+    fn resolve_request(request: SourceRequest<'_>) -> SourceKey {
         match request {
             SourceRequest::Entry(path) => SourceKey::new(normalize_virtual_path(path)),
             SourceRequest::Import {
@@ -372,15 +383,18 @@ impl MemorySourceProvider {
 }
 
 impl SourceProvider for MemorySourceProvider {
-    fn load(&mut self, request: SourceRequest<'_>) -> Result<ProvidedSource, SourceLoadError> {
-        let key = self.resolve(request);
+    fn resolve(&mut self, request: SourceRequest<'_>) -> Result<SourceKey, SourceLoadError> {
+        Ok(Self::resolve_request(request))
+    }
+
+    fn load(&mut self, key: &SourceKey) -> Result<ProvidedSource, SourceLoadError> {
         let source = self
             .sources
-            .get(&key)
+            .get(key)
             .ok_or_else(|| SourceLoadError::NotFound { key: key.clone() })?;
 
         Ok(ProvidedSource::new(
-            key,
+            key.clone(),
             source.display_path.clone(),
             source.bytes.clone(),
         ))
@@ -540,11 +554,12 @@ mod tests {
         let mut provider = MemorySourceProvider::default();
         let key = provider.insert(Path::new("app").join(".").join("main.nexa"), [0xff, 0x00]);
 
-        let source = provider.load(SourceRequest::Entry(
+        let resolved = provider.resolve(SourceRequest::Entry(
             &Path::new("app").join("nested").join("..").join("main.nexa"),
         ))?;
+        let source = provider.load(&resolved)?;
 
-        assert_eq!(source.key(), &key);
+        assert_eq!((resolved, source.key()), (key.clone(), &key));
         assert_eq!(source.display_path(), Path::new("app").join("main.nexa"));
         assert_eq!(source.bytes(), [0xff, 0x00]);
 
@@ -561,28 +576,40 @@ mod tests {
             b"dependency",
         );
 
-        let source = provider.load(SourceRequest::Import {
+        let resolved = provider.resolve(SourceRequest::Import {
             importer: &importer,
             specifier: "../lib/./math.nexa",
         })?;
+        let source = provider.load(&resolved)?;
 
-        assert_eq!(source.key(), &dependency);
+        assert_eq!((resolved, source.key()), (dependency.clone(), &dependency));
         assert_eq!(source.bytes(), b"dependency");
 
         Ok(())
     }
 
     #[test]
-    fn memory_provider_reports_the_resolved_key_for_missing_imports() {
+    fn memory_provider_resolves_missing_imports_before_load() -> Result<(), SourceLoadError> {
         let mut provider = MemorySourceProvider::default();
         let importer = SourceKey::new(Path::new("project").join("src").join("main.nexa"));
         let missing = SourceKey::new(Path::new("project").join("lib").join("missing.nexa"));
+        let resolved = provider.resolve(SourceRequest::Import {
+            importer: &importer,
+            specifier: "../lib/./missing.nexa",
+        })?;
+
+        assert_eq!(resolved, missing);
+
+        Ok(())
+    }
+
+    #[test]
+    fn memory_provider_reports_not_found_when_loading_a_missing_key() {
+        let mut provider = MemorySourceProvider::default();
+        let missing = SourceKey::new(Path::new("project").join("lib").join("missing.nexa"));
 
         assert_eq!(
-            provider.load(SourceRequest::Import {
-                importer: &importer,
-                specifier: "../lib/./missing.nexa",
-            }),
+            provider.load(&missing),
             Err(SourceLoadError::NotFound { key: missing })
         );
     }

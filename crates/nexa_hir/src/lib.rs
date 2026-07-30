@@ -10,9 +10,9 @@ mod hir;
 mod lower;
 
 pub use check::{
-    type_check, Analysis, Builtin, FunctionFacts, LocalId, MatchArmFacts, MatchFacts,
-    NameResolution, PayloadBindingFacts, PayloadFacts, RecordFacts, RecordFieldFacts, TypedProgram,
-    UnionFacts, VariantConstructionFacts, VariantFacts,
+    type_check, type_check_modules, Analysis, Builtin, FunctionFacts, LocalId, MatchArmFacts,
+    MatchFacts, NameResolution, PayloadBindingFacts, PayloadFacts, RecordFacts, RecordFieldFacts,
+    ResolvedImport, TypedProgram, UnionFacts, VariantConstructionFacts, VariantFacts,
 };
 pub use hir::{
     AssignmentStatement, BinaryOperator, Block, BreakStatement, ConstDeclaration,

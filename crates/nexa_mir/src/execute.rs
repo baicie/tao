@@ -1,7 +1,10 @@
+use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
 
-use nexa_hir::{BinaryOperator, FieldId, PayloadId, RecordId, UnaryOperator, UnionId, VariantId};
+use nexa_hir::{
+    BinaryOperator, FieldId, ModuleId, PayloadId, RecordId, UnaryOperator, UnionId, VariantId,
+};
 use nexa_span::SourceSpan;
 
 use crate::{
@@ -49,7 +52,12 @@ impl Display for Value {
             Self::Bool(value) => write!(formatter, "{value}"),
             Self::String(value) => formatter.write_str(value),
             Self::Array(_) => formatter.write_str("<array>"),
-            Self::Record { record, .. } => write!(formatter, "<record#{}>", record.index()),
+            Self::Record { record, .. } => write!(
+                formatter,
+                "<record#{}:{}>",
+                record.module().index(),
+                record.index()
+            ),
             Self::Union { union, variant, .. } => write!(
                 formatter,
                 "<union#{}::variant#{}>",
@@ -195,14 +203,13 @@ pub fn run_with_args(
     program: &MirProgram,
     arguments: &[String],
 ) -> Result<Execution, RuntimeFailure> {
+    validate_program(program).map_err(RuntimeFailure::from)?;
     let main = program
         .entry
         .ok_or_else(|| RuntimeError::new(program.span, "program has no `main` entry point"))
         .map_err(RuntimeFailure::from)?;
     let main_function = program
-        .functions
-        .iter()
-        .find(|function| function.id == main)
+        .function(main)
         .ok_or_else(|| RuntimeError::new(program.span, "entry function does not exist"))
         .map_err(RuntimeFailure::from)?;
     let main_arguments = match main_function.parameters.len() {
@@ -244,6 +251,102 @@ pub fn run_with_args(
     }
 }
 
+fn validate_program(program: &MirProgram) -> Result<(), RuntimeError> {
+    let modules = program.modules.iter().copied().collect::<HashSet<_>>();
+    if modules.len() != program.modules.len() {
+        return Err(RuntimeError::new(
+            program.span,
+            "program contains a duplicate module identity",
+        ));
+    }
+    if !modules.contains(&program.entry_module) {
+        return Err(RuntimeError::new(
+            program.span,
+            "program entry module does not exist",
+        ));
+    }
+    if program.entry_module != ModuleId::ENTRY {
+        return Err(RuntimeError::new(
+            program.span,
+            "program entry module is not module 0",
+        ));
+    }
+
+    let mut functions = HashSet::new();
+    for function in &program.functions {
+        if !modules.contains(&function.id.module()) {
+            return Err(RuntimeError::new(
+                function.span,
+                "function owner module does not exist",
+            ));
+        }
+        if !functions.insert(function.id) {
+            return Err(RuntimeError::new(
+                function.span,
+                "program contains a duplicate function identity",
+            ));
+        }
+    }
+
+    let mut records = HashSet::new();
+    for record in &program.records {
+        if !modules.contains(&record.id.module()) {
+            return Err(RuntimeError::new(
+                record.span,
+                "record owner module does not exist",
+            ));
+        }
+        if !records.insert(record.id) {
+            return Err(RuntimeError::new(
+                record.span,
+                "program contains a duplicate record identity",
+            ));
+        }
+        for (index, field) in record.fields.iter().enumerate() {
+            if field.id != FieldId::new(record.id, index) {
+                return Err(RuntimeError::new(
+                    field.span,
+                    "record field layout identity is inconsistent",
+                ));
+            }
+        }
+    }
+
+    let mut unions = HashSet::new();
+    for union in &program.unions {
+        if !modules.contains(&union.id.module()) {
+            return Err(RuntimeError::new(
+                union.span,
+                "union owner module does not exist",
+            ));
+        }
+        if !unions.insert(union.id) {
+            return Err(RuntimeError::new(
+                union.span,
+                "program contains a duplicate union identity",
+            ));
+        }
+        let _ = union_layout(program, union.id, union.span)?;
+    }
+
+    if let Some(entry) = program.entry {
+        if entry.module() != program.entry_module {
+            return Err(RuntimeError::new(
+                program.span,
+                "entry function is not owned by the entry module",
+            ));
+        }
+        if !functions.contains(&entry) {
+            return Err(RuntimeError::new(
+                program.span,
+                "entry function does not exist",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 const MAX_CALL_DEPTH: usize = 64;
 const MAX_EXECUTION_STEPS: usize = 100_000;
 const MAX_RECURSIVE_UNION_DEPTH: usize = 1024;
@@ -283,9 +386,7 @@ impl Interpreter {
         span: SourceSpan,
     ) -> Result<Value, RuntimeError> {
         let function = program
-            .functions
-            .iter()
-            .find(|function| function.id == function_id)
+            .function(function_id)
             .ok_or_else(|| RuntimeError::new(span, "call target does not exist"))?;
         if function.parameters.len() != arguments.len() {
             return Err(RuntimeError::new(
@@ -487,9 +588,7 @@ impl Interpreter {
         frame: &Frame,
     ) -> Result<Value, RuntimeError> {
         let layout = program
-            .records
-            .get(record.index())
-            .filter(|layout| layout.id == record)
+            .record(record)
             .ok_or_else(|| RuntimeError::new(span, "record layout does not exist"))?;
         if fields.len() != layout.fields.len() {
             return Err(RuntimeError::new(
@@ -677,9 +776,7 @@ fn union_layout(
     span: SourceSpan,
 ) -> Result<&MirUnion, RuntimeError> {
     let layout = program
-        .unions
-        .get(union.index())
-        .filter(|layout| layout.id == union)
+        .union(union)
         .ok_or_else(|| RuntimeError::new(span, "union layout does not exist"))?;
     for (variant_index, variant) in layout.variants.iter().enumerate() {
         let expected_variant = VariantId::new(union, variant_index);
@@ -1012,9 +1109,7 @@ fn validate_field_layout(
         ));
     }
     let layout = program
-        .records
-        .get(record.index())
-        .filter(|layout| layout.id == record)
+        .record(record)
         .ok_or_else(|| RuntimeError::new(span, "record layout does not exist"))?;
     let Some(layout_field) = layout.fields.get(field.index()) else {
         return Err(RuntimeError::new(
@@ -1136,7 +1231,10 @@ const fn value_type(value: &Value) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use nexa_hir::{PayloadId, Type, UnionId, VariantId};
+    use nexa_hir::{
+        lower as lower_hir, type_check, FunctionId, ModuleId, PayloadId, Type, UnionId, VariantId,
+    };
+    use nexa_parser::parse_source;
     use nexa_span::{FileId, TextRange};
 
     use super::{
@@ -1146,6 +1244,192 @@ mod tests {
     use crate::{
         BasicBlockId, MirPayload, MirProgram, MirRecord, MirRecordField, MirUnion, MirVariant,
     };
+
+    #[test]
+    fn interpreter_invokes_the_resolved_entry_without_searching_its_name(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let parse = parse_source(FileId::new(0), "function main(): Unit { print(42); }");
+        let hir = lower_hir(FileId::new(0), &parse.syntax())?;
+        let analysis = type_check(&hir);
+        let typed = analysis
+            .typed()
+            .ok_or_else(|| std::io::Error::other("expected valid typed HIR"))?;
+        let mut program = crate::lower(typed)?;
+        let entry = program
+            .entry
+            .ok_or_else(|| std::io::Error::other("expected resolved entry"))?;
+        let function = program
+            .functions
+            .iter_mut()
+            .find(|function| function.id == entry)
+            .ok_or_else(|| std::io::Error::other("expected entry function layout"))?;
+        function.name = "renamed".to_owned();
+
+        let execution = super::run(&program)?;
+
+        assert_eq!(execution.output(), ["42"]);
+        Ok(())
+    }
+
+    #[test]
+    fn interpreter_rejects_an_entry_owned_by_a_dependency_module(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let parse = parse_source(FileId::new(0), "function main(): Unit {}");
+        let hir = lower_hir(FileId::new(0), &parse.syntax())?;
+        let analysis = type_check(&hir);
+        let typed = analysis
+            .typed()
+            .ok_or_else(|| std::io::Error::other("expected valid typed HIR"))?;
+        let mut program = crate::lower(typed)?;
+        program.modules.push(ModuleId::new(1));
+        program.entry = Some(FunctionId::in_module(ModuleId::new(1), 0));
+
+        let failure = super::run(&program)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected invalid entry failure"))?;
+
+        assert_eq!(
+            failure.error().message(),
+            "entry function is not owned by the entry module"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn interpreter_rejects_duplicate_module_identities() -> Result<(), Box<dyn std::error::Error>> {
+        let mut program = lower_program("function main(): Unit {}")?;
+        program.modules.push(ModuleId::ENTRY);
+
+        let failure = super::run(&program)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected duplicate module failure"))?;
+
+        assert_eq!(
+            failure.error().message(),
+            "program contains a duplicate module identity"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn interpreter_rejects_a_missing_entry_module() -> Result<(), Box<dyn std::error::Error>> {
+        let mut program = lower_program("function main(): Unit {}")?;
+        program.entry_module = ModuleId::new(9);
+
+        let failure = super::run(&program)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected missing entry module failure"))?;
+
+        assert_eq!(
+            failure.error().message(),
+            "program entry module does not exist"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn interpreter_rejects_an_existing_dependency_selected_as_the_entry_module(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut program = lower_program("function main(): Unit {}")?;
+        let dependency = ModuleId::new(1);
+        let mut dependency_entry = program
+            .functions
+            .first()
+            .cloned()
+            .ok_or_else(|| std::io::Error::other("expected main function"))?;
+        dependency_entry.id = FunctionId::in_module(dependency, 0);
+        program.modules.push(dependency);
+        program.functions.push(dependency_entry);
+        program.entry_module = dependency;
+        program.entry = Some(FunctionId::in_module(dependency, 0));
+
+        let failure = super::run(&program)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected forged entry module failure"))?;
+
+        assert_eq!(
+            failure.error().message(),
+            "program entry module is not module 0"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn interpreter_rejects_functions_owned_by_unknown_modules(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut program = lower_program("function main(): Unit {}")?;
+        let function = program
+            .functions
+            .first_mut()
+            .ok_or_else(|| std::io::Error::other("expected main function"))?;
+        function.id = FunctionId::in_module(ModuleId::new(9), 0);
+
+        let failure = super::run(&program)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected missing function owner failure"))?;
+
+        assert_eq!(
+            failure.error().message(),
+            "function owner module does not exist"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn interpreter_rejects_duplicate_function_identities() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut program = lower_program("function helper(): Unit {} function main(): Unit {}")?;
+        let duplicate = program
+            .functions
+            .first()
+            .cloned()
+            .ok_or_else(|| std::io::Error::other("expected helper function"))?;
+        program.functions.push(duplicate);
+
+        let failure = super::run(&program)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected duplicate function failure"))?;
+
+        assert_eq!(
+            failure.error().message(),
+            "program contains a duplicate function identity"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn interpreter_rejects_a_missing_entry_function() -> Result<(), Box<dyn std::error::Error>> {
+        let mut program = lower_program("function main(): Unit {}")?;
+        program.entry = Some(FunctionId::in_module(ModuleId::ENTRY, 9));
+
+        let failure = super::run(&program)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected missing entry function failure"))?;
+
+        assert_eq!(failure.error().message(), "entry function does not exist");
+        Ok(())
+    }
+
+    #[test]
+    fn interpreter_rejects_record_layouts_owned_by_unknown_modules(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut program = lower_program("type Box = { value: Int; }; function main(): Unit {}")?;
+        let record = program
+            .records
+            .first_mut()
+            .ok_or_else(|| std::io::Error::other("expected record layout"))?;
+        record.id = RecordId::in_module(ModuleId::new(9), 0);
+
+        let failure = super::run(&program)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected missing record owner failure"))?;
+
+        assert_eq!(
+            failure.error().message(),
+            "record owner module does not exist"
+        );
+        Ok(())
+    }
 
     #[test]
     fn field_projection_reports_a_nominal_tag_mismatch_at_the_access_span(
@@ -1199,6 +1483,7 @@ mod tests {
         let other = RecordId::new(1);
         let span = SourceSpan::new(FileId::new(9), TextRange::new(50, 60));
         let program = MirProgram {
+            modules: vec![nexa_hir::ModuleId::ENTRY],
             entry_module: nexa_hir::ModuleId::ENTRY,
             entry: None,
             records: vec![MirRecord {
@@ -1356,6 +1641,7 @@ mod tests {
         let union = UnionId::new(0);
         let variant = VariantId::new(union, 0);
         MirProgram {
+            modules: vec![nexa_hir::ModuleId::ENTRY],
             entry_module: nexa_hir::ModuleId::ENTRY,
             entry: None,
             records: Vec::new(),
@@ -1378,5 +1664,22 @@ mod tests {
             functions: Vec::new(),
             span,
         }
+    }
+
+    fn lower_program(source: &str) -> Result<MirProgram, Box<dyn std::error::Error>> {
+        let parse = parse_source(FileId::new(0), source);
+        if !parse.is_ok() {
+            return Err(std::io::Error::other(format!(
+                "unexpected parser diagnostics: {:?}",
+                parse.diagnostics()
+            ))
+            .into());
+        }
+        let hir = lower_hir(FileId::new(0), &parse.syntax())?;
+        let analysis = type_check(&hir);
+        let typed = analysis
+            .typed()
+            .ok_or_else(|| std::io::Error::other("expected valid typed HIR"))?;
+        Ok(crate::lower(typed)?)
     }
 }

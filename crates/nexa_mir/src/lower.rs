@@ -49,7 +49,7 @@ impl std::error::Error for MirLoweringError {}
 /// Returns [`MirLoweringError`] only when the supplied typed HIR violates the
 /// semantic invariants enforced by [`nexa_hir::type_check`].
 pub fn lower(typed: &TypedProgram) -> Result<MirProgram, MirLoweringError> {
-    let program = typed.program();
+    let entry_program = typed.program();
     let records = typed
         .records()
         .iter()
@@ -60,31 +60,38 @@ pub fn lower(typed: &TypedProgram) -> Result<MirProgram, MirLoweringError> {
         .iter()
         .map(|union| lower_union_layout(union.id(), union))
         .collect::<Result<Vec<_>, _>>()?;
-    let functions = program
-        .functions
+    let functions = typed
+        .modules()
         .iter()
-        .enumerate()
-        .map(|(index, function)| {
-            lower_function(
-                HirFunctionId::in_module(program.module, index),
-                function,
-                typed,
-            )
+        .flat_map(|program| {
+            program
+                .functions
+                .iter()
+                .enumerate()
+                .map(move |(index, function)| {
+                    (HirFunctionId::in_module(program.module, index), function)
+                })
         })
+        .map(|(id, function)| lower_function(id, function, typed))
         .collect::<Result<Vec<_>, _>>()?;
-    let entry = program
+    let entry = entry_program
         .functions
         .iter()
         .position(|function| function.name.text == "main")
-        .map(|index| HirFunctionId::in_module(program.module, index));
+        .map(|index| HirFunctionId::in_module(entry_program.module, index));
 
     Ok(MirProgram {
-        entry_module: program.module,
+        modules: typed
+            .modules()
+            .iter()
+            .map(|program| program.module)
+            .collect(),
+        entry_module: entry_program.module,
         entry,
         records,
         unions,
         functions,
-        span: program.span,
+        span: entry_program.span,
     })
 }
 

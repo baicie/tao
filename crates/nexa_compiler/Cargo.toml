@@ -14,7 +14,10 @@ nexa_diagnostics.workspace = true
 nexa_hir.workspace = true
 nexa_mir.workspace = true
 nexa_parser.workspace = true
+nexa_source.workspace = true
 nexa_span.workspace = true
+nexa_syntax.workspace = true
+thiserror.workspace = true
 
 [lints]
 workspace = true
