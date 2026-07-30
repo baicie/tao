@@ -6,10 +6,11 @@ Deliver the [Nexa Language 1.0 Reference Core](../../spec/language-1.0.md): a
 statically checked, multi-file command-line language executed by the CFG MIR
 reference interpreter.
 
-Language Core v0.5 is fully delivered. It establishes nominal records, tagged
-unions, exhaustive matching, guarded recursive data, and module-ready resolved
-identities across CST, typed HIR, CFG MIR, and the interpreter. v0.6,
-multi-file modules, is the active implementation milestone.
+Language Core v0.6 is fully delivered. It establishes deterministic multi-file
+modules, private-by-default exports, source sessions, and module-owned resolved
+identities across CST, typed HIR, CFG MIR, and the interpreter. v0.7, bounded
+generics and ordinary `Option`/`Result` error values, is the active
+implementation milestone.
 
 ## Delivery Milestones
 
@@ -31,7 +32,7 @@ multi-file modules, is the active implementation milestone.
 - Define and test the accepted recursive-type shapes.
 - Evaluate only the selected match arm.
 
-### v0.6: Multi-File Modules (Active)
+### v0.6: Multi-File Modules (Delivered)
 
 - Add explicit named imports and exports using relative source paths.
 - Make the compiler session own the source map, module graph, and stable
@@ -41,7 +42,7 @@ multi-file modules, is the active implementation milestone.
 - Sort and render diagnostics by file and source position.
 - Keep file-system access in the CLI/provider boundary rather than the parser.
 
-### v0.7: Bounded Generics And Error Values
+### v0.7: Bounded Generics And Error Values (Active)
 
 - Add declared type parameters to functions, records, and tagged unions.
 - Infer type arguments only from local call or construction context.

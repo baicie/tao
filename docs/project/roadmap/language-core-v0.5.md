@@ -3,8 +3,8 @@
 ## Status
 
 Language Core v0.5 is delivered. The executable compiler satisfies every exit
-criterion below, and v0.6 multi-file modules are now the active implementation
-milestone in the [1.0 roadmap](language-1.0.md).
+criterion below. v0.6 multi-file modules have since been delivered, and later
+milestones continue in the [1.0 roadmap](language-1.0.md).
 
 ## Goal
 

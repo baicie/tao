@@ -1,39 +1,39 @@
 # Architecture
 
-Nexa is a small compiler workspace for Language Core v0.5. The workspace keeps
+Nexa is a small compiler workspace for Language Core v0.6. The workspace keeps
 each crate aligned to a compiler responsibility rather than a generic
 application layer.
 
-The active 1.0 target preserves these phase boundaries while extending the
-single-file driver into a source session and module graph. v0.5 is the current
-delivered architecture; v0.6 adds explicit multi-file modules while preserving
-the same phase boundaries.
+The active 1.0 target preserves these phase boundaries. v0.6 is the current
+delivered architecture: the compiler driver owns a source session and module
+graph while each parser remains a pure one-file consumer.
 
-Language Core v0.5 extends module-ready `RecordId` and `FieldId` identities
-with `UnionId`, `VariantId`, and `PayloadId`. Typed HIR resolves construction,
-patterns, coverage, and payload bindings before MIR; the interpreter operates
-only on resolved layouts and dense tag dispatch.
+Language Core v0.6 extends function, record, union, field, variant, and payload
+identities with module ownership. Typed HIR resolves imports, visibility,
+construction, patterns, coverage, and payload bindings before MIR; the
+interpreter operates only on resolved identities and layouts.
 
 ## Crate Responsibilities
 
 | Crate | Responsibility |
 |-------|----------------|
 | `nexa_span` | `FileId`, `TextRange`, and source spans |
-| `nexa_source` | source file ownership and line/column lookup |
+| `nexa_source` | source identities, provider boundary, ownership, and line/column lookup |
 | `nexa_diagnostics` | structured errors, warnings, and source labels |
 | `nexa_syntax` | tokens, `SyntaxKind`, and lossless CST support |
 | `nexa_parser` | parser entry points and recovery diagnostics |
 | `nexa_hir` | CST lowering, name resolution, typed expressions, and type checking |
 | `nexa_mir` | CFG MIR lowering, immutable runtime values, and interpreter |
-| `nexa_compiler` | compiler-driver entry points for checking and running |
-| `nexac` | command-line interface and diagnostic rendering |
+| `nexa_compiler` | source sessions, module graphs, checking, lowering, and execution orchestration |
+| `nexac` | file-system source provider, command-line interface, and diagnostic rendering |
 
 ## Dependency Graph
 
 ```text
 nexac -> nexa_source -> nexa_span
   |
-  \-> nexa_compiler -> nexa_parser -> nexa_syntax -> nexa_span
+  \-> nexa_compiler -> nexa_source
+                     +-> nexa_parser -> nexa_syntax -> nexa_span
                      |                \-> nexa_diagnostics -> nexa_span
                      +-> nexa_hir -> nexa_syntax
                      |             \-> nexa_diagnostics -> nexa_span
@@ -46,6 +46,9 @@ Rules:
 - Diagnostics are expressed in terms of stable source spans.
 - The compiler driver orchestrates parser, HIR, and MIR; the interpreter only
   consumes MIR.
+- The source provider resolves and loads opaque canonical keys; the compiler
+  session owns reachability, source registration, graph order, and load
+  failure caching.
 - String, array, record, union, member, index, constructor, and match types are
   resolved in typed HIR rather than rediscovered by MIR lowering.
 - Array storage may be shared across immutable values, but storage identity is

@@ -1,5 +1,21 @@
 # Changelog
 
+## Language Core v0.6 (Delivered)
+
+- Added explicit named imports and private-by-default exports for functions,
+  nominal records, and tagged unions across reachable `.nexa` files.
+- Added canonical source providers, deterministic DFS module graphs, cached
+  loads, cycle detection, complete cross-file source maps, and `E4001` through
+  `E4005` diagnostics.
+- Added module-owned definition and layout identities through typed HIR, CFG
+  MIR, and the interpreter, including resolved entry selection and diamond
+  identity preservation.
+- Added file-system and in-memory provider tests, multi-file CLI fixtures, and
+  the executable `examples/modules/main.nexa` four-module example.
+
+The active implementation milestone is v0.7: bounded generics and ordinary
+`Option`/`Result` error values.
+
 ## Language Core v0.5 (Delivered)
 
 - Added nominal tagged union declarations, qualified constructors, positional
@@ -12,7 +28,7 @@
   parser recovery, CLI fixtures, malformed-MIR checks, and the executable
   `examples/tagged_unions.nexa` example.
 
-The active implementation milestone is v0.6: explicit multi-file modules.
+This milestone remains a supported predecessor of v0.6.
 
 ## Language Core v0.4 (Delivered)
 

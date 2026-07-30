@@ -2,10 +2,11 @@
 
 ## Goals
 
-- [Nexa Language 1.0](roadmap/language-1.0.md) (active target; v0.6 is the current milestone)
+- [Nexa Language 1.0](roadmap/language-1.0.md) (active target; v0.7 is the current milestone)
 
 ## Roadmap
 
+- [Multi-file modules (v0.6)](roadmap/language-core-v0.6.md) (delivered)
 - [Tagged unions and matching (v0.5)](roadmap/language-core-v0.5.md) (delivered)
 - [Language Core v0.4](roadmap/language-core-v0.4.md) (delivered)
 - [Nexa Language 1.0](roadmap/language-1.0.md) (active)

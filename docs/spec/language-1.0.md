@@ -3,7 +3,7 @@
 ## Status
 
 This document defines the target contract for Nexa Language 1.0. The current
-delivered implementation is [Language Core v0.5](language-core-v0.5.md); the
+delivered implementation is [Language Core v0.6](language-core-v0.6.md); the
 features below become language guarantees only when their milestone is marked
 delivered in the [1.0 roadmap](../project/roadmap/language-1.0.md).
 

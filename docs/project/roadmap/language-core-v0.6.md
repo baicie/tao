@@ -2,11 +2,11 @@
 
 ## Status
 
-Language Core v0.6 is the active implementation milestone. Its executable
-behavior is defined by the
-[v0.6 specification](../../spec/language-core-v0.6.md). It is delivered only
-after every exit criterion and verification gate below passes on the
-integration branch.
+Language Core v0.6 is delivered. Its executable behavior is defined by the
+[v0.6 specification](../../spec/language-core-v0.6.md), and the compiler
+satisfies every exit criterion and verification gate below. v0.7 bounded
+generics and error values are now the active milestone in the
+[1.0 roadmap](language-1.0.md).
 
 ## Goal
 
@@ -278,8 +278,8 @@ display paths, and one-based Unicode line/column. Additional fixtures assert:
 |---|---:|---|---|
 | `nexac parse entry.nexa` with syntactically valid missing import target | 0 | entry CST only | empty |
 | `nexac parse entry.nexa` with malformed import | nonzero | recovered CST as currently defined | rendered `E1001` |
-| `nexac check entry.nexa` valid graph, no `main` | 0 | empty | empty |
-| `nexac check entry.nexa` valid graph and entry | 0 | empty | empty |
+| `nexac check entry.nexa` valid graph, no `main` | 0 | `ok` line | empty |
+| `nexac check entry.nexa` valid graph and entry | 0 | `ok` line | empty |
 | `nexac check entry.nexa` any `E4001`-`E4005` or source error | nonzero | empty | globally sorted diagnostics |
 | `nexac run entry.nexa` valid graph | 0 | program output | empty |
 | `nexac run entry.nexa -- args` valid argument-taking entry | 0 | deterministic output | empty |

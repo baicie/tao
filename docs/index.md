@@ -3,7 +3,7 @@ layout: home
 
 hero:
   name: "Nexa"
-  text: "Language Core v0.5 Delivered"
+  text: "Language Core v0.6 Delivered"
   tagline: "A TS-shaped language with independent static semantics and a MIR interpreter."
   actions:
     - theme: brand
@@ -19,11 +19,11 @@ features:
   - title: Stable Source Spans
     details: Diagnostics and parser output share source ranges through nexa_span.
   - title: Checked Execution
-    details: nexac parses, type-checks, lowers to CFG MIR, and runs a single source file.
+    details: nexac loads a reachable module graph, type-checks it, lowers it to CFG MIR, and runs the resolved entry.
   - title: Immutable Data
     details: UTF-8 strings, homogeneous arrays, nominal records, tagged unions, and command-line arguments have explicit native semantics.
   - title: Current Milestone
-    details: Language Core v0.5 delivers tagged unions and exhaustive matching; v0.6 targets explicit multi-file modules.
+    details: Language Core v0.6 delivers explicit multi-file modules; v0.7 targets bounded generics and ordinary error values.
   - title: Native Semantics
     details: Familiar TypeScript-shaped syntax does not imply JavaScript runtime compatibility.
   - title: Rust Tooling
