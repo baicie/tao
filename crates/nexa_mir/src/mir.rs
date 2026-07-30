@@ -1,11 +1,14 @@
 use nexa_hir::{
-    BinaryOperator, FieldId, PayloadId, RecordId, Type, UnaryOperator, UnionId, VariantId,
+    BinaryOperator, FieldId, FunctionId, ModuleId, PayloadId, RecordId, Type, UnaryOperator,
+    UnionId, VariantId,
 };
 use nexa_span::SourceSpan;
 
 /// A complete Nexa program in resolved middle intermediate representation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MirProgram {
+    pub(crate) entry_module: ModuleId,
+    pub(crate) entry: Option<FunctionId>,
     pub(crate) records: Vec<MirRecord>,
     pub(crate) unions: Vec<MirUnion>,
     pub(crate) functions: Vec<MirFunction>,
@@ -13,6 +16,18 @@ pub struct MirProgram {
 }
 
 impl MirProgram {
+    /// Returns the compiler session's entry-module identity.
+    #[must_use]
+    pub const fn entry_module(&self) -> ModuleId {
+        self.entry_module
+    }
+
+    /// Returns the already resolved entry function, when one was declared.
+    #[must_use]
+    pub const fn entry_function(&self) -> Option<FunctionId> {
+        self.entry
+    }
+
     /// Returns nominal record layouts in stable source order.
     #[must_use]
     pub fn records(&self) -> &[MirRecord] {
@@ -216,6 +231,7 @@ impl MirPayload {
 /// A function after local and function-name resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MirFunction {
+    pub(crate) id: FunctionId,
     pub(crate) name: String,
     pub(crate) parameters: Vec<LocalId>,
     pub(crate) parameter_types: Vec<Type>,
@@ -227,6 +243,12 @@ pub struct MirFunction {
 }
 
 impl MirFunction {
+    /// Returns the function's stable module-owned identity.
+    #[must_use]
+    pub const fn id(&self) -> FunctionId {
+        self.id
+    }
+
     /// Returns the source name of the function.
     #[must_use]
     pub fn name(&self) -> &str {
@@ -276,18 +298,6 @@ pub struct LocalId(pub(crate) usize);
 
 impl LocalId {
     /// Returns the slot's zero-based index within its function frame.
-    #[must_use]
-    pub const fn index(self) -> usize {
-        self.0
-    }
-}
-
-/// A resolved function identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FunctionId(pub(crate) usize);
-
-impl FunctionId {
-    /// Returns the function's zero-based index within its program.
     #[must_use]
     pub const fn index(self) -> usize {
         self.0

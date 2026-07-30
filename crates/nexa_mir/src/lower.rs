@@ -9,9 +9,8 @@ use nexa_hir::{
 use nexa_span::SourceSpan;
 
 use crate::{
-    BasicBlockId, Callee, FunctionId, LocalId, MirBasicBlock, MirExpression, MirFunction,
-    MirPayload, MirProgram, MirRecord, MirRecordField, MirStatement, MirTerminator, MirUnion,
-    MirVariant,
+    BasicBlockId, Callee, LocalId, MirBasicBlock, MirExpression, MirFunction, MirPayload,
+    MirProgram, MirRecord, MirRecordField, MirStatement, MirTerminator, MirUnion, MirVariant,
 };
 
 /// An invariant violation while lowering validated HIR to MIR.
@@ -54,23 +53,34 @@ pub fn lower(typed: &TypedProgram) -> Result<MirProgram, MirLoweringError> {
     let records = typed
         .records()
         .iter()
-        .enumerate()
-        .map(|(index, record)| lower_record_layout(RecordId::new(index), record))
+        .map(|record| lower_record_layout(record.id(), record))
         .collect::<Result<Vec<_>, _>>()?;
     let unions = typed
         .unions()
         .iter()
-        .enumerate()
-        .map(|(index, union)| lower_union_layout(UnionId::new(index), union))
+        .map(|union| lower_union_layout(union.id(), union))
         .collect::<Result<Vec<_>, _>>()?;
     let functions = program
         .functions
         .iter()
         .enumerate()
-        .map(|(index, function)| lower_function(HirFunctionId::new(index), function, typed))
+        .map(|(index, function)| {
+            lower_function(
+                HirFunctionId::in_module(program.module, index),
+                function,
+                typed,
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
+    let entry = program
+        .functions
+        .iter()
+        .position(|function| function.name.text == "main")
+        .map(|index| HirFunctionId::in_module(program.module, index));
 
     Ok(MirProgram {
+        entry_module: program.module,
+        entry,
         records,
         unions,
         functions,
@@ -284,6 +294,7 @@ fn lower_function(
     let (parameters, local_count, blocks) = lowerer.finish()?;
 
     Ok(MirFunction {
+        id: function_id,
         name: function.name.text.clone(),
         parameters,
         parameter_types: facts.parameter_types().to_vec(),
@@ -1162,9 +1173,7 @@ impl FunctionLowerer<'_> {
             return Err(error(callee.span(), "non-name call reached MIR lowering"));
         };
         let callee = match self.typed.name_resolution(name.span) {
-            Some(NameResolution::Function(function)) => {
-                Callee::Function(FunctionId(function.index()))
-            }
+            Some(NameResolution::Function(function)) => Callee::Function(function),
             Some(NameResolution::Builtin(Builtin::Print)) => Callee::Print,
             Some(NameResolution::Local(_)) => {
                 return Err(error(

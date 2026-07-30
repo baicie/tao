@@ -196,13 +196,16 @@ pub fn run_with_args(
     arguments: &[String],
 ) -> Result<Execution, RuntimeFailure> {
     let main = program
-        .functions
-        .iter()
-        .position(|function| function.name == "main")
-        .map(FunctionId)
+        .entry
         .ok_or_else(|| RuntimeError::new(program.span, "program has no `main` entry point"))
         .map_err(RuntimeFailure::from)?;
-    let main_arguments = match program.functions[main.0].parameters.len() {
+    let main_function = program
+        .functions
+        .iter()
+        .find(|function| function.id == main)
+        .ok_or_else(|| RuntimeError::new(program.span, "entry function does not exist"))
+        .map_err(RuntimeFailure::from)?;
+    let main_arguments = match main_function.parameters.len() {
         0 if arguments.is_empty() => Vec::new(),
         0 => {
             return Err(RuntimeError::new(
@@ -281,7 +284,8 @@ impl Interpreter {
     ) -> Result<Value, RuntimeError> {
         let function = program
             .functions
-            .get(function_id.0)
+            .iter()
+            .find(|function| function.id == function_id)
             .ok_or_else(|| RuntimeError::new(span, "call target does not exist"))?;
         if function.parameters.len() != arguments.len() {
             return Err(RuntimeError::new(
@@ -1195,6 +1199,8 @@ mod tests {
         let other = RecordId::new(1);
         let span = SourceSpan::new(FileId::new(9), TextRange::new(50, 60));
         let program = MirProgram {
+            entry_module: nexa_hir::ModuleId::ENTRY,
+            entry: None,
             records: vec![MirRecord {
                 id: record,
                 name: "Box".to_owned(),
@@ -1350,6 +1356,8 @@ mod tests {
         let union = UnionId::new(0);
         let variant = VariantId::new(union, 0);
         MirProgram {
+            entry_module: nexa_hir::ModuleId::ENTRY,
+            entry: None,
             records: Vec::new(),
             unions: vec![MirUnion {
                 id: union,

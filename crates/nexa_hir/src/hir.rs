@@ -3,6 +3,8 @@ use nexa_span::SourceSpan;
 /// A complete Nexa source file after syntax lowering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
+    /// The stable identity of the module that owns these declarations.
+    pub module: ModuleId,
     /// All top-level nominal record declarations in source order.
     pub records: Vec<RecordDeclaration>,
     /// All top-level nominal tagged union declarations in source order.
@@ -11,6 +13,83 @@ pub struct Program {
     pub functions: Vec<Function>,
     /// The source range covered by the source file node.
     pub span: SourceSpan,
+}
+
+/// A stable first-discovery identifier for one source module.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ModuleId(usize);
+
+impl ModuleId {
+    /// The entry module in every compiler session.
+    pub const ENTRY: Self = Self(0);
+
+    /// Creates a module identifier from its zero-based discovery index.
+    #[must_use]
+    pub const fn new(index: usize) -> Self {
+        Self(index)
+    }
+
+    /// Returns the zero-based discovery index within the compiler session.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.0
+    }
+}
+
+/// A kind-safe identity for any top-level definition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DefId {
+    /// A source function.
+    Function(FunctionId),
+    /// A nominal immutable record.
+    Record(RecordId),
+    /// A nominal tagged union.
+    Union(UnionId),
+}
+
+impl DefId {
+    /// Returns the module that owns this definition.
+    #[must_use]
+    pub const fn module(self) -> ModuleId {
+        match self {
+            Self::Function(function) => function.module(),
+            Self::Record(record) => record.module(),
+            Self::Union(union) => union.module(),
+        }
+    }
+}
+
+/// A stable source-order identifier for a function owned by one module.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FunctionId {
+    module: ModuleId,
+    index: usize,
+}
+
+impl FunctionId {
+    /// Creates an entry-module function identifier for single-file callers.
+    #[must_use]
+    pub const fn new(index: usize) -> Self {
+        Self::in_module(ModuleId::ENTRY, index)
+    }
+
+    /// Creates a function identifier from its owner and module-local index.
+    #[must_use]
+    pub const fn in_module(module: ModuleId, index: usize) -> Self {
+        Self { module, index }
+    }
+
+    /// Returns the module that owns this function.
+    #[must_use]
+    pub const fn module(self) -> ModuleId {
+        self.module
+    }
+
+    /// Returns the zero-based source index within the owning module.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.index
+    }
 }
 
 /// A nominal immutable record declaration.
@@ -129,21 +208,36 @@ pub enum TypeReferenceKind {
     Array(Box<TypeReference>),
 }
 
-/// A stable source-order identifier for a nominal record in one program.
+/// A stable source-order identifier for a nominal record owned by one module.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct RecordId(usize);
+pub struct RecordId {
+    module: ModuleId,
+    index: usize,
+}
 
 impl RecordId {
-    /// Creates a record identifier from its zero-based source index.
+    /// Creates an entry-module record identifier for single-file callers.
     #[must_use]
     pub const fn new(index: usize) -> Self {
-        Self(index)
+        Self::in_module(ModuleId::ENTRY, index)
     }
 
-    /// Returns the zero-based source index within the program.
+    /// Creates a record identifier from its owner and module-local index.
+    #[must_use]
+    pub const fn in_module(module: ModuleId, index: usize) -> Self {
+        Self { module, index }
+    }
+
+    /// Returns the module that owns this record.
+    #[must_use]
+    pub const fn module(self) -> ModuleId {
+        self.module
+    }
+
+    /// Returns the zero-based source index within the owning module.
     #[must_use]
     pub const fn index(self) -> usize {
-        self.0
+        self.index
     }
 }
 
@@ -174,21 +268,36 @@ impl FieldId {
     }
 }
 
-/// A stable source-order identifier for a nominal tagged union in one program.
+/// A stable source-order identifier for a nominal tagged union owned by one module.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct UnionId(usize);
+pub struct UnionId {
+    module: ModuleId,
+    index: usize,
+}
 
 impl UnionId {
-    /// Creates a union identifier from its zero-based source index.
+    /// Creates an entry-module union identifier for single-file callers.
     #[must_use]
     pub const fn new(index: usize) -> Self {
-        Self(index)
+        Self::in_module(ModuleId::ENTRY, index)
     }
 
-    /// Returns the zero-based source index within the program.
+    /// Creates a union identifier from its owner and module-local index.
+    #[must_use]
+    pub const fn in_module(module: ModuleId, index: usize) -> Self {
+        Self { module, index }
+    }
+
+    /// Returns the module that owns this union.
+    #[must_use]
+    pub const fn module(self) -> ModuleId {
+        self.module
+    }
+
+    /// Returns the zero-based source index within the owning module.
     #[must_use]
     pub const fn index(self) -> usize {
-        self.0
+        self.index
     }
 }
 
@@ -272,8 +381,18 @@ impl std::fmt::Display for Type {
             Self::Bool => formatter.write_str("Bool"),
             Self::String => formatter.write_str("String"),
             Self::Array(element) => write!(formatter, "{element}[]"),
-            Self::Record(record) => write!(formatter, "record#{}", record.index()),
-            Self::Union(union) => write!(formatter, "union#{}", union.index()),
+            Self::Record(record) => write!(
+                formatter,
+                "record#{}:{}",
+                record.module().index(),
+                record.index()
+            ),
+            Self::Union(union) => write!(
+                formatter,
+                "union#{}:{}",
+                union.module().index(),
+                union.index()
+            ),
             Self::Unit => formatter.write_str("Unit"),
         }
     }

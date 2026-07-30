@@ -5,7 +5,7 @@ use nexa_span::SourceSpan;
 
 use crate::{
     AssignmentStatement, BinaryOperator, Block, ConstDeclaration, Expression, FieldId, Function,
-    IfStatement, LetDeclaration, MatchArm, MatchPattern, Name, PayloadId, Program,
+    FunctionId, IfStatement, LetDeclaration, MatchArm, MatchPattern, Name, PayloadId, Program,
     RecordFieldInitializer, RecordId, ReturnStatement, Statement, Type, TypeReference,
     TypeReferenceKind, UnaryOperator, UnionId, VariantId, WhileStatement,
 };
@@ -98,13 +98,13 @@ impl TypedProgram {
     /// Returns local-slot facts for a resolved source function.
     #[must_use]
     pub fn function_facts(&self, function: FunctionId) -> Option<&FunctionFacts> {
-        self.functions.get(function.index())
+        self.functions.iter().find(|facts| facts.id == function)
     }
 
     /// Returns resolved layout facts for a nominal record.
     #[must_use]
     pub fn record_facts(&self, record: RecordId) -> Option<&RecordFacts> {
-        self.records.get(record.index())
+        self.records.iter().find(|facts| facts.id == record)
     }
 
     /// Returns all nominal records in stable source order.
@@ -116,7 +116,7 @@ impl TypedProgram {
     /// Returns resolved declaration facts for a nominal tagged union.
     #[must_use]
     pub fn union_facts(&self, union: UnionId) -> Option<&UnionFacts> {
-        self.unions.get(union.index())
+        self.unions.iter().find(|facts| facts.id == union)
     }
 
     /// Returns all nominal tagged unions in stable source order.
@@ -156,24 +156,6 @@ impl LocalId {
     }
 }
 
-/// A stable source-order identifier for a function in one program.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FunctionId(usize);
-
-impl FunctionId {
-    /// Creates a function identifier from its zero-based source index.
-    #[must_use]
-    pub const fn new(index: usize) -> Self {
-        Self(index)
-    }
-
-    /// Returns the zero-based source index within the program.
-    #[must_use]
-    pub const fn index(self) -> usize {
-        self.0
-    }
-}
-
 /// A compiler-provided operation resolved during semantic analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Builtin {
@@ -207,6 +189,7 @@ pub enum NameResolution {
 /// Slot allocation facts for one validated function.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionFacts {
+    id: FunctionId,
     parameters: Vec<LocalId>,
     parameter_types: Vec<Type>,
     return_type: Type,
@@ -214,6 +197,12 @@ pub struct FunctionFacts {
 }
 
 impl FunctionFacts {
+    /// Returns this function's stable module-owned identifier.
+    #[must_use]
+    pub const fn id(&self) -> FunctionId {
+        self.id
+    }
+
     /// Returns parameter slots in declaration order.
     #[must_use]
     pub fn parameter_ids(&self) -> &[LocalId] {
@@ -543,7 +532,7 @@ pub fn type_check(program: &Program) -> Analysis {
     for (index, function) in program.functions.iter().enumerate() {
         check_function(
             function,
-            index,
+            FunctionId::in_module(program.module, index),
             &functions,
             &type_symbols,
             &records,
@@ -619,14 +608,18 @@ fn collect_type_names(
         .records
         .iter()
         .enumerate()
-        .map(|(index, record)| (&record.name, TypeSymbol::Record(RecordId::new(index))))
-        .chain(
-            program
-                .unions
-                .iter()
-                .enumerate()
-                .map(|(index, union)| (&union.name, TypeSymbol::Union(UnionId::new(index)))),
-        )
+        .map(|(index, record)| {
+            (
+                &record.name,
+                TypeSymbol::Record(RecordId::in_module(program.module, index)),
+            )
+        })
+        .chain(program.unions.iter().enumerate().map(|(index, union)| {
+            (
+                &union.name,
+                TypeSymbol::Union(UnionId::in_module(program.module, index)),
+            )
+        }))
         .collect::<Vec<_>>();
     declarations.sort_by_key(|(name, _)| (name.span.file().raw(), name.span.range().start()));
 
@@ -676,7 +669,7 @@ fn collect_record_facts(
         .iter()
         .enumerate()
         .map(|(record_index, record)| {
-            let record_id = RecordId::new(record_index);
+            let record_id = RecordId::in_module(program.module, record_index);
             let mut declared_fields = HashMap::<String, SourceSpan>::new();
             let mut fields = Vec::new();
 
@@ -737,7 +730,7 @@ fn collect_union_facts(
         .iter()
         .enumerate()
         .map(|(union_index, union)| {
-            let union_id = UnionId::new(union_index);
+            let union_id = UnionId::in_module(program.module, union_index);
             let mut declared_variants = HashMap::<String, SourceSpan>::new();
             let mut variants = Vec::new();
 
@@ -928,7 +921,7 @@ fn collect_function_signatures(
     let mut by_id = Vec::with_capacity(program.functions.len());
 
     for (index, function) in program.functions.iter().enumerate() {
-        let function_id = FunctionId::new(index);
+        let function_id = FunctionId::in_module(program.module, index);
         facts.record_name(function.name.span, NameResolution::Function(function_id));
         let signature = FunctionSignature {
             parameters: function
@@ -966,7 +959,7 @@ fn collect_function_signatures(
 
 fn check_function(
     function: &Function,
-    function_index: usize,
+    function_id: FunctionId,
     functions: &FunctionCatalog,
     type_symbols: &TypeCatalog,
     records: &[RecordFacts],
@@ -974,8 +967,9 @@ fn check_function(
     diagnostics: &mut Vec<Diagnostic>,
     facts: &mut FactBuilder,
 ) {
-    let signature = &functions.by_id[function_index];
+    let signature = &functions.by_id[function_id.index()];
     let mut checker = FunctionChecker {
+        function_id,
         functions: &functions.by_name,
         type_symbols,
         records,
@@ -1043,6 +1037,7 @@ fn check_function(
 }
 
 struct FunctionChecker<'a> {
+    function_id: FunctionId,
     functions: &'a HashMap<String, FunctionSignature>,
     type_symbols: &'a TypeCatalog,
     records: &'a [RecordFacts],
@@ -2345,6 +2340,7 @@ impl FunctionChecker<'_> {
 
     fn finish(self) {
         self.facts.functions.push(FunctionFacts {
+            id: self.function_id,
             parameters: self.parameters,
             parameter_types: self.parameter_types,
             return_type: self.return_type.unwrap_or(Type::Unit),

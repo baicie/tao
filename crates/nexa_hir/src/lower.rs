@@ -7,10 +7,10 @@ use nexa_syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 use crate::{
     AssignmentStatement, BinaryOperator, Block, BreakStatement, ConstDeclaration,
     ContinueStatement, Expression, ExpressionStatement, Function, IfStatement, LetDeclaration,
-    MatchArm, MatchPattern, Name, Parameter, Program, RecordDeclaration, RecordFieldDeclaration,
-    RecordFieldInitializer, ReturnStatement, Statement, TypeReference, TypeReferenceKind,
-    UnaryOperator, UnionDeclaration, UnionVariantDeclaration, VariantPayloadDeclaration,
-    WhileStatement,
+    MatchArm, MatchPattern, ModuleId, Name, Parameter, Program, RecordDeclaration,
+    RecordFieldDeclaration, RecordFieldInitializer, ReturnStatement, Statement, TypeReference,
+    TypeReferenceKind, UnaryOperator, UnionDeclaration, UnionVariantDeclaration,
+    VariantPayloadDeclaration, WhileStatement,
 };
 
 const SYNTAX_ERROR: DiagnosticCode = DiagnosticCode::new("E1001");
@@ -70,6 +70,20 @@ impl std::error::Error for LoweringError {}
 /// Returns [`LoweringError`] when the supplied CST is malformed or an integer
 /// literal does not fit Nexa's signed 64-bit `Int` type.
 pub fn lower(file: FileId, syntax: &SyntaxNode) -> Result<Program, LoweringError> {
+    lower_module(ModuleId::ENTRY, file, syntax)
+}
+
+/// Lowers one syntax-valid source file under its compiler-session module identity.
+///
+/// # Errors
+///
+/// Returns [`LoweringError`] when the supplied CST is malformed or an integer
+/// literal does not fit Nexa's signed 64-bit `Int` type.
+pub fn lower_module(
+    module: ModuleId,
+    file: FileId,
+    syntax: &SyntaxNode,
+) -> Result<Program, LoweringError> {
     if syntax.kind() != SyntaxKind::SourceFile {
         return Err(malformed(node_span(file, syntax)));
     }
@@ -91,6 +105,7 @@ pub fn lower(file: FileId, syntax: &SyntaxNode) -> Result<Program, LoweringError
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(Program {
+        module,
         records,
         unions,
         functions,

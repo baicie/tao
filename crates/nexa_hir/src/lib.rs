@@ -10,16 +10,17 @@ mod hir;
 mod lower;
 
 pub use check::{
-    type_check, Analysis, Builtin, FunctionFacts, FunctionId, LocalId, MatchArmFacts, MatchFacts,
+    type_check, Analysis, Builtin, FunctionFacts, LocalId, MatchArmFacts, MatchFacts,
     NameResolution, PayloadBindingFacts, PayloadFacts, RecordFacts, RecordFieldFacts, TypedProgram,
     UnionFacts, VariantConstructionFacts, VariantFacts,
 };
 pub use hir::{
     AssignmentStatement, BinaryOperator, Block, BreakStatement, ConstDeclaration,
-    ContinueStatement, Expression, ExpressionStatement, FieldId, Function, IfStatement,
-    LetDeclaration, MatchArm, MatchPattern, Name, Parameter, PayloadId, Program, RecordDeclaration,
-    RecordFieldDeclaration, RecordFieldInitializer, RecordId, ReturnStatement, Statement, Type,
-    TypeReference, TypeReferenceKind, UnaryOperator, UnionDeclaration, UnionId,
-    UnionVariantDeclaration, VariantId, VariantPayloadDeclaration, WhileStatement,
+    ContinueStatement, DefId, Expression, ExpressionStatement, FieldId, Function, FunctionId,
+    IfStatement, LetDeclaration, MatchArm, MatchPattern, ModuleId, Name, Parameter, PayloadId,
+    Program, RecordDeclaration, RecordFieldDeclaration, RecordFieldInitializer, RecordId,
+    ReturnStatement, Statement, Type, TypeReference, TypeReferenceKind, UnaryOperator,
+    UnionDeclaration, UnionId, UnionVariantDeclaration, VariantId, VariantPayloadDeclaration,
+    WhileStatement,
 };
-pub use lower::{lower, LoweringError};
+pub use lower::{lower, lower_module, LoweringError};
