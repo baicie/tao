@@ -8,8 +8,8 @@ use crate::{
     AssignmentStatement, BinaryOperator, Block, BreakStatement, ConstDeclaration,
     ContinueStatement, Expression, ExpressionStatement, Function, IfStatement, ImportDeclaration,
     LetDeclaration, MatchArm, MatchPattern, ModuleId, Name, Parameter, Program, RecordDeclaration,
-    RecordFieldDeclaration, RecordFieldInitializer, ReturnStatement, Statement, TypeReference,
-    TypeReferenceKind, UnaryOperator, UnionDeclaration, UnionVariantDeclaration,
+    RecordFieldDeclaration, RecordFieldInitializer, ReturnStatement, Statement, TypeParameter,
+    TypeReference, TypeReferenceKind, UnaryOperator, UnionDeclaration, UnionVariantDeclaration,
     VariantPayloadDeclaration, Visibility, WhileStatement,
 };
 
@@ -258,6 +258,7 @@ fn lower_union(
 
     Ok(UnionDeclaration {
         name: lower_direct_name(file, node)?,
+        type_parameters: lower_type_parameters(file, node)?,
         visibility,
         variants,
         span: node_span(file, node),
@@ -319,6 +320,7 @@ fn lower_record(
 
     Ok(RecordDeclaration {
         name: lower_direct_name(file, node)?,
+        type_parameters: lower_type_parameters(file, node)?,
         visibility,
         fields,
         span: node_span(file, node),
@@ -357,6 +359,7 @@ fn lower_function(
 
     Ok(Function {
         name,
+        type_parameters: lower_type_parameters(file, node)?,
         visibility,
         parameters,
         return_type,
@@ -373,6 +376,29 @@ fn lower_parameter(file: FileId, node: &SyntaxNode) -> Result<Parameter, Lowerin
     })
 }
 
+fn lower_type_parameters(
+    file: FileId,
+    declaration: &SyntaxNode,
+) -> Result<Vec<TypeParameter>, LoweringError> {
+    let Some(list) = child(declaration, SyntaxKind::TypeParameterList) else {
+        return Ok(Vec::new());
+    };
+    let parameters = list
+        .children()
+        .map(|parameter| {
+            if parameter.kind() != SyntaxKind::TypeParameter {
+                return Err(malformed(node_span(file, &parameter)));
+            }
+            Ok(TypeParameter {
+                name: lower_direct_name(file, &parameter)?,
+                span: node_span(file, &parameter),
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    validate_angle_list(file, &list, parameters.len())?;
+    Ok(parameters)
+}
+
 fn lower_type(file: FileId, node: &SyntaxNode) -> Result<TypeReference, LoweringError> {
     if node.kind() == SyntaxKind::ArrayType {
         let element = lower_type(file, &required_type_child(file, node)?)?;
@@ -385,36 +411,93 @@ fn lower_type(file: FileId, node: &SyntaxNode) -> Result<TypeReference, Lowering
         return Err(malformed(node_span(file, node)));
     }
 
-    let token = node
+    let direct_tokens = node
         .children_with_tokens()
         .filter_map(|element| element.into_token())
-        .find(|token| {
-            matches!(
-                token.kind(),
-                SyntaxKind::IntKw
-                    | SyntaxKind::BoolKw
-                    | SyntaxKind::StringKw
-                    | SyntaxKind::UnitKw
-                    | SyntaxKind::Ident
-            )
-        })
-        .ok_or_else(|| malformed(node_span(file, node)))?;
+        .filter(|token| !token.kind().is_trivia())
+        .collect::<Vec<_>>();
+    let [token] = direct_tokens.as_slice() else {
+        return Err(malformed(node_span(file, node)));
+    };
+    let mut children = node.children();
+    let argument_list = children.next();
+    if children.next().is_some()
+        || argument_list
+            .as_ref()
+            .is_some_and(|child| child.kind() != SyntaxKind::TypeArgumentList)
+    {
+        return Err(malformed(node_span(file, node)));
+    }
     let kind = match token.kind() {
-        SyntaxKind::IntKw => TypeReferenceKind::Int,
-        SyntaxKind::BoolKw => TypeReferenceKind::Bool,
-        SyntaxKind::StringKw => TypeReferenceKind::String,
-        SyntaxKind::UnitKw => TypeReferenceKind::Unit,
-        SyntaxKind::Ident => TypeReferenceKind::Named(Name {
-            text: token.text().to_owned(),
-            span: token_span(file, &token),
-        }),
-        _ => return Err(malformed(token_span(file, &token))),
+        SyntaxKind::IntKw if argument_list.is_none() => TypeReferenceKind::Int,
+        SyntaxKind::BoolKw if argument_list.is_none() => TypeReferenceKind::Bool,
+        SyntaxKind::StringKw if argument_list.is_none() => TypeReferenceKind::String,
+        SyntaxKind::UnitKw if argument_list.is_none() => TypeReferenceKind::Unit,
+        SyntaxKind::Ident => TypeReferenceKind::Named {
+            name: Name {
+                text: token.text().to_owned(),
+                span: token_span(file, token),
+            },
+            arguments: argument_list
+                .as_ref()
+                .map(|list| lower_type_arguments(file, list))
+                .transpose()?
+                .unwrap_or_default(),
+        },
+        _ => return Err(malformed(token_span(file, token))),
     };
 
     Ok(TypeReference {
         kind,
-        span: token_span(file, &token),
+        span: node_span(file, node),
     })
+}
+
+fn lower_type_arguments(
+    file: FileId,
+    list: &SyntaxNode,
+) -> Result<Vec<TypeReference>, LoweringError> {
+    let arguments = list
+        .children()
+        .map(|argument| {
+            if !matches!(argument.kind(), SyntaxKind::Type | SyntaxKind::ArrayType) {
+                return Err(malformed(node_span(file, &argument)));
+            }
+            lower_type(file, &argument)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    validate_angle_list(file, list, arguments.len())?;
+    Ok(arguments)
+}
+
+fn validate_angle_list(
+    file: FileId,
+    list: &SyntaxNode,
+    item_count: usize,
+) -> Result<(), LoweringError> {
+    if item_count == 0 {
+        return Err(malformed(node_span(file, list)));
+    }
+
+    let tokens = list
+        .children_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter(|token| !token.kind().is_trivia())
+        .map(|token| token.kind())
+        .collect::<Vec<_>>();
+    let mut expected = Vec::with_capacity(item_count + 1);
+    expected.push(SyntaxKind::Lt);
+    for index in 0..item_count {
+        if index != 0 {
+            expected.push(SyntaxKind::Comma);
+        }
+    }
+    expected.push(SyntaxKind::Gt);
+
+    if tokens != expected {
+        return Err(malformed(node_span(file, list)));
+    }
+    Ok(())
 }
 
 fn lower_block(file: FileId, node: &SyntaxNode) -> Result<Block, LoweringError> {

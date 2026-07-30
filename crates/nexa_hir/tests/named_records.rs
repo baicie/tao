@@ -147,7 +147,10 @@ function main(): Unit {
             Some(NameResolution::Field(FieldId::new(RecordId::new(0), 0))),
             Some(NameResolution::Field(FieldId::new(RecordId::new(0), 0))),
             Some(NameResolution::Field(FieldId::new(RecordId::new(0), 0))),
-            Some(&Type::Record(RecordId::new(0))),
+            Some(&Type::Record {
+                definition: RecordId::new(0),
+                arguments: Box::new([]),
+            }),
             Some(&Type::String),
         )
     );

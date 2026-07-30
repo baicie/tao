@@ -121,6 +121,8 @@ impl FunctionId {
 pub struct RecordDeclaration {
     /// The declared record name.
     pub name: Name,
+    /// Generic type parameters in declaration order.
+    pub type_parameters: Vec<TypeParameter>,
     /// The declaration's module visibility.
     pub visibility: Visibility,
     /// Fields in declaration order.
@@ -145,6 +147,8 @@ pub struct RecordFieldDeclaration {
 pub struct UnionDeclaration {
     /// The declared union name.
     pub name: Name,
+    /// Generic type parameters in declaration order.
+    pub type_parameters: Vec<TypeParameter>,
     /// The declaration's module visibility.
     pub visibility: Visibility,
     /// Variants in declaration order.
@@ -180,6 +184,8 @@ pub struct VariantPayloadDeclaration {
 pub struct Function {
     /// The declared function name.
     pub name: Name,
+    /// Generic type parameters in declaration order.
+    pub type_parameters: Vec<TypeParameter>,
     /// The declaration's module visibility.
     pub visibility: Visibility,
     /// Function parameters in declaration order.
@@ -212,6 +218,15 @@ pub struct Name {
     pub span: SourceSpan,
 }
 
+/// One source-declared generic type parameter before semantic resolution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeParameter {
+    /// The declared type-parameter name.
+    pub name: Name,
+    /// The complete source range of the declaration.
+    pub span: SourceSpan,
+}
+
 /// A source-level type reference.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeReference {
@@ -232,8 +247,13 @@ pub enum TypeReferenceKind {
     String,
     /// The built-in no-value result type.
     Unit,
-    /// A named nominal type.
-    Named(Name),
+    /// A named nominal type with optional generic arguments.
+    Named {
+        /// The source-written type-constructor name.
+        name: Name,
+        /// Type arguments in source order.
+        arguments: Vec<TypeReference>,
+    },
     /// An immutable homogeneous array type.
     Array(Box<TypeReference>),
 }
@@ -385,6 +405,76 @@ impl PayloadId {
     }
 }
 
+/// The declaration that owns a generic type parameter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TypeParameterOwner {
+    /// A generic source function.
+    Function(FunctionId),
+    /// A generic nominal record.
+    Record(RecordId),
+    /// A generic nominal tagged union.
+    Union(UnionId),
+}
+
+impl TypeParameterOwner {
+    /// Returns the module that owns this generic declaration.
+    #[must_use]
+    pub const fn module(self) -> ModuleId {
+        match self {
+            Self::Function(function) => function.module(),
+            Self::Record(record) => record.module(),
+            Self::Union(union) => union.module(),
+        }
+    }
+
+    /// Returns the owning declaration's kind-safe definition identity.
+    #[must_use]
+    pub const fn definition(self) -> DefId {
+        match self {
+            Self::Function(function) => DefId::Function(function),
+            Self::Record(record) => DefId::Record(record),
+            Self::Union(union) => DefId::Union(union),
+        }
+    }
+}
+
+impl From<DefId> for TypeParameterOwner {
+    fn from(definition: DefId) -> Self {
+        match definition {
+            DefId::Function(function) => Self::Function(function),
+            DefId::Record(record) => Self::Record(record),
+            DefId::Union(union) => Self::Union(union),
+        }
+    }
+}
+
+/// A stable declaration-order identity for one generic type parameter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TypeParameterId {
+    owner: TypeParameterOwner,
+    index: usize,
+}
+
+impl TypeParameterId {
+    /// Creates a type-parameter identity from its owner and declaration index.
+    #[must_use]
+    pub const fn new(owner: TypeParameterOwner, index: usize) -> Self {
+        Self { owner, index }
+    }
+
+    /// Returns the generic declaration that owns this parameter.
+    #[must_use]
+    pub const fn owner(self) -> TypeParameterOwner {
+        self.owner
+    }
+
+    /// Returns the zero-based declaration-order index within the owner.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.index
+    }
+}
+
 /// The closed set of Language Core value types.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
@@ -396,10 +486,22 @@ pub enum Type {
     String,
     /// An immutable homogeneous array value.
     Array(Box<Type>),
+    /// A generic type parameter resolved to its owner and declaration index.
+    Parameter(TypeParameterId),
     /// A nominal immutable record value.
-    Record(RecordId),
+    Record {
+        /// The generic record declaration.
+        definition: RecordId,
+        /// Resolved type arguments in declaration order.
+        arguments: Box<[Type]>,
+    },
     /// A nominal tagged union value.
-    Union(UnionId),
+    Union {
+        /// The generic union declaration.
+        definition: UnionId,
+        /// Resolved type arguments in declaration order.
+        arguments: Box<[Type]>,
+    },
     /// The result type for expressions with no value.
     Unit,
 }
@@ -411,21 +513,74 @@ impl std::fmt::Display for Type {
             Self::Bool => formatter.write_str("Bool"),
             Self::String => formatter.write_str("String"),
             Self::Array(element) => write!(formatter, "{element}[]"),
-            Self::Record(record) => write!(
-                formatter,
-                "record#{}:{}",
-                record.module().index(),
-                record.index()
-            ),
-            Self::Union(union) => write!(
-                formatter,
-                "union#{}:{}",
-                union.module().index(),
-                union.index()
-            ),
+            Self::Parameter(parameter) => match parameter.owner() {
+                TypeParameterOwner::Function(function) => write!(
+                    formatter,
+                    "function#{}:{}::parameter#{}",
+                    function.module().index(),
+                    function.index(),
+                    parameter.index()
+                ),
+                TypeParameterOwner::Record(record) => write!(
+                    formatter,
+                    "record#{}:{}::parameter#{}",
+                    record.module().index(),
+                    record.index(),
+                    parameter.index()
+                ),
+                TypeParameterOwner::Union(union) => write!(
+                    formatter,
+                    "union#{}:{}::parameter#{}",
+                    union.module().index(),
+                    union.index(),
+                    parameter.index()
+                ),
+            },
+            Self::Record {
+                definition,
+                arguments,
+            } => {
+                write!(
+                    formatter,
+                    "record#{}:{}",
+                    definition.module().index(),
+                    definition.index()
+                )?;
+                format_type_arguments(formatter, arguments)
+            }
+            Self::Union {
+                definition,
+                arguments,
+            } => {
+                write!(
+                    formatter,
+                    "union#{}:{}",
+                    definition.module().index(),
+                    definition.index()
+                )?;
+                format_type_arguments(formatter, arguments)
+            }
             Self::Unit => formatter.write_str("Unit"),
         }
     }
+}
+
+fn format_type_arguments(
+    formatter: &mut std::fmt::Formatter<'_>,
+    arguments: &[Type],
+) -> std::fmt::Result {
+    if arguments.is_empty() {
+        return Ok(());
+    }
+
+    formatter.write_str("<")?;
+    for (index, argument) in arguments.iter().enumerate() {
+        if index != 0 {
+            formatter.write_str(", ")?;
+        }
+        write!(formatter, "{argument}")?;
+    }
+    formatter.write_str(">")
 }
 
 /// A braced sequence of statements.
