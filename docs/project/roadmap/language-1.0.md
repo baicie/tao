@@ -6,11 +6,14 @@ Deliver the [Nexa Language 1.0 Reference Core](../../spec/language-1.0.md): a
 statically checked, multi-file command-line language executed by the CFG MIR
 reference interpreter.
 
-Language Core v0.6 is fully delivered. It establishes deterministic multi-file
-modules, private-by-default exports, source sessions, and module-owned resolved
-identities across CST, typed HIR, CFG MIR, and the interpreter. v0.7, bounded
-generics and ordinary `Option`/`Result` error values, is the active
-implementation milestone.
+Language Core v0.7 is fully delivered. It establishes bounded generic
+functions and nominal data, local type-argument inference, ordinary
+source-defined `Option`/`Result` unions, deterministic instance limits, and
+definition-level MIR erasure across module boundaries. Its normative contract
+and completed delivery record are the
+[v0.7 specification](../../spec/language-core-v0.7.md) and
+[v0.7 roadmap](language-core-v0.7.md). v0.8, function values and the practical
+core, is the active implementation milestone.
 
 ## Delivery Milestones
 
@@ -42,16 +45,25 @@ implementation milestone.
 - Sort and render diagnostics by file and source position.
 - Keep file-system access in the CLI/provider boundary rather than the parser.
 
-### v0.7: Bounded Generics And Error Values (Active)
+### v0.7: Bounded Generics And Error Values (Delivered)
 
-- Add declared type parameters to functions, records, and tagged unions.
-- Infer type arguments only from local call or construction context.
-- Reject unconstrained parameters and unbounded recursive instantiation.
-- Define `Option<T>` and `Result<T, E>` using ordinary union declarations.
-- Keep recoverable errors explicit; do not add exceptions or implicit
-  propagation.
+- Add declared type parameters to functions, records, and tagged unions, with
+  complete explicit arguments in named type references.
+- Infer call and constructor arguments only from local arguments and exact
+  expected result context; do not add expression-level explicit type arguments.
+- Reject unconstrained parameters, non-regular recursive instantiation, and a
+  deterministic 257th semantic instance.
+- Keep definition identity separate from instantiated type arguments in typed
+  HIR, then erase those arguments in definition-level CFG MIR and runtime
+  values.
+- Define `Option<T>` and `Result<T, E>` using explicitly declared/imported
+  ordinary union declarations.
+- Keep recoverable errors explicit; do not add exceptions, an implicit prelude,
+  or implicit propagation.
+- The complete [v0.7 delivery roadmap](language-core-v0.7.md) and verification
+  gates are satisfied.
 
-### v0.8: Function Values And Practical Core
+### v0.8: Function Values And Practical Core (Active)
 
 - Add statically typed function types and indirect calls.
 - Add arrow-function expressions and immutable lexical captures.

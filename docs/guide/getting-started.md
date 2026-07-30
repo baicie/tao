@@ -28,24 +28,25 @@ cargo test --workspace
 ## Try the CLI
 
 ```bash
-cargo run -p nexac -- check examples/modules/main.nexa
-cargo run -p nexac -- run examples/modules/main.nexa
-cargo run -p nexac -- parse examples/tagged_unions.nexa
+cargo run -p nexac -- check examples/generic-modules/main.nexa
+cargo run -p nexac -- run examples/generic-modules/main.nexa
+cargo run -p nexac -- parse examples/generics.nexa
 ```
 
 `check` parses, resolves, and type-checks the program. `run` executes the
 checked module graph's entry-local `main` function through the MIR interpreter.
-The bundled four-module diamond example prints:
+The bundled generic two-module example prints:
 
 ```text
 42
 ```
 
-Language Core v0.6 adds deterministic relative imports, private-by-default
-exports, cross-file diagnostics, and module-owned nominal identities. It
-retains tagged unions, nominal records, immutable UTF-8 `String`, and
-homogeneous `T[]` values. A program may use either `main(): Unit` with no
-program arguments or
+Language Core v0.7 adds bounded generic functions, records, and tagged unions;
+local type-argument inference; ordinary source-defined `Option<T>` and
+`Result<T, E>` values; and deterministic instance limits. It retains
+deterministic relative imports, private-by-default exports, cross-file
+diagnostics, immutable UTF-8 `String`, and homogeneous `T[]` values. A program
+may use either `main(): Unit` with no program arguments or
 `main(args: String[]): Unit` to receive arguments after a second `--`.
 
 Nexa adopts familiar TypeScript-shaped syntax, but it is not a TypeScript or

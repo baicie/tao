@@ -1,5 +1,21 @@
 # Changelog
 
+## Language Core v0.7 (Delivered)
+
+- Added bounded generic functions, nominal records, and tagged unions with
+  owner-scoped type-parameter identities and complete named type arguments.
+- Added deterministic local inference for calls and constructors, regular
+  generic recursion, and a session-wide limit of 256 unique closed instances.
+- Added ordinary source-defined `Option<T>` and `Result<T, E>` unions without
+  an implicit prelude, exception handling, or propagation semantics.
+- Added definition-level CFG MIR erasure with validation of resolved generic
+  facts, including cross-module generic construction, calls, and matching.
+- Added stable `E3008`, `E3009`, and `E3010` diagnostics, accepted/rejected
+  conformance coverage, and executable single-file and multi-file examples.
+
+The active implementation milestone is v0.8: function values, lexical
+closures, `for...of`, and practical immutable-data operations.
+
 ## Language Core v0.6 (Delivered)
 
 - Added explicit named imports and private-by-default exports for functions,
@@ -13,8 +29,7 @@
 - Added file-system and in-memory provider tests, multi-file CLI fixtures, and
   the executable `examples/modules/main.nexa` four-module example.
 
-The active implementation milestone is v0.7: bounded generics and ordinary
-`Option`/`Result` error values.
+This milestone remains a supported predecessor of v0.7.
 
 ## Language Core v0.5 (Delivered)
 
