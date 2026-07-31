@@ -116,6 +116,36 @@ impl FunctionId {
     }
 }
 
+/// A stable source-order identifier for a closure owned by one function.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ClosureId {
+    owner: FunctionId,
+    source_index: usize,
+}
+
+impl ClosureId {
+    /// Creates a closure identifier from its owner and source-order index.
+    #[must_use]
+    pub const fn new(owner: FunctionId, source_index: usize) -> Self {
+        Self {
+            owner,
+            source_index,
+        }
+    }
+
+    /// Returns the source function that lexically owns this closure.
+    #[must_use]
+    pub const fn owner(self) -> FunctionId {
+        self.owner
+    }
+
+    /// Returns the zero-based source index within the owning function.
+    #[must_use]
+    pub const fn source_index(self) -> usize {
+        self.source_index
+    }
+}
+
 /// A nominal immutable record declaration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordDeclaration {
@@ -256,6 +286,13 @@ pub enum TypeReferenceKind {
     },
     /// An immutable homogeneous array type.
     Array(Box<TypeReference>),
+    /// A function value with named source parameters.
+    Function {
+        /// Function parameters in source order.
+        parameters: Vec<Parameter>,
+        /// The function's result type.
+        return_type: Box<TypeReference>,
+    },
 }
 
 /// A stable source-order identifier for a nominal record owned by one module.
@@ -486,6 +523,13 @@ pub enum Type {
     String,
     /// An immutable homogeneous array value.
     Array(Box<Type>),
+    /// A first-class function value.
+    Function {
+        /// Parameter types in declaration order.
+        parameters: Box<[Type]>,
+        /// The function's result type.
+        return_type: Box<Type>,
+    },
     /// A generic type parameter resolved to its owner and declaration index.
     Parameter(TypeParameterId),
     /// A nominal immutable record value.
@@ -513,6 +557,19 @@ impl std::fmt::Display for Type {
             Self::Bool => formatter.write_str("Bool"),
             Self::String => formatter.write_str("String"),
             Self::Array(element) => write!(formatter, "{element}[]"),
+            Self::Function {
+                parameters,
+                return_type,
+            } => {
+                formatter.write_str("(")?;
+                for (index, parameter) in parameters.iter().enumerate() {
+                    if index != 0 {
+                        formatter.write_str(", ")?;
+                    }
+                    write!(formatter, "{parameter}")?;
+                }
+                write!(formatter, ") => {return_type}")
+            }
             Self::Parameter(parameter) => match parameter.owner() {
                 TypeParameterOwner::Function(function) => write!(
                     formatter,
@@ -605,6 +662,8 @@ pub enum Statement {
     If(IfStatement),
     /// A conditional loop.
     While(WhileStatement),
+    /// An immutable iteration over an array's elements.
+    ForOf(ForOfStatement),
     /// An exit from the nearest enclosing loop.
     Break(BreakStatement),
     /// A jump to the next iteration of the nearest enclosing loop.
@@ -670,6 +729,19 @@ pub struct IfStatement {
 pub struct WhileStatement {
     /// The condition evaluated before every iteration.
     pub condition: Expression,
+    /// The repeated statement body.
+    pub body: Block,
+    /// The statement's full source range.
+    pub span: SourceSpan,
+}
+
+/// A loop that visits each element of an immutable array in source order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForOfStatement {
+    /// The immutable element binding introduced for each iteration.
+    pub binding: Name,
+    /// The array expression evaluated once before iteration begins.
+    pub iterable: Expression,
     /// The repeated statement body.
     pub body: Block,
     /// The statement's full source range.
@@ -775,6 +847,19 @@ pub enum Expression {
     },
     /// A reference to a named local value.
     Name(Name),
+    /// A typed closure expression.
+    Arrow {
+        /// Stable closure identity within the lexically owning function.
+        closure: ClosureId,
+        /// Closure parameters in source order.
+        parameters: Vec<Parameter>,
+        /// The declared closure result type.
+        return_type: TypeReference,
+        /// The expression or block evaluated when the closure is called.
+        body: ArrowBody,
+        /// The full expression range.
+        span: SourceSpan,
+    },
     /// A prefix operator application.
     Unary {
         /// The prefix operator.
@@ -826,11 +911,32 @@ impl Expression {
             | Self::Match { span, .. }
             | Self::Index { span, .. }
             | Self::Member { span, .. }
+            | Self::Arrow { span, .. }
             | Self::Unary { span, .. }
             | Self::Binary { span, .. }
             | Self::Call { span, .. }
             | Self::Parenthesized { span, .. } => *span,
             Self::Name(name) => name.span,
+        }
+    }
+}
+
+/// The body form selected by a source arrow expression.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArrowBody {
+    /// A single value-producing expression.
+    Expression(Box<Expression>),
+    /// A braced statement body with explicit return behavior.
+    Block(Block),
+}
+
+impl ArrowBody {
+    /// Returns the complete source range of this arrow body.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        match self {
+            Self::Expression(expression) => expression.span(),
+            Self::Block(block) => block.span,
         }
     }
 }

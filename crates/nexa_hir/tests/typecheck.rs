@@ -220,8 +220,8 @@ fn type_check_rejects_unit_array_elements_and_unprintable_values(
 }
 
 #[test]
-fn type_check_rejects_string_coercion_and_string_members() -> Result<(), Box<dyn std::error::Error>>
-{
+fn type_check_rejects_string_coercion_and_indexing_but_accepts_length(
+) -> Result<(), Box<dyn std::error::Error>> {
     let analysis = analyze(
         r#"function main(): Unit {
   const mixed = "answer: " + 42;
@@ -230,13 +230,8 @@ fn type_check_rejects_string_coercion_and_string_members() -> Result<(), Box<dyn
 }"#,
     )?;
 
-    assert_eq!(
-        (
-            diagnostic_count(&analysis, "E3001"),
-            diagnostic_count(&analysis, "E2005")
-        ),
-        (2, 1)
-    );
+    assert_eq!(diagnostic_count(&analysis, "E3001"), 2);
+    assert_eq!(diagnostic_count(&analysis, "E2005"), 0);
 
     Ok(())
 }
@@ -476,6 +471,39 @@ fn type_check_reports_incorrect_call_arity() -> Result<(), Box<dyn std::error::E
     let analysis = analyze("function main(): Unit { print(); }")?;
 
     assert!(has_diagnostic(&analysis, "E2003"));
+
+    Ok(())
+}
+
+#[test]
+fn call_arity_labels_complete_calls_and_the_source_declaration(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = r#"function consume(value: Int): Unit {}
+function main(): Unit { consume(); print(1, 2); }"#;
+    let analysis = analyze(source)?;
+    let label_spans = analysis
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.code().as_str() == "E2003")
+        .map(|diagnostic| {
+            diagnostic
+                .labels()
+                .iter()
+                .map(|label| label.span())
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        label_spans,
+        [
+            vec![
+                prefix_span(source, "consume()", "consume()".len())?,
+                prefix_span(source, "consume(value", "consume".len())?,
+            ],
+            vec![prefix_span(source, "print(1, 2)", "print(1, 2)".len())?],
+        ]
+    );
 
     Ok(())
 }

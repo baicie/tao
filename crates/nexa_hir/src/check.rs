@@ -4,11 +4,12 @@ use nexa_diagnostics::{Diagnostic, DiagnosticCode, Label};
 use nexa_span::SourceSpan;
 
 use crate::{
-    AssignmentStatement, BinaryOperator, Block, ConstDeclaration, DefId, Expression, FieldId,
-    Function, FunctionId, IfStatement, LetDeclaration, MatchArm, MatchPattern, ModuleId, Name,
-    PayloadId, Program, RecordFieldInitializer, RecordId, ReturnStatement, Statement, Type,
-    TypeParameter, TypeParameterId, TypeParameterOwner, TypeReference, TypeReferenceKind,
-    UnaryOperator, UnionId, VariantId, Visibility, WhileStatement,
+    ArrowBody, AssignmentStatement, BinaryOperator, Block, ClosureId, ConstDeclaration, DefId,
+    Expression, FieldId, ForOfStatement, Function, FunctionId, IfStatement, LetDeclaration,
+    MatchArm, MatchPattern, ModuleId, Name, Parameter, PayloadId, Program, RecordFieldInitializer,
+    RecordId, ReturnStatement, Statement, Type, TypeParameter, TypeParameterId, TypeParameterOwner,
+    TypeReference, TypeReferenceKind, UnaryOperator, UnionId, VariantId, Visibility,
+    WhileStatement,
 };
 
 const UNDEFINED_NAME: DiagnosticCode = DiagnosticCode::new("E2001");
@@ -27,6 +28,8 @@ const UNREACHABLE_ARM: DiagnosticCode = DiagnosticCode::new("E3007");
 const UNCONSTRAINED_TYPE_PARAMETER: DiagnosticCode = DiagnosticCode::new("E3008");
 const TYPE_INFERENCE: DiagnosticCode = DiagnosticCode::new("E3009");
 const GENERIC_LIMIT: DiagnosticCode = DiagnosticCode::new("E3010");
+const MUTABLE_CAPTURE: DiagnosticCode = DiagnosticCode::new("E3011");
+const GENERIC_FUNCTION_VALUE: DiagnosticCode = DiagnosticCode::new("E3012");
 const MISSING_EXPORT: DiagnosticCode = DiagnosticCode::new("E4003");
 const PRIVATE_EXPORT: DiagnosticCode = DiagnosticCode::new("E4004");
 const EXPORT_COLLISION: DiagnosticCode = DiagnosticCode::new("E4005");
@@ -110,6 +113,7 @@ pub struct TypedProgram {
     calls: HashMap<SourceSpan, CallFacts>,
     matches: HashMap<SourceSpan, MatchFacts>,
     functions: Vec<FunctionFacts>,
+    closures: Vec<ClosureFacts>,
 }
 
 impl TypedProgram {
@@ -173,6 +177,18 @@ impl TypedProgram {
     #[must_use]
     pub fn function_facts(&self, function: FunctionId) -> Option<&FunctionFacts> {
         self.functions.iter().find(|facts| facts.id == function)
+    }
+
+    /// Returns semantic facts for one stable arrow-function site.
+    #[must_use]
+    pub fn closure_facts(&self, closure: ClosureId) -> Option<&ClosureFacts> {
+        self.closures.iter().find(|facts| facts.id == closure)
+    }
+
+    /// Returns all closure facts in stable owner and source order.
+    #[must_use]
+    pub fn closures(&self) -> &[ClosureFacts] {
+        &self.closures
     }
 
     /// Returns resolved layout facts for a nominal record.
@@ -243,6 +259,16 @@ pub enum Builtin {
     Print,
     /// The fixed array `length` member.
     ArrayLength,
+    /// The Unicode-scalar string `length` member.
+    StringLength,
+    /// The immutable array `append` member call.
+    ArrayAppend,
+    /// The immutable array `concat` member call.
+    ArrayConcat,
+    /// The canonical integer-to-string conversion.
+    ToString,
+    /// The complete ASCII decimal string-to-integer conversion.
+    ParseInt,
 }
 
 /// The semantic target of a source name token.
@@ -277,6 +303,48 @@ pub struct FunctionFacts {
     parameter_types: Vec<Type>,
     return_type: Type,
     local_count: usize,
+}
+
+/// Resolved signature, local slots, and by-value captures for one arrow site.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClosureFacts {
+    id: ClosureId,
+    parameters: Vec<LocalId>,
+    parameter_types: Vec<Type>,
+    return_type: Type,
+    captures: Vec<LocalId>,
+}
+
+impl ClosureFacts {
+    /// Returns the stable source-order closure identity.
+    #[must_use]
+    pub const fn id(&self) -> ClosureId {
+        self.id
+    }
+
+    /// Returns closure parameter slots in declaration order.
+    #[must_use]
+    pub fn parameter_ids(&self) -> &[LocalId] {
+        &self.parameters
+    }
+
+    /// Returns closure parameter types in declaration order.
+    #[must_use]
+    pub fn parameter_types(&self) -> &[Type] {
+        &self.parameter_types
+    }
+
+    /// Returns the declared closure result type.
+    #[must_use]
+    pub const fn return_type(&self) -> &Type {
+        &self.return_type
+    }
+
+    /// Returns captured owner-local slots in deterministic first-use order.
+    #[must_use]
+    pub fn captures(&self) -> &[LocalId] {
+        &self.captures
+    }
 }
 
 impl FunctionFacts {
@@ -680,6 +748,7 @@ struct FactBuilder {
     calls: HashMap<SourceSpan, CallFacts>,
     matches: HashMap<SourceSpan, MatchFacts>,
     functions: Vec<FunctionFacts>,
+    closures: Vec<ClosureFacts>,
     generic_calls: Vec<GenericCallEdge>,
     instances: Vec<InstanceOccurrence>,
 }
@@ -809,6 +878,13 @@ pub fn type_check_modules(programs: &[Program], links: &[ResolvedImport]) -> Ana
     diagnostics.sort_by(|left, right| diagnostic_position(left).cmp(&diagnostic_position(right)));
     facts.records = records;
     facts.unions = unions;
+    facts.closures.sort_by_key(|closure| {
+        (
+            closure.id.owner().module().index(),
+            closure.id.owner().index(),
+            closure.id.source_index(),
+        )
+    });
     let entry_index = programs
         .iter()
         .position(|program| program.module == ModuleId::ENTRY);
@@ -828,6 +904,7 @@ pub fn type_check_modules(programs: &[Program], links: &[ResolvedImport]) -> Ana
             calls: facts.calls,
             matches: facts.matches,
             functions: facts.functions,
+            closures: facts.closures,
         });
 
     Analysis { typed, diagnostics }
@@ -1649,6 +1726,23 @@ fn resolve_type_kind(
             resolve_type_kind(element, types, parameters, diagnostics, facts)
                 .map(|element| Type::Array(Box::new(element)))
         }
+        TypeReferenceKind::Function {
+            parameters: function_parameters,
+            return_type,
+        } => {
+            let parameter_types = function_parameters
+                .iter()
+                .map(|parameter| {
+                    resolve_type_kind(&parameter.ty, types, parameters, diagnostics, facts)
+                })
+                .collect::<Option<Vec<_>>>()?;
+            let return_type =
+                resolve_type_kind(return_type, types, parameters, diagnostics, facts)?;
+            Some(Type::Function {
+                parameters: parameter_types.into_boxed_slice(),
+                return_type: Box::new(return_type),
+            })
+        }
     }
 }
 
@@ -1720,6 +1814,7 @@ fn type_reaches_record(
         Type::Array(element) => {
             type_reaches_record(element, target, records, substitutions, visited)
         }
+        Type::Function { .. } => false,
         Type::Parameter(parameter) => substitutions.get(parameter).is_some_and(|replacement| {
             replacement != ty
                 && type_reaches_record(replacement, target, records, substitutions, visited)
@@ -1822,6 +1917,15 @@ fn collect_nominal_type_edges(
 ) {
     match ty {
         Type::Array(element) => collect_nominal_type_edges(source, element, span, edges),
+        Type::Function {
+            parameters,
+            return_type,
+        } => {
+            for parameter in parameters {
+                collect_nominal_type_edges(source, parameter, span, edges);
+            }
+            collect_nominal_type_edges(source, return_type, span, edges);
+        }
         Type::Record {
             definition,
             arguments,
@@ -2138,6 +2242,15 @@ impl ClosedInstanceCollector<'_> {
     fn discover_type(&mut self, ty: &Type, span: SourceSpan) {
         match ty {
             Type::Array(element) => self.discover_type(element, span),
+            Type::Function {
+                parameters,
+                return_type,
+            } => {
+                for parameter in parameters {
+                    self.discover_type(parameter, span);
+                }
+                self.discover_type(return_type, span);
+            }
             Type::Record {
                 definition,
                 arguments,
@@ -2371,6 +2484,7 @@ fn check_function(
         loop_depth: 0,
         parameters: Vec::new(),
         next_local: 0,
+        closure_stack: Vec::new(),
     };
 
     for (parameter, ty) in function.parameters.iter().zip(&signature.parameters) {
@@ -2440,6 +2554,7 @@ struct FunctionChecker<'a> {
     loop_depth: usize,
     parameters: Vec<LocalId>,
     next_local: usize,
+    closure_stack: Vec<ClosureCaptureState>,
 }
 
 #[derive(Debug, Clone)]
@@ -2448,6 +2563,14 @@ struct Binding {
     ty: Option<Type>,
     span: SourceSpan,
     mutable: bool,
+    closure_depth: usize,
+}
+
+struct ClosureCaptureState {
+    id: ClosureId,
+    captures: Vec<LocalId>,
+    captured: HashSet<LocalId>,
+    rejected_mutable: HashSet<LocalId>,
 }
 
 impl FunctionChecker<'_> {
@@ -2485,6 +2608,10 @@ impl FunctionChecker<'_> {
             Statement::If(statement) => self.check_if(statement),
             Statement::While(statement) => {
                 self.check_while(statement);
+                false
+            }
+            Statement::ForOf(statement) => {
+                self.check_for_of(statement);
                 false
             }
             Statement::Break(statement) => {
@@ -2545,7 +2672,20 @@ impl FunctionChecker<'_> {
 
         if let (Some(expected), Some(actual)) = (&declared_type, &initializer_type) {
             if expected != actual {
-                self.type_mismatch(initializer.span(), expected, actual);
+                let mut diagnostic = type_mismatch_diagnostic(
+                    initializer.span(),
+                    expected,
+                    actual,
+                    self.records,
+                    self.unions,
+                );
+                if let Some(annotation) = annotation {
+                    diagnostic = diagnostic.with_label(Label::secondary(
+                        annotation.span,
+                        "expected type declared here",
+                    ));
+                }
+                self.diagnostics.push(diagnostic);
             }
         }
 
@@ -2563,6 +2703,7 @@ impl FunctionChecker<'_> {
             );
             return;
         };
+        self.record_capture(&binding, statement.target.span);
         self.facts
             .record_name(statement.target.span, NameResolution::Local(binding.id));
         let value_type = self.check_expression_with_expected(&statement.value, binding.ty.as_ref());
@@ -2627,6 +2768,133 @@ impl FunctionChecker<'_> {
         self.loop_depth += 1;
         let _ = self.check_block(&statement.body, true);
         self.loop_depth -= 1;
+    }
+
+    fn check_for_of(&mut self, statement: &ForOfStatement) {
+        let element_type = match self.check_expression(&statement.iterable) {
+            Some(Type::Array(element)) => Some(*element),
+            Some(actual) => {
+                self.error(
+                    TYPE_MISMATCH,
+                    statement.iterable.span(),
+                    format!(
+                        "for...of requires an array, found `{}`",
+                        format_type(&actual, self.records, self.unions)
+                    ),
+                    "expected an array value",
+                );
+                None
+            }
+            None => None,
+        };
+
+        self.scopes.push(HashMap::new());
+        let _ = self.bind(&statement.binding, element_type, false);
+        self.loop_depth += 1;
+        let _ = self.check_block(&statement.body, false);
+        self.loop_depth -= 1;
+        let _ = self.scopes.pop();
+    }
+
+    fn check_arrow(
+        &mut self,
+        closure: ClosureId,
+        parameters: &[Parameter],
+        return_reference: &TypeReference,
+        body: &ArrowBody,
+        _span: SourceSpan,
+    ) -> Option<Type> {
+        let parameter_types = parameters
+            .iter()
+            .map(|parameter| {
+                resolve_type(
+                    &parameter.ty,
+                    self.type_symbols,
+                    &self.type_parameters,
+                    self.diagnostics,
+                    self.facts,
+                )
+            })
+            .collect::<Vec<_>>();
+        let return_type = resolve_type(
+            return_reference,
+            self.type_symbols,
+            &self.type_parameters,
+            self.diagnostics,
+            self.facts,
+        );
+
+        self.closure_stack.push(ClosureCaptureState {
+            id: closure,
+            captures: Vec::new(),
+            captured: HashSet::new(),
+            rejected_mutable: HashSet::new(),
+        });
+        self.scopes.push(HashMap::new());
+        let mut parameter_ids = Vec::with_capacity(parameters.len());
+        for (parameter, ty) in parameters.iter().zip(&parameter_types) {
+            if let Some(local) = self.bind(&parameter.name, ty.clone(), false) {
+                parameter_ids.push(local);
+            }
+        }
+
+        let outer_return_type = std::mem::replace(&mut self.return_type, return_type.clone());
+        let outer_loop_depth = std::mem::replace(&mut self.loop_depth, 0);
+        match body {
+            ArrowBody::Expression(expression) => {
+                let actual = self.check_expression_with_expected(expression, return_type.as_ref());
+                if let (Some(expected), Some(actual)) = (&return_type, actual) {
+                    if &actual != expected {
+                        self.type_mismatch(expression.span(), expected, &actual);
+                    }
+                }
+            }
+            ArrowBody::Block(block) => {
+                let always_returns = self.check_block(block, false);
+                if return_type.as_ref().is_some_and(|ty| ty != &Type::Unit) && !always_returns {
+                    self.error(
+                        INVALID_RETURN,
+                        return_reference.span,
+                        format!(
+                            "arrow may not return `{}` on every path",
+                            return_type.as_ref().map_or_else(
+                                || "value".to_owned(),
+                                |ty| format_type(ty, self.records, self.unions)
+                            )
+                        ),
+                        "return required on every path",
+                    );
+                }
+            }
+        }
+        self.return_type = outer_return_type;
+        self.loop_depth = outer_loop_depth;
+        let _ = self.scopes.pop();
+        let capture_state = self.closure_stack.pop();
+
+        if let (Some(capture_state), Some(return_type)) = (capture_state, return_type.as_ref()) {
+            if capture_state.id == closure
+                && parameter_ids.len() == parameters.len()
+                && parameter_types.iter().all(Option::is_some)
+            {
+                self.facts.closures.push(ClosureFacts {
+                    id: closure,
+                    parameters: parameter_ids,
+                    parameter_types: parameter_types.iter().filter_map(Clone::clone).collect(),
+                    return_type: return_type.clone(),
+                    captures: capture_state.captures,
+                });
+            }
+        }
+
+        parameter_types
+            .into_iter()
+            .collect::<Option<Vec<_>>>()
+            .zip(return_type)
+            .map(|(parameters, return_type)| Type::Function {
+                parameters: parameters.into_boxed_slice(),
+                return_type: Box::new(return_type),
+            })
     }
 
     fn check_loop_control(&mut self, span: SourceSpan, keyword: &str) {
@@ -2718,20 +2986,62 @@ impl FunctionChecker<'_> {
             } => self.check_member(object, member),
             Expression::Name(name) => match self.lookup_binding(name) {
                 Some(binding) => {
+                    self.record_capture(&binding, name.span);
                     self.facts
                         .record_name(name.span, NameResolution::Local(binding.id));
                     binding.ty
                 }
                 None => {
-                    self.error(
-                        UNDEFINED_NAME,
-                        name.span,
-                        format!("undefined value `{}`", name.text),
-                        "not found in this scope",
-                    );
-                    None
+                    if let Some(signature) = self.functions.get(&name.text).cloned() {
+                        self.facts.record_name(name.span, signature.resolution);
+                        if !signature.type_parameters.is_empty() {
+                            self.diagnostics.push(
+                                Diagnostic::error(
+                                    GENERIC_FUNCTION_VALUE,
+                                    format!(
+                                        "generic function `{}` cannot be used as a value",
+                                        name.text
+                                    ),
+                                )
+                                .with_label(Label::primary(
+                                    name.span,
+                                    "polymorphic function value is not supported",
+                                ))
+                                .with_label(Label::secondary(
+                                    signature.name_span,
+                                    "generic function declared here",
+                                )),
+                            );
+                            None
+                        } else {
+                            signature
+                                .parameters
+                                .into_iter()
+                                .collect::<Option<Vec<_>>>()
+                                .zip(signature.return_type)
+                                .map(|(parameters, return_type)| Type::Function {
+                                    parameters: parameters.into_boxed_slice(),
+                                    return_type: Box::new(return_type),
+                                })
+                        }
+                    } else {
+                        self.error(
+                            UNDEFINED_NAME,
+                            name.span,
+                            format!("undefined value `{}`", name.text),
+                            "not found in this scope",
+                        );
+                        None
+                    }
                 }
             },
+            Expression::Arrow {
+                closure,
+                parameters,
+                return_type,
+                body,
+                span,
+            } => self.check_arrow(*closure, parameters, return_type, body, *span),
             Expression::Unary {
                 operator,
                 expression,
@@ -3293,11 +3603,30 @@ impl FunctionChecker<'_> {
             }
         }
 
-        match self.check_expression(object) {
+        let object_type = self.check_expression(object);
+        self.check_member_type(member, object_type)
+    }
+
+    fn check_member_type(&mut self, member: &Name, object_type: Option<Type>) -> Option<Type> {
+        match object_type {
             Some(Type::Array(_)) if member.text == "length" => {
                 self.facts
                     .record_name(member.span, NameResolution::Builtin(Builtin::ArrayLength));
                 Some(Type::Int)
+            }
+            Some(Type::String) if member.text == "length" => {
+                self.facts
+                    .record_name(member.span, NameResolution::Builtin(Builtin::StringLength));
+                Some(Type::Int)
+            }
+            Some(Type::Array(_)) if matches!(member.text.as_str(), "append" | "concat") => {
+                self.error(
+                    UNKNOWN_MEMBER,
+                    member.span,
+                    format!("array member `{}` must be called", member.text),
+                    "array operations are not bound method values",
+                );
+                None
             }
             Some(Type::Record {
                 definition: record_id,
@@ -3407,11 +3736,16 @@ impl FunctionChecker<'_> {
             BinaryOperator::Equal => {
                 if matches!(
                     left_type,
-                    Type::Array(_) | Type::Record { .. } | Type::Union { .. } | Type::Parameter(_)
+                    Type::Array(_)
+                        | Type::Function { .. }
+                        | Type::Record { .. }
+                        | Type::Union { .. }
+                        | Type::Parameter(_)
                 ) && left_type == right_type
                 {
                     let kind = match left_type {
                         Type::Array(_) => "array",
+                        Type::Function { .. } => "function",
                         Type::Record { .. } => "record",
                         Type::Union { .. } => "tagged union",
                         Type::Parameter(_) => "type parameter",
@@ -3507,47 +3841,31 @@ impl FunctionChecker<'_> {
     ) -> Option<Type> {
         if let Expression::Member { object, member, .. } = callee {
             if let Expression::Name(qualifier) = object.as_ref() {
-                return self.check_variant_constructor(
-                    qualifier,
-                    member,
-                    arguments,
-                    span,
-                    expected_result,
-                );
+                let has_type_qualifier = self.type_symbols.contains_key(&qualifier.text);
+                let supports_value_members =
+                    self.lookup_binding(qualifier).is_some_and(|binding| {
+                        matches!(binding.ty, Some(Type::Array(_) | Type::Record { .. }))
+                    });
+                if has_type_qualifier || !supports_value_members {
+                    return self.check_variant_constructor(
+                        qualifier,
+                        member,
+                        arguments,
+                        span,
+                        expected_result,
+                    );
+                }
             }
+
+            return self.check_member_call(callee, object, member, arguments, span);
         }
 
         let Expression::Name(name) = callee else {
-            let _ = self.check_expression(callee);
-            for argument in arguments {
-                let _ = self.check_expression(argument);
-            }
-            self.error(
-                TYPE_MISMATCH,
-                callee.span(),
-                "only named functions can be called",
-                "not a callable function name",
-            );
-            return None;
+            return self.check_indirect_call(callee, arguments, span);
         };
 
-        if let Some(binding) = self.lookup_binding(name) {
-            self.facts
-                .record_name(name.span, NameResolution::Local(binding.id));
-            for argument in arguments {
-                let _ = self.check_expression(argument);
-            }
-            let binding_description = binding.ty.as_ref().map_or_else(
-                || "value".to_owned(),
-                |ty| format!("`{}` value", format_type(ty, self.records, self.unions)),
-            );
-            self.error(
-                TYPE_MISMATCH,
-                name.span,
-                format!("cannot call a {binding_description}"),
-                "not a function",
-            );
-            return None;
+        if self.lookup_binding(name).is_some() {
+            return self.check_indirect_call(callee, arguments, span);
         }
 
         if name.text == "print" {
@@ -3558,15 +3876,14 @@ impl FunctionChecker<'_> {
                 .map(|argument| self.check_expression(argument))
                 .collect::<Vec<_>>();
             if arguments.len() != 1 {
-                self.error(
-                    CALL_ARITY,
-                    name.span,
+                self.diagnostics.push(call_arity_diagnostic(
+                    span,
                     format!(
                         "function `print` expects 1 argument(s), found {}",
                         arguments.len()
                     ),
-                    "incorrect argument count",
-                );
+                    None,
+                ));
             }
             for (argument, actual) in arguments.iter().zip(argument_types) {
                 if let Some(actual) = actual {
@@ -3586,6 +3903,38 @@ impl FunctionChecker<'_> {
             return Some(Type::Unit);
         }
 
+        let scalar_builtin = match name.text.as_str() {
+            "toString" => Some((Builtin::ToString, Type::Int, Type::String)),
+            "parseInt" => Some((Builtin::ParseInt, Type::String, Type::Int)),
+            _ => None,
+        };
+        if let Some((builtin, parameter, result)) = scalar_builtin {
+            self.facts
+                .record_name(name.span, NameResolution::Builtin(builtin));
+            if arguments.len() != 1 {
+                self.error(
+                    CALL_ARITY,
+                    span,
+                    format!(
+                        "function `{}` expects 1 argument(s), found {}",
+                        name.text,
+                        arguments.len()
+                    ),
+                    "incorrect argument count",
+                );
+            }
+            for (index, argument) in arguments.iter().enumerate() {
+                let expected = (index == 0).then_some(&parameter);
+                let actual = self.check_expression_with_expected(argument, expected);
+                if let (Some(expected), Some(actual)) = (expected, actual) {
+                    if &actual != expected {
+                        self.type_mismatch(argument.span(), expected, &actual);
+                    }
+                }
+            }
+            return Some(result);
+        }
+
         let Some(signature) = self.functions.get(&name.text).cloned() else {
             for argument in arguments {
                 let _ = self.check_expression(argument);
@@ -3601,20 +3950,137 @@ impl FunctionChecker<'_> {
         self.facts.record_name(name.span, signature.resolution);
 
         if signature.parameters.len() != arguments.len() {
-            self.error(
-                CALL_ARITY,
-                name.span,
+            self.diagnostics.push(call_arity_diagnostic(
+                span,
                 format!(
                     "function `{}` expects {} argument(s), found {}",
                     name.text,
                     signature.parameters.len(),
                     arguments.len()
                 ),
+                Some(signature.name_span),
+            ));
+        }
+
+        self.check_resolved_function_call(name, arguments, span, expected_result, &signature)
+    }
+
+    fn check_member_call(
+        &mut self,
+        callee: &Expression,
+        object: &Expression,
+        member: &Name,
+        arguments: &[Expression],
+        span: SourceSpan,
+    ) -> Option<Type> {
+        let object_type = self.check_expression(object);
+        if let Some(Type::Array(element)) = object_type.as_ref() {
+            let intrinsic = match member.text.as_str() {
+                "append" => Some((Builtin::ArrayAppend, element.as_ref().clone())),
+                "concat" => Some((
+                    Builtin::ArrayConcat,
+                    Type::Array(Box::new(element.as_ref().clone())),
+                )),
+                _ => None,
+            };
+            if let Some((builtin, parameter)) = intrinsic {
+                self.facts
+                    .record_name(member.span, NameResolution::Builtin(builtin));
+                if arguments.len() != 1 {
+                    self.error(
+                        CALL_ARITY,
+                        span,
+                        format!(
+                            "array `{}` expects 1 argument(s), found {}",
+                            member.text,
+                            arguments.len()
+                        ),
+                        "incorrect argument count",
+                    );
+                }
+                for (index, argument) in arguments.iter().enumerate() {
+                    let expected = (index == 0).then_some(&parameter);
+                    let actual = self.check_expression_with_expected(argument, expected);
+                    if let (Some(expected), Some(actual)) = (expected, actual) {
+                        if &actual != expected {
+                            self.type_mismatch(argument.span(), expected, &actual);
+                        }
+                    }
+                }
+                return Some(Type::Array(element.clone()));
+            }
+        }
+
+        let callee_type = self.check_member_type(member, object_type);
+        if let Some(ty) = &callee_type {
+            self.facts.record_expression(callee.span(), ty.clone());
+        }
+        self.check_indirect_call_with_type(callee, arguments, span, callee_type)
+    }
+
+    fn check_indirect_call(
+        &mut self,
+        callee: &Expression,
+        arguments: &[Expression],
+        span: SourceSpan,
+    ) -> Option<Type> {
+        let callee_type = self.check_expression(callee);
+        self.check_indirect_call_with_type(callee, arguments, span, callee_type)
+    }
+
+    fn check_indirect_call_with_type(
+        &mut self,
+        callee: &Expression,
+        arguments: &[Expression],
+        span: SourceSpan,
+        callee_type: Option<Type>,
+    ) -> Option<Type> {
+        let Some(Type::Function {
+            parameters,
+            return_type,
+        }) = callee_type
+        else {
+            for argument in arguments {
+                let _ = self.check_expression(argument);
+            }
+            if let Some(actual) = callee_type {
+                self.error(
+                    TYPE_MISMATCH,
+                    callee.span(),
+                    format!(
+                        "cannot call a `{}` value",
+                        format_type(&actual, self.records, self.unions)
+                    ),
+                    "not a function",
+                );
+            }
+            return None;
+        };
+
+        if parameters.len() != arguments.len() {
+            self.error(
+                CALL_ARITY,
+                span,
+                format!(
+                    "function value expects {} argument(s), found {}",
+                    parameters.len(),
+                    arguments.len()
+                ),
                 "incorrect argument count",
             );
         }
 
-        self.check_resolved_function_call(name, arguments, span, expected_result, &signature)
+        for (index, argument) in arguments.iter().enumerate() {
+            let expected = parameters.get(index);
+            let actual = self.check_expression_with_expected(argument, expected);
+            if let (Some(expected), Some(actual)) = (expected, actual) {
+                if &actual != expected {
+                    self.type_mismatch(argument.span(), expected, &actual);
+                }
+            }
+        }
+
+        Some(*return_type)
     }
 
     fn check_resolved_function_call(
@@ -4112,6 +4578,7 @@ impl FunctionChecker<'_> {
     }
 
     fn bind(&mut self, name: &Name, ty: Option<Type>, mutable: bool) -> Option<LocalId> {
+        let closure_depth = self.closure_stack.len();
         let scope = self.scopes.last_mut()?;
 
         if let Some(previous) = scope.get(&name.text) {
@@ -4131,6 +4598,7 @@ impl FunctionChecker<'_> {
                     ty,
                     span: name.span,
                     mutable,
+                    closure_depth,
                 },
             );
             self.facts.record_name(name.span, NameResolution::Local(id));
@@ -4145,17 +4613,45 @@ impl FunctionChecker<'_> {
             .find_map(|scope| scope.get(&name.text).cloned())
     }
 
+    fn record_capture(&mut self, binding: &Binding, reference: SourceSpan) {
+        if binding.closure_depth >= self.closure_stack.len() {
+            return;
+        }
+
+        let mut mutable_capture_count = 0;
+        for closure in self.closure_stack.iter_mut().skip(binding.closure_depth) {
+            if binding.mutable {
+                if closure.rejected_mutable.insert(binding.id) {
+                    mutable_capture_count += 1;
+                }
+            } else if closure.captured.insert(binding.id) {
+                closure.captures.push(binding.id);
+            }
+        }
+
+        for _ in 0..mutable_capture_count {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    MUTABLE_CAPTURE,
+                    "closures cannot capture mutable `let` bindings",
+                )
+                .with_label(Label::primary(reference, "mutable capture required here"))
+                .with_label(Label::secondary(
+                    binding.span,
+                    "mutable binding declared here",
+                )),
+            );
+        }
+    }
+
     fn type_mismatch(&mut self, span: SourceSpan, expected: &Type, actual: &Type) {
-        self.error(
-            TYPE_MISMATCH,
+        self.diagnostics.push(type_mismatch_diagnostic(
             span,
-            format!(
-                "expected `{}`, found `{}`",
-                format_type(expected, self.records, self.unions),
-                format_type(actual, self.records, self.unions)
-            ),
-            "type mismatch",
-        );
+            expected,
+            actual,
+            self.records,
+            self.unions,
+        ));
     }
 
     fn report_inference_conflict(
@@ -4209,6 +4705,37 @@ impl FunctionChecker<'_> {
     }
 }
 
+fn type_mismatch_diagnostic(
+    span: SourceSpan,
+    expected: &Type,
+    actual: &Type,
+    records: &[RecordFacts],
+    unions: &[UnionFacts],
+) -> Diagnostic {
+    Diagnostic::error(
+        TYPE_MISMATCH,
+        format!(
+            "expected `{}`, found `{}`",
+            format_type(expected, records, unions),
+            format_type(actual, records, unions)
+        ),
+    )
+    .with_label(Label::primary(span, "type mismatch"))
+}
+
+fn call_arity_diagnostic(
+    span: SourceSpan,
+    message: impl Into<String>,
+    declaration: Option<SourceSpan>,
+) -> Diagnostic {
+    let mut diagnostic = Diagnostic::error(CALL_ARITY, message)
+        .with_label(Label::primary(span, "incorrect argument count"));
+    if let Some(declaration) = declaration {
+        diagnostic = diagnostic.with_label(Label::secondary(declaration, "function declared here"));
+    }
+    diagnostic
+}
+
 fn expression_requires_complete_context(expression: &Expression) -> bool {
     match expression {
         Expression::Record { .. } => true,
@@ -4224,6 +4751,7 @@ fn expression_requires_complete_context(expression: &Expression) -> bool {
         Expression::Parenthesized { expression, .. } => {
             expression_requires_complete_context(expression)
         }
+        Expression::Arrow { .. } => false,
         Expression::Integer { .. }
         | Expression::Boolean { .. }
         | Expression::String { .. }
@@ -4240,6 +4768,13 @@ fn contains_invalid_array_element(ty: &Type) -> bool {
         Type::Array(element) => {
             element.as_ref() == &Type::Unit || contains_invalid_array_element(element)
         }
+        Type::Function {
+            parameters,
+            return_type,
+        } => {
+            parameters.iter().any(contains_invalid_array_element)
+                || contains_invalid_array_element(return_type)
+        }
         Type::Int
         | Type::Bool
         | Type::String
@@ -4254,6 +4789,10 @@ fn type_contains_parameter(ty: &Type) -> bool {
     match ty {
         Type::Parameter(_) => true,
         Type::Array(element) => type_contains_parameter(element),
+        Type::Function {
+            parameters,
+            return_type,
+        } => parameters.iter().any(type_contains_parameter) || type_contains_parameter(return_type),
         Type::Record { arguments, .. } | Type::Union { arguments, .. } => {
             arguments.iter().any(type_contains_parameter)
         }
@@ -4265,6 +4804,15 @@ fn type_contains_parameter_id(ty: &Type, parameter: TypeParameterId) -> bool {
     match ty {
         Type::Parameter(candidate) => *candidate == parameter,
         Type::Array(element) => type_contains_parameter_id(element, parameter),
+        Type::Function {
+            parameters,
+            return_type,
+        } => {
+            parameters
+                .iter()
+                .any(|ty| type_contains_parameter_id(ty, parameter))
+                || type_contains_parameter_id(return_type, parameter)
+        }
         Type::Record { arguments, .. } | Type::Union { arguments, .. } => arguments
             .iter()
             .any(|argument| type_contains_parameter_id(argument, parameter)),
@@ -4276,6 +4824,15 @@ fn formal_contains_any_parameter(ty: &Type, parameters: &HashSet<TypeParameterId
     match ty {
         Type::Parameter(parameter) => parameters.contains(parameter),
         Type::Array(element) => formal_contains_any_parameter(element, parameters),
+        Type::Function {
+            parameters: function_parameters,
+            return_type,
+        } => {
+            function_parameters
+                .iter()
+                .any(|ty| formal_contains_any_parameter(ty, parameters))
+                || formal_contains_any_parameter(return_type, parameters)
+        }
         Type::Record { arguments, .. } | Type::Union { arguments, .. } => arguments
             .iter()
             .any(|argument| formal_contains_any_parameter(argument, parameters)),
@@ -4290,6 +4847,17 @@ fn substitute_type(ty: &Type, substitutions: &HashMap<TypeParameterId, Type>) ->
             .cloned()
             .unwrap_or(Type::Parameter(*parameter)),
         Type::Array(element) => Type::Array(Box::new(substitute_type(element, substitutions))),
+        Type::Function {
+            parameters,
+            return_type,
+        } => Type::Function {
+            parameters: parameters
+                .iter()
+                .map(|parameter| substitute_type(parameter, substitutions))
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+            return_type: Box::new(substitute_type(return_type, substitutions)),
+        },
         Type::Record {
             definition,
             arguments,
@@ -4358,6 +4926,33 @@ fn unify_type_arguments(
             first_constraint_spans,
             constraint_span,
         ),
+        (
+            Type::Function {
+                parameters: template_parameters,
+                return_type: template_return,
+            },
+            Type::Function {
+                parameters: actual_parameters,
+                return_type: actual_return,
+            },
+        ) if template_parameters.len() == actual_parameters.len() => {
+            unify_type_argument_lists(
+                template_parameters,
+                actual_parameters,
+                parameters,
+                substitutions,
+                first_constraint_spans,
+                constraint_span,
+            )?;
+            unify_type_arguments(
+                template_return,
+                actual_return,
+                parameters,
+                substitutions,
+                first_constraint_spans,
+                constraint_span,
+            )
+        }
         (
             Type::Record {
                 definition: template_definition,
@@ -4442,6 +5037,21 @@ fn infer_missing_type_arguments(
             infer_missing_type_arguments(template, actual, parameters, substitutions);
         }
         (
+            Type::Function {
+                parameters: template_parameters,
+                return_type: template_return,
+            },
+            Type::Function {
+                parameters: actual_parameters,
+                return_type: actual_return,
+            },
+        ) if template_parameters.len() == actual_parameters.len() => {
+            for (template, actual) in template_parameters.iter().zip(actual_parameters) {
+                infer_missing_type_arguments(template, actual, parameters, substitutions);
+            }
+            infer_missing_type_arguments(template_return, actual_return, parameters, substitutions);
+        }
+        (
             Type::Record {
                 definition: template_definition,
                 arguments: template_arguments,
@@ -4490,6 +5100,20 @@ fn format_type(ty: &Type, records: &[RecordFacts], unions: &[UnionFacts]) -> Str
         Type::Bool => "Bool".to_owned(),
         Type::String => "String".to_owned(),
         Type::Array(element) => format!("{}[]", format_type(element, records, unions)),
+        Type::Function {
+            parameters,
+            return_type,
+        } => {
+            let parameters = parameters
+                .iter()
+                .map(|parameter| format_type(parameter, records, unions))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "({parameters}) => {}",
+                format_type(return_type, records, unions)
+            )
+        }
         Type::Parameter(parameter) => format!("parameter#{}", parameter.index()),
         Type::Record {
             definition,

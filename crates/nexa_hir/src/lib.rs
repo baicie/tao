@@ -10,19 +10,19 @@ mod hir;
 mod lower;
 
 pub use check::{
-    type_check, type_check_modules, Analysis, Builtin, CallFacts, FunctionFacts, LocalId,
-    MatchArmFacts, MatchFacts, NameResolution, PayloadBindingFacts, PayloadFacts, RecordFacts,
-    RecordFieldFacts, ResolvedImport, TypeParameterFacts, TypedProgram, UnionFacts,
+    type_check, type_check_modules, Analysis, Builtin, CallFacts, ClosureFacts, FunctionFacts,
+    LocalId, MatchArmFacts, MatchFacts, NameResolution, PayloadBindingFacts, PayloadFacts,
+    RecordFacts, RecordFieldFacts, ResolvedImport, TypeParameterFacts, TypedProgram, UnionFacts,
     VariantConstructionFacts, VariantFacts,
 };
 pub use hir::{
-    AssignmentStatement, BinaryOperator, Block, BreakStatement, ConstDeclaration,
-    ContinueStatement, DefId, Expression, ExpressionStatement, FieldId, Function, FunctionId,
-    IfStatement, ImportDeclaration, LetDeclaration, MatchArm, MatchPattern, ModuleId, Name,
-    Parameter, PayloadId, Program, RecordDeclaration, RecordFieldDeclaration,
-    RecordFieldInitializer, RecordId, ReturnStatement, Statement, Type, TypeParameter,
-    TypeParameterId, TypeParameterOwner, TypeReference, TypeReferenceKind, UnaryOperator,
-    UnionDeclaration, UnionId, UnionVariantDeclaration, VariantId, VariantPayloadDeclaration,
-    Visibility, WhileStatement,
+    ArrowBody, AssignmentStatement, BinaryOperator, Block, BreakStatement, ClosureId,
+    ConstDeclaration, ContinueStatement, DefId, Expression, ExpressionStatement, FieldId,
+    ForOfStatement, Function, FunctionId, IfStatement, ImportDeclaration, LetDeclaration, MatchArm,
+    MatchPattern, ModuleId, Name, Parameter, PayloadId, Program, RecordDeclaration,
+    RecordFieldDeclaration, RecordFieldInitializer, RecordId, ReturnStatement, Statement, Type,
+    TypeParameter, TypeParameterId, TypeParameterOwner, TypeReference, TypeReferenceKind,
+    UnaryOperator, UnionDeclaration, UnionId, UnionVariantDeclaration, VariantId,
+    VariantPayloadDeclaration, Visibility, WhileStatement,
 };
 pub use lower::{lower, lower_module, LoweringError};

@@ -209,6 +209,18 @@ pub enum SyntaxKind {
     TypeParameter = 99,
     /// The type arguments applied to a named type reference.
     TypeArgumentList = 100,
+    /// The `for` keyword.
+    ForKw = 101,
+    /// A callable type such as `(value: Int) => Int`.
+    FunctionType = 102,
+    /// An arrow function expression.
+    ArrowExpression = 103,
+    /// The expression or block body of an arrow function.
+    ArrowBody = 104,
+    /// An iteration over an array value.
+    ForStatement = 105,
+    /// The immutable binding introduced by a `for...of` statement.
+    ForBinding = 106,
 }
 
 impl SyntaxKind {
@@ -321,6 +333,12 @@ impl SyntaxKind {
             98 => Self::TypeParameterList,
             99 => Self::TypeParameter,
             100 => Self::TypeArgumentList,
+            101 => Self::ForKw,
+            102 => Self::FunctionType,
+            103 => Self::ArrowExpression,
+            104 => Self::ArrowBody,
+            105 => Self::ForStatement,
+            106 => Self::ForBinding,
             _ => unreachable!("invalid Nexa syntax kind: {raw}"),
         }
     }
@@ -469,6 +487,7 @@ fn keyword_kind(kind: SyntaxKind, text: &str) -> SyntaxKind {
         "while" => SyntaxKind::WhileKw,
         "break" => SyntaxKind::BreakKw,
         "continue" => SyntaxKind::ContinueKw,
+        "for" => SyntaxKind::ForKw,
         "return" => SyntaxKind::ReturnKw,
         "true" => SyntaxKind::TrueKw,
         "false" => SyntaxKind::FalseKw,
@@ -672,7 +691,7 @@ mod tests {
 
     #[test]
     fn tokenizes_stateful_control_flow_keywords_and_logical_operators() {
-        let tokens = tokenize("let while break continue && ||");
+        let tokens = tokenize("let while for break continue && ||");
         let kinds: Vec<_> = tokens.iter().map(|token| token.kind()).collect();
 
         assert_eq!(
@@ -682,6 +701,8 @@ mod tests {
                 SyntaxKind::Whitespace,
                 SyntaxKind::WhileKw,
                 SyntaxKind::Whitespace,
+                SyntaxKind::ForKw,
+                SyntaxKind::Whitespace,
                 SyntaxKind::BreakKw,
                 SyntaxKind::Whitespace,
                 SyntaxKind::ContinueKw,
@@ -689,6 +710,25 @@ mod tests {
                 SyntaxKind::AmpAmp,
                 SyntaxKind::Whitespace,
                 SyntaxKind::PipePipe,
+            ]
+        );
+    }
+
+    #[test]
+    fn tokenizes_for_as_a_keyword_and_keeps_of_contextual() {
+        let tokens = tokenize("for of before often");
+
+        assert_eq!(
+            tokens
+                .iter()
+                .filter(|token| !token.kind().is_trivia())
+                .map(|token| (token.kind(), token.text()))
+                .collect::<Vec<_>>(),
+            [
+                (SyntaxKind::ForKw, "for"),
+                (SyntaxKind::Ident, "of"),
+                (SyntaxKind::Ident, "before"),
+                (SyntaxKind::Ident, "often"),
             ]
         );
     }
@@ -974,6 +1014,12 @@ mod tests {
             SyntaxKind::TypeParameterList,
             SyntaxKind::TypeParameter,
             SyntaxKind::TypeArgumentList,
+            SyntaxKind::ForKw,
+            SyntaxKind::FunctionType,
+            SyntaxKind::ArrowExpression,
+            SyntaxKind::ArrowBody,
+            SyntaxKind::ForStatement,
+            SyntaxKind::ForBinding,
         ];
 
         for kind in kinds {

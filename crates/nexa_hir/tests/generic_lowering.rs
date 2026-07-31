@@ -120,6 +120,17 @@ fn type_shape(reference: &TypeReference) -> String {
             }
         }
         TypeReferenceKind::Array(element) => format!("{}[]", type_shape(element)),
+        TypeReferenceKind::Function {
+            parameters,
+            return_type,
+        } => {
+            let parameters = parameters
+                .iter()
+                .map(|parameter| type_shape(&parameter.ty))
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("({parameters})=>{}", type_shape(return_type))
+        }
     }
 }
 

@@ -19,6 +19,7 @@ const STATEMENT_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::LetKw,
     SyntaxKind::IfKw,
     SyntaxKind::WhileKw,
+    SyntaxKind::ForKw,
     SyntaxKind::BreakKw,
     SyntaxKind::ContinueKw,
     SyntaxKind::ReturnKw,
@@ -39,6 +40,7 @@ const ARRAY_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::LetKw,
     SyntaxKind::IfKw,
     SyntaxKind::WhileKw,
+    SyntaxKind::ForKw,
     SyntaxKind::BreakKw,
     SyntaxKind::ContinueKw,
     SyntaxKind::ReturnKw,
@@ -69,6 +71,7 @@ const RECORD_EXPRESSION_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::LetKw,
     SyntaxKind::IfKw,
     SyntaxKind::WhileKw,
+    SyntaxKind::ForKw,
     SyntaxKind::BreakKw,
     SyntaxKind::ContinueKw,
     SyntaxKind::ReturnKw,
@@ -108,6 +111,7 @@ const MATCH_BODY_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::LetKw,
     SyntaxKind::IfKw,
     SyntaxKind::WhileKw,
+    SyntaxKind::ForKw,
     SyntaxKind::BreakKw,
     SyntaxKind::ContinueKw,
     SyntaxKind::ReturnKw,
@@ -126,6 +130,7 @@ const MATCH_ARM_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::LetKw,
     SyntaxKind::IfKw,
     SyntaxKind::WhileKw,
+    SyntaxKind::ForKw,
     SyntaxKind::BreakKw,
     SyntaxKind::ContinueKw,
     SyntaxKind::ReturnKw,
@@ -178,6 +183,7 @@ const TYPE_ARGUMENT_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::BoolKw,
     SyntaxKind::StringKw,
     SyntaxKind::UnitKw,
+    SyntaxKind::LParen,
     SyntaxKind::Comma,
     SyntaxKind::Gt,
     SyntaxKind::GtEq,
@@ -194,6 +200,34 @@ const TYPE_ARGUMENT_RECOVERY: &[SyntaxKind] = &[
     SyntaxKind::ExportKw,
     SyntaxKind::FunctionKw,
     SyntaxKind::TypeKw,
+];
+const PARAMETER_LIST_RECOVERY: &[SyntaxKind] = &[
+    SyntaxKind::Comma,
+    SyntaxKind::RParen,
+    SyntaxKind::Colon,
+    SyntaxKind::FatArrow,
+    SyntaxKind::LBrace,
+    SyntaxKind::RBrace,
+    SyntaxKind::Eq,
+    SyntaxKind::Semicolon,
+    SyntaxKind::ImportKw,
+    SyntaxKind::ExportKw,
+    SyntaxKind::FunctionKw,
+    SyntaxKind::TypeKw,
+];
+const FOR_HEADER_RECOVERY: &[SyntaxKind] = &[
+    SyntaxKind::RParen,
+    SyntaxKind::LBrace,
+    SyntaxKind::RBrace,
+    SyntaxKind::Semicolon,
+    SyntaxKind::ConstKw,
+    SyntaxKind::LetKw,
+    SyntaxKind::IfKw,
+    SyntaxKind::WhileKw,
+    SyntaxKind::ForKw,
+    SyntaxKind::BreakKw,
+    SyntaxKind::ContinueKw,
+    SyntaxKind::ReturnKw,
 ];
 
 pub(super) fn parse_tokens(
@@ -599,13 +633,16 @@ impl Parser<'_> {
     fn parse_parameter_list(&mut self) {
         self.builder.start_node(SyntaxKind::ParameterList.into());
         self.skip_trivia();
+        let mut can_recover_missing_name = true;
 
-        while self.current().is_some() && !self.at(SyntaxKind::RParen) {
+        while self.current().is_some() && !self.parameter_list_is_finished(can_recover_missing_name)
+        {
             let position = self.position;
             self.parse_parameter();
+            can_recover_missing_name = false;
 
             if self.position == position {
-                self.recover_to(&[SyntaxKind::Comma, SyntaxKind::RParen, SyntaxKind::LBrace]);
+                self.recover_to(PARAMETER_LIST_RECOVERY);
             }
 
             self.skip_trivia();
@@ -616,17 +653,15 @@ impl Parser<'_> {
                     self.error_at_current("expected parameter after `,`");
                     break;
                 }
-            } else if !self.at(SyntaxKind::RParen) {
+                can_recover_missing_name = true;
+            } else if !self.parameter_list_is_finished(false) {
                 self.error_at_current("expected `,` or `)` after parameter");
-                self.recover_to(&[SyntaxKind::Comma, SyntaxKind::RParen, SyntaxKind::LBrace]);
+                self.recover_to(PARAMETER_LIST_RECOVERY);
                 if self.at(SyntaxKind::Comma) {
                     self.bump();
                     self.skip_trivia();
+                    can_recover_missing_name = true;
                 }
-            }
-
-            if self.at(SyntaxKind::LBrace) {
-                break;
             }
         }
 
@@ -635,7 +670,11 @@ impl Parser<'_> {
 
     fn parse_parameter(&mut self) {
         self.builder.start_node(SyntaxKind::Parameter.into());
-        self.expect(SyntaxKind::Ident, "expected parameter name");
+        if !self.expect(SyntaxKind::Ident, "expected parameter name")
+            && self.at_reserved_parameter_name()
+        {
+            self.bump();
+        }
         self.expect(SyntaxKind::Colon, "expected `:` after parameter name");
         self.parse_type();
         self.builder.finish_node();
@@ -730,8 +769,17 @@ impl Parser<'_> {
         ) {
             self.bump();
             true
+        } else if current == Some(SyntaxKind::LParen) {
+            if self.nth_non_trivia(1) == Some(SyntaxKind::LParen) {
+                self.parse_parenthesized_function_type();
+            } else {
+                self.parse_function_type();
+            }
+            true
         } else {
-            self.error_at_current("expected type `Int`, `Bool`, `String`, `Unit`, or a named type");
+            self.error_at_current(
+                "expected type `Int`, `Bool`, `String`, `Unit`, a named type, or a function type",
+            );
             false
         };
 
@@ -751,6 +799,34 @@ impl Parser<'_> {
             self.expect(SyntaxKind::RBracket, "expected `]` after array type");
             self.builder.finish_node();
         }
+    }
+
+    fn parse_function_type(&mut self) {
+        self.builder.start_node(SyntaxKind::FunctionType.into());
+        self.expect(
+            SyntaxKind::LParen,
+            "expected `(` before function type parameters",
+        );
+        self.parse_parameter_list();
+        self.expect(
+            SyntaxKind::RParen,
+            "expected `)` after function type parameters",
+        );
+        self.expect(SyntaxKind::FatArrow, "expected `=>` in function type");
+        self.parse_type();
+        self.builder.finish_node();
+    }
+
+    fn parse_parenthesized_function_type(&mut self) {
+        self.expect(
+            SyntaxKind::LParen,
+            "expected `(` before parenthesized function type",
+        );
+        self.parse_function_type();
+        self.expect(
+            SyntaxKind::RParen,
+            "expected `)` after parenthesized function type",
+        );
     }
 
     fn parse_type_argument_list(&mut self) {
@@ -835,6 +911,7 @@ impl Parser<'_> {
                 Some(SyntaxKind::LetKw) => self.parse_let_declaration(),
                 Some(SyntaxKind::IfKw) => self.parse_if_statement(),
                 Some(SyntaxKind::WhileKw) => self.parse_while_statement(),
+                Some(SyntaxKind::ForKw) => self.parse_for_statement(),
                 Some(SyntaxKind::BreakKw) => self.parse_break_statement(),
                 Some(SyntaxKind::ContinueKw) => self.parse_continue_statement(),
                 Some(SyntaxKind::ReturnKw) => self.parse_return_statement(),
@@ -971,6 +1048,31 @@ impl Parser<'_> {
             self.error_at_current("expected expression");
         }
         self.expect(SyntaxKind::RParen, "expected `)` after condition");
+        self.parse_block();
+        self.builder.finish_node();
+    }
+
+    fn parse_for_statement(&mut self) {
+        self.builder.start_node(SyntaxKind::ForStatement.into());
+        self.expect(SyntaxKind::ForKw, "expected `for`");
+        self.expect(SyntaxKind::LParen, "expected `(` after `for`");
+
+        self.builder.start_node(SyntaxKind::ForBinding.into());
+        if !self.expect(
+            SyntaxKind::ConstKw,
+            "expected `const` in `for...of` binding",
+        ) && self.at(SyntaxKind::LetKw)
+        {
+            self.bump();
+        }
+        self.expect(SyntaxKind::Ident, "expected binding name after `const`");
+        self.builder.finish_node();
+
+        self.expect_contextual_keyword("of", "expected `of` after `for` binding");
+        if !self.parse_expression() {
+            self.recover_to(FOR_HEADER_RECOVERY);
+        }
+        self.expect(SyntaxKind::RParen, "expected `)` after `for...of` header");
         self.parse_block();
         self.builder.finish_node();
     }
@@ -1190,12 +1292,16 @@ impl Parser<'_> {
                 true
             }
             Some(SyntaxKind::LParen) => {
-                self.builder
-                    .start_node(SyntaxKind::ParenthesizedExpression.into());
-                self.bump();
-                let _ = self.parse_expression();
-                self.expect(SyntaxKind::RParen, "expected `)` after expression");
-                self.builder.finish_node();
+                if self.at_arrow_expression() {
+                    self.parse_arrow_expression();
+                } else {
+                    self.builder
+                        .start_node(SyntaxKind::ParenthesizedExpression.into());
+                    self.bump();
+                    let _ = self.parse_expression();
+                    self.expect(SyntaxKind::RParen, "expected `)` after expression");
+                    self.builder.finish_node();
+                }
                 true
             }
             _ => {
@@ -1203,6 +1309,28 @@ impl Parser<'_> {
                 false
             }
         }
+    }
+
+    fn parse_arrow_expression(&mut self) {
+        self.builder.start_node(SyntaxKind::ArrowExpression.into());
+        self.expect(SyntaxKind::LParen, "expected `(` before arrow parameters");
+        self.parse_parameter_list();
+        self.expect(SyntaxKind::RParen, "expected `)` after arrow parameters");
+        self.expect(SyntaxKind::Colon, "expected `:` before arrow return type");
+        self.parse_type();
+        self.expect(
+            SyntaxKind::FatArrow,
+            "expected `=>` after arrow return type",
+        );
+        self.skip_trivia();
+        self.builder.start_node(SyntaxKind::ArrowBody.into());
+        if self.at(SyntaxKind::LBrace) {
+            self.parse_block();
+        } else {
+            let _ = self.parse_expression();
+        }
+        self.builder.finish_node();
+        self.builder.finish_node();
     }
 
     fn parse_array_expression(&mut self) {
@@ -1343,6 +1471,7 @@ impl Parser<'_> {
                     | SyntaxKind::LetKw
                     | SyntaxKind::IfKw
                     | SyntaxKind::WhileKw
+                    | SyntaxKind::ForKw
                     | SyntaxKind::BreakKw
                     | SyntaxKind::ContinueKw
                     | SyntaxKind::ReturnKw
@@ -1501,6 +1630,18 @@ impl Parser<'_> {
         }
     }
 
+    fn expect_contextual_keyword(&mut self, keyword: &str, message: &'static str) -> bool {
+        self.skip_trivia();
+
+        if self.at_contextual_keyword(keyword) {
+            self.bump();
+            true
+        } else {
+            self.error_at_current(message);
+            false
+        }
+    }
+
     fn expect_type_list_close(&mut self, message: &'static str) -> bool {
         self.skip_trivia();
         if self.at_type_list_close() {
@@ -1595,6 +1736,40 @@ impl Parser<'_> {
         self.current() == Some(kind)
     }
 
+    fn at_contextual_keyword(&self, keyword: &str) -> bool {
+        !self.pending_split_eq
+            && self
+                .tokens
+                .get(self.position)
+                .is_some_and(|token| token.kind() == SyntaxKind::Ident && token.text() == keyword)
+    }
+
+    fn at_arrow_expression(&self) -> bool {
+        if !self.at(SyntaxKind::LParen) {
+            return false;
+        }
+
+        let mut depth = 0_usize;
+        let mut offset = 0_usize;
+        loop {
+            match self.nth_non_trivia(offset) {
+                Some(SyntaxKind::LParen) => depth += 1,
+                Some(SyntaxKind::RParen) => {
+                    if depth == 1 {
+                        return matches!(
+                            self.nth_non_trivia(offset + 1),
+                            Some(SyntaxKind::Colon | SyntaxKind::FatArrow)
+                        );
+                    }
+                    depth = depth.saturating_sub(1);
+                }
+                Some(_) => {}
+                None => return false,
+            }
+            offset += 1;
+        }
+    }
+
     fn import_list_is_finished(&self) -> bool {
         matches!(
             self.current(),
@@ -1629,6 +1804,44 @@ impl Parser<'_> {
                     | SyntaxKind::TypeKw
             )
         )
+    }
+
+    fn parameter_list_is_finished(&self, can_recover_missing_name: bool) -> bool {
+        if self.at_reserved_parameter_name() {
+            return false;
+        }
+        if can_recover_missing_name && self.at(SyntaxKind::Colon) {
+            return false;
+        }
+
+        matches!(
+            self.current(),
+            None | Some(
+                SyntaxKind::RParen
+                    | SyntaxKind::Colon
+                    | SyntaxKind::FatArrow
+                    | SyntaxKind::LBrace
+                    | SyntaxKind::RBrace
+                    | SyntaxKind::Eq
+                    | SyntaxKind::Semicolon
+                    | SyntaxKind::ImportKw
+                    | SyntaxKind::ExportKw
+                    | SyntaxKind::FunctionKw
+                    | SyntaxKind::TypeKw
+            )
+        )
+    }
+
+    fn at_reserved_parameter_name(&self) -> bool {
+        matches!(
+            self.current(),
+            Some(
+                SyntaxKind::ImportKw
+                    | SyntaxKind::ExportKw
+                    | SyntaxKind::FunctionKw
+                    | SyntaxKind::TypeKw
+            )
+        ) && self.nth_non_trivia(1) == Some(SyntaxKind::Colon)
     }
 
     fn type_argument_list_is_finished(&self) -> bool {
@@ -1736,6 +1949,7 @@ const fn is_type_start(kind: SyntaxKind) -> bool {
             | SyntaxKind::BoolKw
             | SyntaxKind::StringKw
             | SyntaxKind::UnitKw
+            | SyntaxKind::LParen
             | SyntaxKind::Ident
     )
 }

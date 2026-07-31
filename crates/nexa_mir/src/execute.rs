@@ -3,14 +3,29 @@ use std::fmt::{Display, Formatter};
 use std::rc::Rc;
 
 use nexa_hir::{
-    BinaryOperator, FieldId, ModuleId, PayloadId, RecordId, UnaryOperator, UnionId, VariantId,
+    BinaryOperator, ClosureId, FieldId, ModuleId, PayloadId, RecordId, UnaryOperator, UnionId,
+    VariantId,
 };
 use nexa_span::SourceSpan;
 
 use crate::{
-    BasicBlockId, Callee, FunctionId, LocalId, MirExpression, MirLoweringError, MirProgram,
-    MirStatement, MirTerminator, MirUnion, MirVariant,
+    ArrayIntrinsic, BasicBlockId, Callee, FunctionId, LocalId, MirBasicBlock, MirExpression,
+    MirLoweringError, MirProgram, MirStatement, MirTerminator, MirUnion, MirVariant,
 };
+
+/// A stable callable value understood by the reference interpreter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CallableValue {
+    /// A non-generic source function resolved by its module-owned identity.
+    Function(FunctionId),
+    /// One closure instance with its immutable capture snapshot.
+    Closure {
+        /// The stable arrow-site identity.
+        closure: ClosureId,
+        /// Captured values in the closure layout's declared order.
+        captures: Rc<[Value]>,
+    },
+}
 
 /// A runtime value produced by the reference interpreter.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,6 +38,8 @@ pub enum Value {
     String(Rc<str>),
     /// An immutable, fixed-length array.
     Array(Rc<[Value]>),
+    /// A statically typed function or closure value.
+    Callable(CallableValue),
     /// An immutable nominal record with declaration-ordered fields.
     Record {
         /// The record's resolved nominal identity.
@@ -52,6 +69,19 @@ impl Display for Value {
             Self::Bool(value) => write!(formatter, "{value}"),
             Self::String(value) => formatter.write_str(value),
             Self::Array(_) => formatter.write_str("<array>"),
+            Self::Callable(CallableValue::Function(function)) => write!(
+                formatter,
+                "<function#{}:{}>",
+                function.module().index(),
+                function.index()
+            ),
+            Self::Callable(CallableValue::Closure { closure, .. }) => write!(
+                formatter,
+                "<closure#{}:{}:{}>",
+                closure.owner().module().index(),
+                closure.owner().index(),
+                closure.source_index()
+            ),
             Self::Record { record, .. } => write!(
                 formatter,
                 "<record#{}:{}>",
@@ -286,6 +316,81 @@ fn validate_program(program: &MirProgram) -> Result<(), RuntimeError> {
                 "program contains a duplicate function identity",
             ));
         }
+        if function.parameter_types.len() != function.parameters.len() {
+            return Err(RuntimeError::new(
+                function.span,
+                "function parameter signature metadata is inconsistent",
+            ));
+        }
+        let mut parameter_slots = HashSet::new();
+        for parameter in &function.parameters {
+            if parameter.0 >= function.local_count {
+                return Err(RuntimeError::new(
+                    function.span,
+                    "function parameter slot is outside its local frame",
+                ));
+            }
+            if !parameter_slots.insert(*parameter) {
+                return Err(RuntimeError::new(
+                    function.span,
+                    "function contains a duplicate parameter slot",
+                ));
+            }
+        }
+        validate_cfg(&function.blocks, function.entry, function.span)?;
+    }
+
+    let mut closures = HashSet::new();
+    for closure in &program.closures {
+        if !functions.contains(&closure.id.owner()) {
+            return Err(RuntimeError::new(
+                closure.span,
+                "closure owner function does not exist",
+            ));
+        }
+        if !closures.insert(closure.id) {
+            return Err(RuntimeError::new(
+                closure.span,
+                "program contains a duplicate closure identity",
+            ));
+        }
+        if closure.parameter_types.len() != closure.parameters.len() {
+            return Err(RuntimeError::new(
+                closure.span,
+                "closure parameter signature metadata is inconsistent",
+            ));
+        }
+
+        let mut occupied = HashSet::new();
+        for capture in &closure.captures {
+            if capture.0 >= closure.local_count {
+                return Err(RuntimeError::new(
+                    closure.span,
+                    "closure capture slot is outside its local frame",
+                ));
+            }
+            if !occupied.insert(*capture) {
+                return Err(RuntimeError::new(
+                    closure.span,
+                    "closure contains a duplicate capture slot",
+                ));
+            }
+        }
+        for parameter in &closure.parameters {
+            if parameter.0 >= closure.local_count {
+                return Err(RuntimeError::new(
+                    closure.span,
+                    "closure parameter slot is outside its local frame",
+                ));
+            }
+            if !occupied.insert(*parameter) {
+                return Err(RuntimeError::new(
+                    closure.span,
+                    "closure capture and parameter slots overlap",
+                ));
+            }
+        }
+        validate_cfg(&closure.blocks, closure.entry, closure.span)?;
     }
 
     let mut records = HashSet::new();
@@ -344,6 +449,180 @@ fn validate_program(program: &MirProgram) -> Result<(), RuntimeError> {
         }
     }
 
+    validate_callable_references(program)?;
+
+    Ok(())
+}
+
+fn validate_callable_references(program: &MirProgram) -> Result<(), RuntimeError> {
+    for function in &program.functions {
+        validate_block_references(program, &function.blocks)?;
+    }
+    for closure in &program.closures {
+        validate_block_references(program, &closure.blocks)?;
+    }
+    Ok(())
+}
+
+fn validate_block_references(
+    program: &MirProgram,
+    blocks: &[MirBasicBlock],
+) -> Result<(), RuntimeError> {
+    for block in blocks {
+        for statement in &block.statements {
+            let expression = match statement {
+                MirStatement::Store { value, .. } => value,
+                MirStatement::Expression { expression, .. } => expression,
+            };
+            validate_expression_references(program, expression)?;
+        }
+
+        match &block.terminator {
+            MirTerminator::Branch { condition, .. } => {
+                validate_expression_references(program, condition)?;
+            }
+            MirTerminator::Return {
+                value: Some(value), ..
+            } => validate_expression_references(program, value)?,
+            MirTerminator::Goto { .. }
+            | MirTerminator::SwitchVariant { .. }
+            | MirTerminator::Return { value: None, .. } => {}
+        }
+    }
+    Ok(())
+}
+
+fn validate_expression_references(
+    program: &MirProgram,
+    expression: &MirExpression,
+) -> Result<(), RuntimeError> {
+    match expression {
+        MirExpression::Function { function, span } => {
+            if program.function(*function).is_none() {
+                return Err(RuntimeError::new(
+                    *span,
+                    "function value target does not exist",
+                ));
+            }
+        }
+        MirExpression::Closure {
+            closure,
+            captures,
+            span,
+        } => {
+            let layout = program
+                .closure(*closure)
+                .ok_or_else(|| RuntimeError::new(*span, "closure layout does not exist"))?;
+            if layout.captures.len() != captures.len() {
+                return Err(RuntimeError::new(
+                    *span,
+                    format!(
+                        "closure construction expected {} capture(s), found {}",
+                        layout.captures.len(),
+                        captures.len()
+                    ),
+                ));
+            }
+            for capture in captures {
+                validate_expression_references(program, capture)?;
+            }
+        }
+        MirExpression::Array { elements, .. } => {
+            for element in elements {
+                validate_expression_references(program, element)?;
+            }
+        }
+        MirExpression::Record { fields, .. } => {
+            for field in fields {
+                validate_expression_references(program, field)?;
+            }
+        }
+        MirExpression::Variant { payloads, .. } => {
+            for payload in payloads {
+                validate_expression_references(program, payload)?;
+            }
+        }
+        MirExpression::Index { target, index, .. } => {
+            validate_expression_references(program, target)?;
+            validate_expression_references(program, index)?;
+        }
+        MirExpression::Length { target, .. }
+        | MirExpression::Field { target, .. }
+        | MirExpression::Unary {
+            expression: target, ..
+        } => validate_expression_references(program, target)?,
+        MirExpression::ArrayIntrinsic {
+            target, argument, ..
+        } => {
+            validate_expression_references(program, target)?;
+            validate_expression_references(program, argument)?;
+        }
+        MirExpression::Binary { left, right, .. } => {
+            validate_expression_references(program, left)?;
+            validate_expression_references(program, right)?;
+        }
+        MirExpression::Call {
+            callee,
+            arguments,
+            span,
+        } => {
+            if let Callee::Function(function) = callee {
+                if program.function(*function).is_none() {
+                    return Err(RuntimeError::new(*span, "call target does not exist"));
+                }
+            }
+            for argument in arguments {
+                validate_expression_references(program, argument)?;
+            }
+        }
+        MirExpression::IndirectCall {
+            callee, arguments, ..
+        } => {
+            validate_expression_references(program, callee)?;
+            for argument in arguments {
+                validate_expression_references(program, argument)?;
+            }
+        }
+        MirExpression::Integer { .. }
+        | MirExpression::Boolean { .. }
+        | MirExpression::String { .. }
+        | MirExpression::Local { .. }
+        | MirExpression::VariantPayload { .. } => {}
+    }
+    Ok(())
+}
+
+fn validate_cfg(
+    blocks: &[MirBasicBlock],
+    entry: BasicBlockId,
+    span: SourceSpan,
+) -> Result<(), RuntimeError> {
+    if entry.0 >= blocks.len() {
+        return Err(RuntimeError::new(
+            span,
+            "callable entry block does not exist",
+        ));
+    }
+    for block in blocks {
+        let valid_targets = match &block.terminator {
+            MirTerminator::Goto { target, .. } => target.0 < blocks.len(),
+            MirTerminator::Branch {
+                then_target,
+                else_target,
+                ..
+            } => then_target.0 < blocks.len() && else_target.0 < blocks.len(),
+            MirTerminator::SwitchVariant { targets, .. } => {
+                targets.iter().all(|target| target.0 < blocks.len())
+            }
+            MirTerminator::Return { .. } => true,
+        };
+        if !valid_targets {
+            return Err(RuntimeError::new(
+                block.span,
+                "callable CFG target does not exist",
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -365,6 +644,21 @@ impl Interpreter {
         arguments: Vec<Value>,
         span: SourceSpan,
     ) -> Result<Value, RuntimeError> {
+        self.call_callable(
+            program,
+            CallableValue::Function(function_id),
+            arguments,
+            span,
+        )
+    }
+
+    fn call_callable(
+        &mut self,
+        program: &MirProgram,
+        callable: CallableValue,
+        arguments: Vec<Value>,
+        span: SourceSpan,
+    ) -> Result<Value, RuntimeError> {
         if self.call_depth >= MAX_CALL_DEPTH {
             return Err(RuntimeError::new(
                 span,
@@ -373,12 +667,19 @@ impl Interpreter {
         }
 
         self.call_depth += 1;
-        let result = self.call_active(program, function_id, arguments, span);
+        let result = match callable {
+            CallableValue::Function(function) => {
+                self.call_function_active(program, function, arguments, span)
+            }
+            CallableValue::Closure { closure, captures } => {
+                self.call_closure_active(program, closure, &captures, arguments, span)
+            }
+        };
         self.call_depth -= 1;
         result
     }
 
-    fn call_active(
+    fn call_function_active(
         &mut self,
         program: &MirProgram,
         function_id: FunctionId,
@@ -401,18 +702,85 @@ impl Interpreter {
         }
 
         let mut frame = Frame {
-            locals: vec![Value::Unit; function.local_count],
+            locals: vec![None; function.local_count],
         };
         for (local, argument) in function.parameters.iter().copied().zip(arguments) {
             frame.store(local, argument, function.span)?;
         }
 
-        let mut current = function.entry;
+        self.execute_body(
+            program,
+            &function.blocks,
+            function.entry,
+            frame,
+            function.span,
+        )
+    }
+
+    fn call_closure_active(
+        &mut self,
+        program: &MirProgram,
+        closure_id: ClosureId,
+        captures: &[Value],
+        arguments: Vec<Value>,
+        span: SourceSpan,
+    ) -> Result<Value, RuntimeError> {
+        let closure = program
+            .closure(closure_id)
+            .ok_or_else(|| RuntimeError::new(span, "closure call target does not exist"))?;
+        if closure.captures.len() != captures.len() {
+            return Err(RuntimeError::new(
+                span,
+                format!(
+                    "closure expected {} capture(s), found {}",
+                    closure.captures.len(),
+                    captures.len()
+                ),
+            ));
+        }
+        if closure.parameters.len() != arguments.len() {
+            return Err(RuntimeError::new(
+                span,
+                format!(
+                    "closure expected {} argument(s), found {}",
+                    closure.parameters.len(),
+                    arguments.len()
+                ),
+            ));
+        }
+
+        let mut frame = Frame {
+            locals: vec![None; closure.local_count],
+        };
+        for (local, value) in closure
+            .captures
+            .iter()
+            .copied()
+            .zip(captures.iter().cloned())
+        {
+            frame.store(local, value, closure.span)?;
+        }
+        for (local, argument) in closure.parameters.iter().copied().zip(arguments) {
+            frame.store(local, argument, closure.span)?;
+        }
+
+        self.execute_body(program, &closure.blocks, closure.entry, frame, closure.span)
+    }
+
+    fn execute_body(
+        &mut self,
+        program: &MirProgram,
+        blocks: &[MirBasicBlock],
+        entry: BasicBlockId,
+        mut frame: Frame,
+        body_span: SourceSpan,
+    ) -> Result<Value, RuntimeError> {
+        let mut current = entry;
+
         loop {
-            let block = function
-                .blocks
+            let block = blocks
                 .get(current.0)
-                .ok_or_else(|| RuntimeError::new(function.span, "basic block does not exist"))?;
+                .ok_or_else(|| RuntimeError::new(body_span, "basic block does not exist"))?;
             self.consume_step(block.span)?;
 
             for statement in &block.statements {
@@ -500,6 +868,36 @@ impl Interpreter {
             MirExpression::String { value, .. } => {
                 Ok(Value::String(Rc::<str>::from(value.as_str())))
             }
+            MirExpression::Function { function, .. } => {
+                Ok(Value::Callable(CallableValue::Function(*function)))
+            }
+            MirExpression::Closure {
+                closure,
+                captures,
+                span,
+            } => {
+                let layout = program
+                    .closure(*closure)
+                    .ok_or_else(|| RuntimeError::new(*span, "closure layout does not exist"))?;
+                if layout.captures.len() != captures.len() {
+                    return Err(RuntimeError::new(
+                        *span,
+                        format!(
+                            "closure construction expected {} capture(s), found {}",
+                            layout.captures.len(),
+                            captures.len()
+                        ),
+                    ));
+                }
+                let captures = captures
+                    .iter()
+                    .map(|capture| self.evaluate(program, capture, frame))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Value::Callable(CallableValue::Closure {
+                    closure: *closure,
+                    captures: captures.into(),
+                }))
+            }
             MirExpression::Array { elements, .. } => elements
                 .iter()
                 .map(|element| self.evaluate(program, element, frame))
@@ -528,6 +926,17 @@ impl Interpreter {
             MirExpression::Length { target, span } => {
                 let target = self.evaluate(program, target, frame)?;
                 evaluate_length(target, *span)
+            }
+            MirExpression::ArrayIntrinsic {
+                operation,
+                element_type,
+                target,
+                argument,
+                span,
+            } => {
+                let target = self.evaluate(program, target, frame)?;
+                let argument = self.evaluate(program, argument, frame)?;
+                evaluate_array_intrinsic(program, *operation, element_type, target, argument, *span)
             }
             MirExpression::Field {
                 target,
@@ -575,6 +984,29 @@ impl Interpreter {
                     .map(|argument| self.evaluate(program, argument, frame))
                     .collect::<Result<Vec<_>, _>>()?;
                 self.evaluate_call(program, *callee, arguments, *span)
+            }
+            MirExpression::IndirectCall {
+                callee,
+                arguments,
+                span,
+            } => {
+                let callee = self.evaluate(program, callee, frame)?;
+                let arguments = arguments
+                    .iter()
+                    .map(|argument| self.evaluate(program, argument, frame))
+                    .collect::<Result<Vec<_>, _>>()?;
+                match callee {
+                    Value::Callable(callable) => {
+                        self.call_callable(program, callable, arguments, *span)
+                    }
+                    value => Err(RuntimeError::new(
+                        *span,
+                        format!(
+                            "indirect call received `{}` instead of a function",
+                            value_type(&value)
+                        ),
+                    )),
+                }
             }
         }
     }
@@ -756,7 +1188,11 @@ impl Interpreter {
                 };
                 if matches!(
                     value,
-                    Value::Array(_) | Value::Record { .. } | Value::Union { .. } | Value::Unit
+                    Value::Array(_)
+                        | Value::Callable(_)
+                        | Value::Record { .. }
+                        | Value::Union { .. }
+                        | Value::Unit
                 ) {
                     return Err(RuntimeError::new(
                         span,
@@ -765,6 +1201,33 @@ impl Interpreter {
                 }
                 self.output.push(value.to_string());
                 Ok(Value::Unit)
+            }
+            Callee::ToString => {
+                let [value] = arguments.as_slice() else {
+                    return Err(RuntimeError::new(span, "`toString` requires one argument"));
+                };
+                let Value::Int(value) = value else {
+                    return Err(RuntimeError::new(
+                        span,
+                        format!("`toString` expected `Int`, found `{}`", value_type(value)),
+                    ));
+                };
+                Ok(Value::String(value.to_string().into()))
+            }
+            Callee::ParseInt => {
+                let [value] = arguments.as_slice() else {
+                    return Err(RuntimeError::new(span, "`parseInt` requires one argument"));
+                };
+                let Value::String(value) = value else {
+                    return Err(RuntimeError::new(
+                        span,
+                        format!(
+                            "`parseInt` expected `String`, found `{}`",
+                            value_type(value)
+                        ),
+                    ));
+                };
+                parse_ascii_int(value, span).map(Value::Int)
             }
         }
     }
@@ -960,20 +1423,21 @@ fn recursive_union_depth(value: &Value) -> usize {
         Value::Union { depth, .. } => *depth,
         Value::Array(values) => values.iter().map(recursive_union_depth).max().unwrap_or(0),
         Value::Record { fields, .. } => fields.iter().map(recursive_union_depth).max().unwrap_or(0),
-        Value::Int(_) | Value::Bool(_) | Value::String(_) | Value::Unit => 0,
+        Value::Int(_) | Value::Bool(_) | Value::String(_) | Value::Callable(_) | Value::Unit => 0,
     }
 }
 
 struct Frame {
-    locals: Vec<Value>,
+    locals: Vec<Option<Value>>,
 }
 
 impl Frame {
     fn load(&self, local: LocalId, span: SourceSpan) -> Result<Value, RuntimeError> {
         self.locals
             .get(local.0)
-            .cloned()
-            .ok_or_else(|| RuntimeError::new(span, "local slot does not exist"))
+            .ok_or_else(|| RuntimeError::new(span, "local slot does not exist"))?
+            .clone()
+            .ok_or_else(|| RuntimeError::new(span, "local slot is uninitialized"))
     }
 
     fn store(
@@ -985,7 +1449,7 @@ impl Frame {
         let Some(slot) = self.locals.get_mut(local.0) else {
             return Err(RuntimeError::new(span, "local slot does not exist"));
         };
-        *slot = value;
+        *slot = Some(value);
         Ok(())
     }
 }
@@ -1082,8 +1546,9 @@ fn evaluate_index(target: Value, index: Value, span: SourceSpan) -> Result<Value
 }
 
 fn evaluate_length(target: Value, span: SourceSpan) -> Result<Value, RuntimeError> {
-    let values = match target {
-        Value::Array(values) => values,
+    let length = match target {
+        Value::Array(values) => values.len(),
+        Value::String(value) => value.chars().count(),
         target => {
             return Err(RuntimeError::new(
                 span,
@@ -1091,9 +1556,218 @@ fn evaluate_length(target: Value, span: SourceSpan) -> Result<Value, RuntimeErro
             ));
         }
     };
-    i64::try_from(values.len())
+    i64::try_from(length)
         .map(Value::Int)
-        .map_err(|_| RuntimeError::new(span, "array length exceeds `Int` range"))
+        .map_err(|_| RuntimeError::new(span, "length exceeds `Int` range"))
+}
+
+fn evaluate_array_intrinsic(
+    program: &MirProgram,
+    operation: ArrayIntrinsic,
+    element_type: &nexa_hir::Type,
+    target: Value,
+    argument: Value,
+    span: SourceSpan,
+) -> Result<Value, RuntimeError> {
+    let Value::Array(values) = target else {
+        return Err(RuntimeError::new(
+            span,
+            format!(
+                "array intrinsic expected `Array`, found `{}`",
+                value_type(&target)
+            ),
+        ));
+    };
+    if !values
+        .iter()
+        .all(|value| value_matches_type(program, value, element_type))
+    {
+        return Err(RuntimeError::new(
+            span,
+            "array intrinsic base contains a value incompatible with its element type",
+        ));
+    }
+    let mut result = Vec::new();
+    match operation {
+        ArrayIntrinsic::Append => {
+            if !value_matches_type(program, &argument, element_type) {
+                return Err(RuntimeError::new(
+                    span,
+                    "array append argument is incompatible with its element type",
+                ));
+            }
+            result
+                .try_reserve_exact(values.len().saturating_add(1))
+                .map_err(|_| RuntimeError::new(span, "array append result is too large"))?;
+            result.extend(values.iter().cloned());
+            result.push(argument);
+        }
+        ArrayIntrinsic::Concat => {
+            let Value::Array(other) = argument else {
+                return Err(RuntimeError::new(
+                    span,
+                    format!(
+                        "array concat expected `Array`, found `{}`",
+                        value_type(&argument)
+                    ),
+                ));
+            };
+            if !other
+                .iter()
+                .all(|value| value_matches_type(program, value, element_type))
+            {
+                return Err(RuntimeError::new(
+                    span,
+                    "array concat argument contains a value incompatible with its element type",
+                ));
+            }
+            let length = values
+                .len()
+                .checked_add(other.len())
+                .ok_or_else(|| RuntimeError::new(span, "array concat result is too large"))?;
+            result
+                .try_reserve_exact(length)
+                .map_err(|_| RuntimeError::new(span, "array concat result is too large"))?;
+            result.extend(values.iter().cloned());
+            result.extend(other.iter().cloned());
+        }
+    }
+    Ok(Value::Array(result.into()))
+}
+
+fn value_matches_type(program: &MirProgram, value: &Value, expected: &nexa_hir::Type) -> bool {
+    match (value, expected) {
+        (Value::Int(_), nexa_hir::Type::Int)
+        | (Value::Bool(_), nexa_hir::Type::Bool)
+        | (Value::String(_), nexa_hir::Type::String)
+        | (Value::Unit, nexa_hir::Type::Unit)
+        | (_, nexa_hir::Type::Parameter(_)) => true,
+        (Value::Array(values), nexa_hir::Type::Array(element)) => values
+            .iter()
+            .all(|value| value_matches_type(program, value, element)),
+        (
+            Value::Callable(CallableValue::Function(function)),
+            nexa_hir::Type::Function {
+                parameters,
+                return_type,
+            },
+        ) => program.function(*function).is_some_and(|function| {
+            function.parameter_types.len() == parameters.len()
+                && function
+                    .parameter_types
+                    .iter()
+                    .zip(parameters)
+                    .all(|(actual, expected)| runtime_type_matches(actual, expected))
+                && runtime_type_matches(&function.return_type, return_type)
+        }),
+        (
+            Value::Callable(CallableValue::Closure { closure, captures }),
+            nexa_hir::Type::Function {
+                parameters,
+                return_type,
+            },
+        ) => program.closure(*closure).is_some_and(|closure| {
+            captures.len() == closure.captures.len()
+                && closure.parameter_types.len() == parameters.len()
+                && closure
+                    .parameter_types
+                    .iter()
+                    .zip(parameters)
+                    .all(|(actual, expected)| runtime_type_matches(actual, expected))
+                && runtime_type_matches(&closure.return_type, return_type)
+        }),
+        (Value::Record { record, .. }, nexa_hir::Type::Record { definition, .. }) => {
+            record == definition
+        }
+        (Value::Union { union, .. }, nexa_hir::Type::Union { definition, .. }) => {
+            union == definition
+        }
+        _ => false,
+    }
+}
+
+fn runtime_type_matches(actual: &nexa_hir::Type, expected: &nexa_hir::Type) -> bool {
+    match (actual, expected) {
+        (nexa_hir::Type::Parameter(_), _) | (_, nexa_hir::Type::Parameter(_)) => true,
+        (nexa_hir::Type::Int, nexa_hir::Type::Int)
+        | (nexa_hir::Type::Bool, nexa_hir::Type::Bool)
+        | (nexa_hir::Type::String, nexa_hir::Type::String)
+        | (nexa_hir::Type::Unit, nexa_hir::Type::Unit) => true,
+        (nexa_hir::Type::Array(actual), nexa_hir::Type::Array(expected)) => {
+            runtime_type_matches(actual, expected)
+        }
+        (
+            nexa_hir::Type::Function {
+                parameters: actual_parameters,
+                return_type: actual_return,
+            },
+            nexa_hir::Type::Function {
+                parameters: expected_parameters,
+                return_type: expected_return,
+            },
+        ) => {
+            actual_parameters.len() == expected_parameters.len()
+                && actual_parameters
+                    .iter()
+                    .zip(expected_parameters)
+                    .all(|(actual, expected)| runtime_type_matches(actual, expected))
+                && runtime_type_matches(actual_return, expected_return)
+        }
+        (
+            nexa_hir::Type::Record {
+                definition: actual,
+                arguments: actual_arguments,
+            },
+            nexa_hir::Type::Record {
+                definition: expected,
+                arguments: expected_arguments,
+            },
+        ) => {
+            actual == expected
+                && actual_arguments.len() == expected_arguments.len()
+                && actual_arguments
+                    .iter()
+                    .zip(expected_arguments)
+                    .all(|(actual, expected)| runtime_type_matches(actual, expected))
+        }
+        (
+            nexa_hir::Type::Union {
+                definition: actual,
+                arguments: actual_arguments,
+            },
+            nexa_hir::Type::Union {
+                definition: expected,
+                arguments: expected_arguments,
+            },
+        ) => {
+            actual == expected
+                && actual_arguments.len() == expected_arguments.len()
+                && actual_arguments
+                    .iter()
+                    .zip(expected_arguments)
+                    .all(|(actual, expected)| runtime_type_matches(actual, expected))
+        }
+        _ => false,
+    }
+}
+
+fn parse_ascii_int(value: &str, span: SourceSpan) -> Result<i64, RuntimeError> {
+    let bytes = value.as_bytes();
+    let digits = if bytes.first() == Some(&b'-') {
+        &bytes[1..]
+    } else {
+        bytes
+    };
+    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
+        return Err(RuntimeError::new(
+            span,
+            "parseInt expected a complete ASCII decimal integer",
+        ));
+    }
+
+    value
+        .parse::<i64>()
+        .map_err(|_| RuntimeError::new(span, "parseInt result is outside the Int range"))
 }
 
 fn validate_field_layout(
@@ -1223,6 +1897,7 @@ const fn value_type(value: &Value) -> &'static str {
         Value::Bool(_) => "Bool",
         Value::String(_) => "String",
         Value::Array(_) => "Array",
+        Value::Callable(_) => "Function",
         Value::Record { .. } => "Record",
         Value::Union { .. } => "Union",
         Value::Unit => "Unit",
@@ -1232,17 +1907,21 @@ const fn value_type(value: &Value) -> &'static str {
 #[cfg(test)]
 mod tests {
     use nexa_hir::{
-        lower as lower_hir, type_check, FunctionId, ModuleId, PayloadId, Type, UnionId, VariantId,
+        lower as lower_hir, type_check, ClosureId, FunctionId, ModuleId, PayloadId, Type,
+        TypeParameterId, TypeParameterOwner, UnionId, VariantId,
     };
     use nexa_parser::parse_source;
     use nexa_span::{FileId, TextRange};
 
     use super::{
-        evaluate_field, evaluate_variant_payload, select_variant_target, validate_field_layout,
-        validate_payload_layout, variant_layout, FieldId, RecordId, SourceSpan, Value,
+        evaluate_field, evaluate_variant_payload, runtime_type_matches, select_variant_target,
+        validate_field_layout, validate_payload_layout, variant_layout, FieldId, RecordId,
+        SourceSpan, Value,
     };
     use crate::{
-        BasicBlockId, MirPayload, MirProgram, MirRecord, MirRecordField, MirUnion, MirVariant,
+        ArrayIntrinsic, BasicBlockId, LocalId, MirBasicBlock, MirClosure, MirExpression,
+        MirFunction, MirPayload, MirProgram, MirRecord, MirRecordField, MirStatement,
+        MirTerminator, MirUnion, MirVariant,
     };
 
     #[test]
@@ -1398,6 +2077,259 @@ mod tests {
     }
 
     #[test]
+    fn interpreter_rejects_a_foreign_function_value_identity(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let span = SourceSpan::new(FileId::new(9), TextRange::new(140, 150));
+        let program = expression_program(
+            MirExpression::Function {
+                function: FunctionId::in_module(ModuleId::new(9), 0),
+                span,
+            },
+            span,
+        );
+
+        let failure = super::run(&program)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected a foreign function value failure"))?;
+
+        assert_eq!(
+            (failure.error().message(), failure.error().span()),
+            ("function value target does not exist", span)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn interpreter_rejects_a_foreign_closure_value_identity(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let span = SourceSpan::new(FileId::new(9), TextRange::new(150, 160));
+        let program = expression_program(
+            MirExpression::Closure {
+                closure: ClosureId::new(FunctionId::new(0), 9),
+                captures: Vec::new(),
+                span,
+            },
+            span,
+        );
+
+        let failure = super::run(&program)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected a foreign closure value failure"))?;
+
+        assert_eq!(
+            (failure.error().message(), failure.error().span()),
+            ("closure layout does not exist", span)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn interpreter_rejects_a_closure_construction_with_the_wrong_capture_count(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let span = SourceSpan::new(FileId::new(9), TextRange::new(160, 170));
+        let closure = ClosureId::new(FunctionId::new(0), 0);
+        let mut program = expression_program(
+            MirExpression::Closure {
+                closure,
+                captures: Vec::new(),
+                span,
+            },
+            span,
+        );
+        program.closures.push(unit_closure(
+            closure,
+            vec![LocalId(0)],
+            Vec::new(),
+            Vec::new(),
+            1,
+            span,
+        ));
+
+        let failure = super::run(&program)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected a closure capture-count failure"))?;
+
+        assert_eq!(
+            (failure.error().message(), failure.error().span()),
+            ("closure construction expected 1 capture(s), found 0", span)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn interpreter_rejects_a_closure_capture_slot_outside_its_frame(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let span = SourceSpan::new(FileId::new(9), TextRange::new(170, 180));
+        let closure = ClosureId::new(FunctionId::new(0), 0);
+        let mut program = expression_program(MirExpression::Integer { value: 0, span }, span);
+        program.closures.push(unit_closure(
+            closure,
+            vec![LocalId(1)],
+            Vec::new(),
+            Vec::new(),
+            1,
+            span,
+        ));
+
+        let failure = super::run(&program)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected an invalid capture-slot failure"))?;
+
+        assert_eq!(
+            (failure.error().message(), failure.error().span()),
+            ("closure capture slot is outside its local frame", span)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn interpreter_rejects_inconsistent_function_signature_metadata(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let span = SourceSpan::new(FileId::new(9), TextRange::new(180, 190));
+        let mut program = expression_program(MirExpression::Integer { value: 0, span }, span);
+        program.functions[0].parameters.push(LocalId(0));
+        program.functions[0].local_count = 1;
+
+        let failure = super::run(&program)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected invalid function metadata"))?;
+
+        assert_eq!(
+            (failure.error().message(), failure.error().span()),
+            (
+                "function parameter signature metadata is inconsistent",
+                span
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn interpreter_rejects_inconsistent_closure_signature_metadata(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let span = SourceSpan::new(FileId::new(9), TextRange::new(190, 200));
+        let closure = ClosureId::new(FunctionId::new(0), 0);
+        let mut program = expression_program(MirExpression::Integer { value: 0, span }, span);
+        program.closures.push(unit_closure(
+            closure,
+            Vec::new(),
+            vec![LocalId(0)],
+            Vec::new(),
+            1,
+            span,
+        ));
+
+        let failure = super::run(&program)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected invalid closure metadata"))?;
+
+        assert_eq!(
+            (failure.error().message(), failure.error().span()),
+            ("closure parameter signature metadata is inconsistent", span)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn interpreter_rejects_a_non_callable_indirect_target() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let span = SourceSpan::new(FileId::new(9), TextRange::new(200, 210));
+        let program = expression_program(
+            MirExpression::IndirectCall {
+                callee: Box::new(MirExpression::Integer { value: 42, span }),
+                arguments: Vec::new(),
+                span,
+            },
+            span,
+        );
+
+        let failure = super::run(&program)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected a non-callable indirect failure"))?;
+
+        assert_eq!(
+            (failure.error().message(), failure.error().span()),
+            ("indirect call received `Int` instead of a function", span)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn interpreter_rejects_an_array_intrinsic_with_a_non_array_target(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let span = SourceSpan::new(FileId::new(9), TextRange::new(210, 220));
+        let program = expression_program(
+            MirExpression::ArrayIntrinsic {
+                operation: ArrayIntrinsic::Append,
+                element_type: Type::Int,
+                target: Box::new(MirExpression::Integer { value: 1, span }),
+                argument: Box::new(MirExpression::Integer { value: 2, span }),
+                span,
+            },
+            span,
+        );
+
+        let failure = super::run(&program)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected an invalid intrinsic failure"))?;
+
+        assert_eq!(
+            (failure.error().message(), failure.error().span()),
+            ("array intrinsic expected `Array`, found `Int`", span)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn runtime_type_matching_erases_parameters_nested_in_nominal_function_types() {
+        let parameter = Type::Parameter(TypeParameterId::new(
+            TypeParameterOwner::Function(FunctionId::new(0)),
+            0,
+        ));
+        let record = RecordId::new(0);
+        let union = UnionId::new(0);
+        let actual = Type::Function {
+            parameters: vec![Type::Array(Box::new(Type::Record {
+                definition: record,
+                arguments: vec![Type::Int].into_boxed_slice(),
+            }))]
+            .into_boxed_slice(),
+            return_type: Box::new(Type::Union {
+                definition: union,
+                arguments: vec![Type::String].into_boxed_slice(),
+            }),
+        };
+        let expected = Type::Function {
+            parameters: vec![Type::Array(Box::new(Type::Record {
+                definition: record,
+                arguments: vec![parameter.clone()].into_boxed_slice(),
+            }))]
+            .into_boxed_slice(),
+            return_type: Box::new(Type::Union {
+                definition: union,
+                arguments: vec![parameter].into_boxed_slice(),
+            }),
+        };
+
+        assert!(runtime_type_matches(&actual, &expected));
+    }
+
+    #[test]
+    fn runtime_type_matching_rejects_different_concrete_nominal_arguments() {
+        let record = RecordId::new(0);
+        let actual = Type::Record {
+            definition: record,
+            arguments: vec![Type::Int].into_boxed_slice(),
+        };
+        let expected = Type::Record {
+            definition: record,
+            arguments: vec![Type::String].into_boxed_slice(),
+        };
+
+        assert!(!runtime_type_matches(&actual, &expected));
+    }
+
+    #[test]
     fn interpreter_rejects_a_missing_entry_function() -> Result<(), Box<dyn std::error::Error>> {
         let mut program = lower_program("function main(): Unit {}")?;
         program.entry = Some(FunctionId::in_module(ModuleId::ENTRY, 9));
@@ -1499,6 +2431,7 @@ mod tests {
             }],
             unions: Vec::new(),
             functions: Vec::new(),
+            closures: Vec::new(),
             span,
         };
 
@@ -1662,6 +2595,60 @@ mod tests {
                 span,
             }],
             functions: Vec::new(),
+            closures: Vec::new(),
+            span,
+        }
+    }
+
+    fn expression_program(expression: MirExpression, span: SourceSpan) -> MirProgram {
+        let main = FunctionId::new(0);
+        MirProgram {
+            modules: vec![ModuleId::ENTRY],
+            entry_module: ModuleId::ENTRY,
+            entry: Some(main),
+            records: Vec::new(),
+            unions: Vec::new(),
+            functions: vec![MirFunction {
+                id: main,
+                name: "main".to_owned(),
+                parameters: Vec::new(),
+                parameter_types: Vec::new(),
+                local_count: 0,
+                return_type: Type::Unit,
+                entry: BasicBlockId(0),
+                blocks: vec![MirBasicBlock {
+                    statements: vec![MirStatement::Expression { expression, span }],
+                    terminator: MirTerminator::Return { value: None, span },
+                    span,
+                }],
+                span,
+            }],
+            closures: Vec::new(),
+            span,
+        }
+    }
+
+    fn unit_closure(
+        id: ClosureId,
+        captures: Vec<LocalId>,
+        parameters: Vec<LocalId>,
+        parameter_types: Vec<Type>,
+        local_count: usize,
+        span: SourceSpan,
+    ) -> MirClosure {
+        MirClosure {
+            id,
+            captures,
+            parameters,
+            parameter_types,
+            local_count,
+            return_type: Type::Unit,
+            entry: BasicBlockId(0),
+            blocks: vec![MirBasicBlock {
+                statements: Vec::new(),
+                terminator: MirTerminator::Return { value: None, span },
+                span,
+            }],
             span,
         }
     }

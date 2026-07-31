@@ -1,6 +1,6 @@
 use nexa_hir::{
-    BinaryOperator, FieldId, FunctionId, ModuleId, PayloadId, RecordId, Type, UnaryOperator,
-    UnionId, VariantId,
+    BinaryOperator, ClosureId, FieldId, FunctionId, ModuleId, PayloadId, RecordId, Type,
+    UnaryOperator, UnionId, VariantId,
 };
 use nexa_span::SourceSpan;
 
@@ -13,6 +13,7 @@ pub struct MirProgram {
     pub(crate) records: Vec<MirRecord>,
     pub(crate) unions: Vec<MirUnion>,
     pub(crate) functions: Vec<MirFunction>,
+    pub(crate) closures: Vec<MirClosure>,
     pub(crate) span: SourceSpan,
 }
 
@@ -57,6 +58,18 @@ impl MirProgram {
     #[must_use]
     pub fn function(&self, id: FunctionId) -> Option<&MirFunction> {
         self.functions.iter().find(|function| function.id == id)
+    }
+
+    /// Returns all closure bodies in stable owner and source order.
+    #[must_use]
+    pub fn closures(&self) -> &[MirClosure] {
+        &self.closures
+    }
+
+    /// Returns one closure body by its stable source identity.
+    #[must_use]
+    pub fn closure(&self, id: ClosureId) -> Option<&MirClosure> {
+        self.closures.iter().find(|closure| closure.id == id)
     }
 
     /// Returns one record layout by its complete module-owned identity.
@@ -267,6 +280,70 @@ pub struct MirFunction {
     pub(crate) span: SourceSpan,
 }
 
+/// A closure body after capture, parameter, and local resolution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirClosure {
+    pub(crate) id: ClosureId,
+    pub(crate) captures: Vec<LocalId>,
+    pub(crate) parameters: Vec<LocalId>,
+    pub(crate) parameter_types: Vec<Type>,
+    pub(crate) local_count: usize,
+    pub(crate) return_type: Type,
+    pub(crate) entry: BasicBlockId,
+    pub(crate) blocks: Vec<MirBasicBlock>,
+    pub(crate) span: SourceSpan,
+}
+
+impl MirClosure {
+    /// Returns the stable arrow-site identity.
+    #[must_use]
+    pub const fn id(&self) -> ClosureId {
+        self.id
+    }
+
+    /// Returns capture slots in typed-HIR first-use order.
+    #[must_use]
+    pub fn captures(&self) -> &[LocalId] {
+        &self.captures
+    }
+
+    /// Returns parameter slots in declaration order.
+    #[must_use]
+    pub fn parameter_ids(&self) -> &[LocalId] {
+        &self.parameters
+    }
+
+    /// Returns parameter types in declaration order.
+    #[must_use]
+    pub fn parameter_types(&self) -> &[Type] {
+        &self.parameter_types
+    }
+
+    /// Returns the declared result type.
+    #[must_use]
+    pub const fn return_type(&self) -> &Type {
+        &self.return_type
+    }
+
+    /// Returns the closure entry block.
+    #[must_use]
+    pub const fn entry_block(&self) -> BasicBlockId {
+        self.entry
+    }
+
+    /// Returns closure CFG blocks in stable order.
+    #[must_use]
+    pub fn blocks(&self) -> &[MirBasicBlock] {
+        &self.blocks
+    }
+
+    /// Returns the arrow expression's source range.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
+
 impl MirFunction {
     /// Returns the function's stable module-owned identity.
     #[must_use]
@@ -455,6 +532,22 @@ pub enum MirExpression {
         /// The literal's source range.
         span: SourceSpan,
     },
+    /// Produces a first-class reference to a non-generic source function.
+    Function {
+        /// The resolved module-owned function identity.
+        function: FunctionId,
+        /// The identifier's source range.
+        span: SourceSpan,
+    },
+    /// Creates a closure by snapshotting resolved captures in order.
+    Closure {
+        /// The stable arrow-site identity.
+        closure: ClosureId,
+        /// Capture expressions in semantic first-use order.
+        captures: Vec<MirExpression>,
+        /// The full arrow expression range.
+        span: SourceSpan,
+    },
     /// Constructs an immutable array in element evaluation order.
     Array {
         /// The element expressions in source order.
@@ -496,6 +589,19 @@ pub enum MirExpression {
         /// The evaluated array expression.
         target: Box<MirExpression>,
         /// The full member expression range.
+        span: SourceSpan,
+    },
+    /// Applies an immutable array operation to one evaluated base and argument.
+    ArrayIntrinsic {
+        /// The statically selected array operation.
+        operation: ArrayIntrinsic,
+        /// The validated source array's element type.
+        element_type: Type,
+        /// The evaluated base array.
+        target: Box<MirExpression>,
+        /// The evaluated element or array argument.
+        argument: Box<MirExpression>,
+        /// The full member-call range.
         span: SourceSpan,
     },
     /// Reads a resolved field from an immutable nominal record.
@@ -558,6 +664,15 @@ pub enum MirExpression {
         /// The full call range.
         span: SourceSpan,
     },
+    /// Calls a callable value produced by an expression.
+    IndirectCall {
+        /// The callable expression, evaluated before every argument.
+        callee: Box<MirExpression>,
+        /// Call arguments in source order.
+        arguments: Vec<MirExpression>,
+        /// The full call range.
+        span: SourceSpan,
+    },
 }
 
 impl MirExpression {
@@ -568,19 +683,32 @@ impl MirExpression {
             Self::Integer { span, .. }
             | Self::Boolean { span, .. }
             | Self::String { span, .. }
+            | Self::Function { span, .. }
+            | Self::Closure { span, .. }
             | Self::Array { span, .. }
             | Self::Record { span, .. }
             | Self::Variant { span, .. }
             | Self::Index { span, .. }
             | Self::Length { span, .. }
+            | Self::ArrayIntrinsic { span, .. }
             | Self::Field { span, .. }
             | Self::VariantPayload { span, .. }
             | Self::Local { span, .. }
             | Self::Unary { span, .. }
             | Self::Binary { span, .. }
-            | Self::Call { span, .. } => *span,
+            | Self::Call { span, .. }
+            | Self::IndirectCall { span, .. } => *span,
         }
     }
+}
+
+/// A statically resolved immutable array operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArrayIntrinsic {
+    /// Returns the base array followed by one value.
+    Append,
+    /// Returns the base array followed by every value in another array.
+    Concat,
 }
 
 /// A resolved callable target.
@@ -590,4 +718,8 @@ pub enum Callee {
     Function(FunctionId),
     /// The built-in scalar printing function.
     Print,
+    /// The canonical integer-to-string conversion.
+    ToString,
+    /// The complete ASCII decimal string-to-integer conversion.
+    ParseInt,
 }

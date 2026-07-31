@@ -111,6 +111,27 @@ fn module_keywords_are_rejected_where_identifiers_are_required(
 }
 
 #[test]
+fn reserved_parameter_name_recovers_without_abandoning_the_function() {
+    let source = "function read(export: Int): Unit {} function later(): Unit {}";
+    let parse = parse_source(TEST_FILE, source);
+    let syntax = parse.syntax();
+    let messages = parse
+        .diagnostics()
+        .iter()
+        .map(|diagnostic| diagnostic.message())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        (
+            messages,
+            count_nodes(&syntax, SyntaxKind::FunctionDeclaration)
+        ),
+        (vec!["expected parameter name"], 2)
+    );
+    assert_eq!(syntax.to_string(), source);
+}
+
+#[test]
 fn parse_source_reports_an_empty_import_list_and_keeps_later_items(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let source = "import {} from \"./empty.nexa\"; import { Value } from \"./value.nexa\"; function later(): Unit {}";

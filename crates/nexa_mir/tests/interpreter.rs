@@ -11,6 +11,142 @@ use nexa_parser::parse_source;
 use nexa_span::{FileId, SourceSpan, TextRange};
 
 #[test]
+fn interpreter_executes_named_function_values_through_indirect_calls(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"function increment(value: Int): Int {
+  return value + 1;
+}
+
+function apply(transform: (input: Int) => Int, value: Int): Int {
+  return transform(value);
+}
+
+function main(): Unit {
+  const operation: (value: Int) => Int = increment;
+  print(apply(operation, 41));
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["42"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_stores_and_calls_function_values_in_arrays() -> Result<(), Box<dyn std::error::Error>>
+{
+    let program = compile(
+        r#"function increment(value: Int): Int { return value + 1; }
+function main(): Unit {
+  const handlers: ((value: Int) => Int)[] = [increment];
+  print(handlers[0](41));
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["42"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_executes_a_returned_closure_after_its_creator_returns(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"function make(offset: Int): (value: Int) => Int {
+  const captured = offset + 1;
+  return (value: Int): Int => value + captured;
+}
+
+function main(): Unit {
+  const addTwo = make(1);
+  print(addTwo(40));
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["42"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_forwards_distant_captures_through_nested_closures(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"function make(base: Int): (delta: Int) => (value: Int) => Int {
+  return (delta: Int): (value: Int) => Int =>
+    (value: Int): Int => base + delta + value;
+}
+
+function main(): Unit {
+  const addBase = make(10);
+  const addDelta = addBase(20);
+  print(addDelta(12));
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["42"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_creates_independent_snapshots_at_one_arrow_site(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"function capture(value: Int): () => Int {
+  return (): Int => value;
+}
+
+function main(): Unit {
+  const first = capture(20);
+  const second = capture(22);
+  print(first() + second());
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["42"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_captures_function_values_and_immutable_data(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"function increment(value: Int): Int {
+  return value + 1;
+}
+
+function make(transform: (value: Int) => Int, offset: Int): (value: Int) => Int {
+  const offsets = [offset];
+  return (value: Int): Int => transform(value) + offsets[0];
+}
+
+function main(): Unit {
+  const operation = make(increment, 1);
+  print(operation(40));
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["42"]);
+
+    Ok(())
+}
+
+#[test]
 fn interpreter_executes_function_calls_branches_and_print() -> Result<(), Box<dyn std::error::Error>>
 {
     let program = compile(
@@ -240,6 +376,113 @@ fn interpreter_skips_a_false_while_body() -> Result<(), Box<dyn std::error::Erro
 }
 
 #[test]
+fn interpreter_evaluates_a_for_of_iterable_once_and_visits_elements_in_order(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"function values(): Int[] {
+  print(1);
+  return [20, 22];
+}
+
+function main(): Unit {
+  for (const value of values()) {
+    print(value);
+  }
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["1", "20", "22"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_skips_an_empty_for_of_body() -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        "function main(): Unit { const values: Int[] = []; for (const value of values) { print(value); } print(42); }",
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["42"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_targets_the_nearest_mixed_loop_for_break_and_continue(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"function main(): Unit {
+  let score = 0;
+  for (const outer of [1, 2, 3]) {
+    for (const inner of [1, 2, 3]) {
+      if (inner === 2) {
+        continue;
+      }
+      if (outer === 2) {
+        break;
+      }
+      score = score + 1;
+    }
+  }
+  print(score);
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["4"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_returns_from_inside_for_of() -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"function firstMatch(values: Int[]): Int {
+  for (const value of values) {
+    if (value > 20) {
+      return value;
+    }
+  }
+  return 0;
+}
+
+function main(): Unit {
+  print(firstMatch([10, 42, 99]));
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["42"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_snapshots_each_for_of_binding_in_a_closure() -> Result<(), Box<dyn std::error::Error>>
+{
+    let program = compile(
+        r#"function main(): Unit {
+  for (const value of [20, 22]) {
+    const read = (): Int => value;
+    print(read());
+  }
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["20", "22"]);
+
+    Ok(())
+}
+
+#[test]
 fn interpreter_short_circuits_boolean_operators() -> Result<(), Box<dyn std::error::Error>> {
     let program = compile(
         r#"function sideEffect(): Bool {
@@ -287,6 +530,211 @@ function main(): Unit {
     let execution = run(&program)?;
 
     assert_eq!(execution.output(), ["Nexa native", "42"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_appends_and_concatenates_without_changing_source_arrays(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"function base(): Int[] { print(1); return [20]; }
+function next(): Int { print(2); return 21; }
+function tail(): Int[] { print(3); return [1]; }
+
+function main(): Unit {
+  const original = base();
+  const values = original.append(next()).concat(tail());
+  print(original.length);
+  for (const value of values) {
+    print(value);
+  }
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["1", "2", "3", "1", "20", "21", "1"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_contextually_types_an_empty_concat_array() -> Result<(), Box<dyn std::error::Error>>
+{
+    let program =
+        compile("function main(): Unit { const values = [42].concat([]); print(values[0]); }")?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["42"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_applies_array_intrinsics_to_erased_generic_function_values(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"function extend<T>(
+  handlers: ((value: T) => T)[],
+  transform: (value: T) => T
+): ((value: T) => T)[] {
+  return handlers.append(transform).concat([transform]);
+}
+
+function increment(value: Int): Int { return value + 1; }
+
+function main(): Unit {
+  const handlers = extend([], increment);
+  print(handlers[0](41));
+  print(handlers[1](40));
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["42", "41"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_counts_unicode_scalar_values_in_string_length(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        "function main(): Unit { print(\"ASCII\".length); print(\"é\".length); print(\"é\".length); print(\"🙂\".length); }",
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["5", "1", "2", "1"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_formats_and_parses_complete_int_boundaries() -> Result<(), Box<dyn std::error::Error>>
+{
+    let program = compile(
+        r#"function main(): Unit {
+  print(toString(0));
+  print(toString(-42));
+  print(toString(-9223372036854775807 - 1));
+  print(toString(9223372036854775807));
+  print(parseInt("00042"));
+  print(parseInt("-0"));
+  print(parseInt("-9223372036854775808"));
+  print(parseInt("9223372036854775807"));
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(
+        execution.output(),
+        [
+            "0",
+            "-42",
+            "-9223372036854775808",
+            "9223372036854775807",
+            "42",
+            "0",
+            "-9223372036854775808",
+            "9223372036854775807"
+        ]
+    );
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_reports_malformed_parse_int_at_the_call_span_with_prior_output(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = r#"function value(): String { print(7); return " 42"; }
+function main(): Unit { parseInt(value()); }"#;
+    let call_start = source
+        .find("parseInt(value())")
+        .ok_or_else(|| std::io::Error::other("expected parseInt call"))?;
+    let expected_span = SourceSpan::new(
+        FileId::new(3),
+        TextRange::new(call_start, call_start + "parseInt(value())".len()),
+    );
+    let program = compile(source)?;
+
+    let failure = run(&program)
+        .err()
+        .ok_or_else(|| std::io::Error::other("expected malformed parseInt failure"))?;
+
+    assert_eq!(
+        (failure.error().message(), failure.error().span()),
+        (
+            "parseInt expected a complete ASCII decimal integer",
+            expected_span
+        )
+    );
+    assert_eq!(failure.output(), ["7"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_rejects_each_malformed_parse_int_class_at_the_call_span(
+) -> Result<(), Box<dyn std::error::Error>> {
+    for input in [
+        "", "-", "+", "+1", "1.0", "1_000", "１２", "42n", " 42", "42 ",
+    ] {
+        let call = format!("parseInt(\"{input}\")");
+        let source = format!("function main(): Unit {{ {call}; }}");
+        let call_start = source
+            .find(&call)
+            .ok_or_else(|| std::io::Error::other("expected parseInt call"))?;
+        let expected_span = SourceSpan::new(
+            FileId::new(3),
+            TextRange::new(call_start, call_start + call.len()),
+        );
+        let program = compile(&source)?;
+        let failure = run(&program)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected malformed parseInt failure"))?;
+
+        assert_eq!(
+            (failure.error().message(), failure.error().span()),
+            (
+                "parseInt expected a complete ASCII decimal integer",
+                expected_span
+            ),
+            "input: {input:?}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_reports_both_parse_int_overflows_at_the_call_span(
+) -> Result<(), Box<dyn std::error::Error>> {
+    for input in ["9223372036854775808", "-9223372036854775809"] {
+        let call = format!("parseInt(\"{input}\")");
+        let source = format!("function main(): Unit {{ {call}; }}");
+        let call_start = source
+            .find(&call)
+            .ok_or_else(|| std::io::Error::other("expected parseInt call"))?;
+        let expected_span = SourceSpan::new(
+            FileId::new(3),
+            TextRange::new(call_start, call_start + call.len()),
+        );
+        let program = compile(&source)?;
+        let failure = run(&program)
+            .err()
+            .ok_or_else(|| std::io::Error::other("expected overflowing parseInt failure"))?;
+
+        assert_eq!(
+            (failure.error().message(), failure.error().span()),
+            ("parseInt result is outside the Int range", expected_span),
+            "input: {input:?}"
+        );
+    }
 
     Ok(())
 }
@@ -1473,6 +1921,65 @@ fn interpreter_reports_a_runtime_error_at_the_65th_active_call(
     Ok(())
 }
 
+#[test]
+fn interpreter_allows_64_mixed_function_and_closure_calls() -> Result<(), Box<dyn std::error::Error>>
+{
+    let source = mixed_call_chain_source(62);
+    let program = compile(&source)?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["7", "1"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_rejects_the_65th_mixed_function_and_closure_call(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = mixed_call_chain_source(63);
+    let expected_span_start = source
+        .find("f63();")
+        .ok_or_else(|| std::io::Error::other("expected final mixed call"))?;
+    let expected_span = SourceSpan::new(
+        FileId::new(3),
+        TextRange::new(expected_span_start, expected_span_start + "f63()".len()),
+    );
+    let program = compile(&source)?;
+    let failure = run(&program)
+        .err()
+        .ok_or_else(|| std::io::Error::other("expected a mixed call-depth error"))?;
+
+    assert_eq!(
+        (failure.error().message(), failure.error().span()),
+        ("maximum call depth of 64 exceeded", expected_span)
+    );
+    assert_eq!(failure.output(), ["7"]);
+
+    Ok(())
+}
+
+#[test]
+fn interpreter_distinguishes_a_captured_unit_from_an_uninitialized_slot(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile(
+        r#"function make(marker: Unit): () => Unit {
+  return (): Unit => { const copy: Unit = marker; };
+}
+function main(): Unit {
+  const operation = make(print(1));
+  operation();
+  print(2);
+}"#,
+    )?;
+
+    let execution = run(&program)?;
+
+    assert_eq!(execution.output(), ["1", "2"]);
+
+    Ok(())
+}
+
 fn call_chain_source(function_count: usize) -> String {
     let mut source = String::new();
 
@@ -1488,6 +1995,24 @@ fn call_chain_source(function_count: usize) -> String {
     }
 
     source.push_str("function main(): Unit { print(7); f1(); }");
+    source
+}
+
+fn mixed_call_chain_source(function_count: usize) -> String {
+    let mut source = String::new();
+
+    for index in 1..=function_count {
+        if index == function_count {
+            source.push_str(&format!("function f{index}(): Unit {{ print(1); }}\n"));
+        } else {
+            source.push_str(&format!(
+                "function f{index}(): Unit {{ f{}(); }}\n",
+                index + 1
+            ));
+        }
+    }
+
+    source.push_str("function main(): Unit { print(7); const start = (): Unit => f1(); start(); }");
     source
 }
 
@@ -1509,11 +2034,20 @@ fn expression_contains_logical_binary(expression: &MirExpression) -> bool {
         MirExpression::Call { arguments, .. } => {
             arguments.iter().any(expression_contains_logical_binary)
         }
+        MirExpression::IndirectCall {
+            callee, arguments, ..
+        } => {
+            expression_contains_logical_binary(callee)
+                || arguments.iter().any(expression_contains_logical_binary)
+        }
         MirExpression::Array { elements, .. } => {
             elements.iter().any(expression_contains_logical_binary)
         }
         MirExpression::Record { fields, .. } => {
             fields.iter().any(expression_contains_logical_binary)
+        }
+        MirExpression::Closure { captures, .. } => {
+            captures.iter().any(expression_contains_logical_binary)
         }
         MirExpression::Variant { payloads, .. } => {
             payloads.iter().any(expression_contains_logical_binary)
@@ -1522,10 +2056,17 @@ fn expression_contains_logical_binary(expression: &MirExpression) -> bool {
             expression_contains_logical_binary(target) || expression_contains_logical_binary(index)
         }
         MirExpression::Length { target, .. } => expression_contains_logical_binary(target),
+        MirExpression::ArrayIntrinsic {
+            target, argument, ..
+        } => {
+            expression_contains_logical_binary(target)
+                || expression_contains_logical_binary(argument)
+        }
         MirExpression::Field { target, .. } => expression_contains_logical_binary(target),
         MirExpression::Integer { .. }
         | MirExpression::Boolean { .. }
         | MirExpression::String { .. }
+        | MirExpression::Function { .. }
         | MirExpression::VariantPayload { .. }
         | MirExpression::Local { .. } => false,
     }

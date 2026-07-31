@@ -1,17 +1,19 @@
 use std::fmt::{Display, Formatter};
 
 use nexa_hir::{
-    BinaryOperator, Block, Builtin, CallFacts, Expression, FieldId, Function,
-    FunctionId as HirFunctionId, IfStatement, MatchArm, MatchArmFacts, MatchPattern, Name,
-    NameResolution, PayloadId, RecordFacts, RecordFieldInitializer, RecordId, ReturnStatement,
-    Statement, Type, TypeParameterFacts, TypeParameterId, TypedProgram, UnionFacts, UnionId,
-    VariantConstructionFacts, VariantId, WhileStatement,
+    ArrowBody, BinaryOperator, Block, Builtin, CallFacts, ClosureFacts, ClosureId, Expression,
+    FieldId, ForOfStatement, Function, FunctionId as HirFunctionId, IfStatement, MatchArm,
+    MatchArmFacts, MatchPattern, Name, NameResolution, Parameter, PayloadId, RecordFacts,
+    RecordFieldInitializer, RecordId, ReturnStatement, Statement, Type, TypeParameterFacts,
+    TypeParameterId, TypedProgram, UnionFacts, UnionId, VariantConstructionFacts, VariantId,
+    WhileStatement,
 };
 use nexa_span::SourceSpan;
 
 use crate::{
-    BasicBlockId, Callee, LocalId, MirBasicBlock, MirExpression, MirFunction, MirPayload,
-    MirProgram, MirRecord, MirRecordField, MirStatement, MirTerminator, MirUnion, MirVariant,
+    ArrayIntrinsic, BasicBlockId, Callee, LocalId, MirBasicBlock, MirClosure, MirExpression,
+    MirFunction, MirPayload, MirProgram, MirRecord, MirRecordField, MirStatement, MirTerminator,
+    MirUnion, MirVariant,
 };
 
 /// An invariant violation while lowering validated HIR to MIR.
@@ -61,7 +63,7 @@ pub fn lower(typed: &TypedProgram) -> Result<MirProgram, MirLoweringError> {
         .iter()
         .map(|union| lower_union_layout(union.id(), union))
         .collect::<Result<Vec<_>, _>>()?;
-    let functions = typed
+    let lowered_functions = typed
         .modules()
         .iter()
         .flat_map(|program| {
@@ -75,6 +77,19 @@ pub fn lower(typed: &TypedProgram) -> Result<MirProgram, MirLoweringError> {
         })
         .map(|(id, function)| lower_function(id, function, typed))
         .collect::<Result<Vec<_>, _>>()?;
+    let mut functions = Vec::with_capacity(lowered_functions.len());
+    let mut closures = Vec::new();
+    for lowered in lowered_functions {
+        functions.push(lowered.function);
+        closures.extend(lowered.closures);
+    }
+    closures.sort_by_key(|closure| {
+        (
+            closure.id.owner().module().index(),
+            closure.id.owner().index(),
+            closure.id.source_index(),
+        )
+    });
     let entry = entry_program
         .functions
         .iter()
@@ -92,8 +107,14 @@ pub fn lower(typed: &TypedProgram) -> Result<MirProgram, MirLoweringError> {
         records,
         unions,
         functions,
+        closures,
         span: entry_program.span,
     })
+}
+
+struct LoweredFunction {
+    function: MirFunction,
+    closures: Vec<MirClosure>,
 }
 
 fn lower_record_layout(
@@ -219,7 +240,7 @@ fn lower_function(
     function_id: HirFunctionId,
     function: &Function,
     typed: &TypedProgram,
-) -> Result<MirFunction, MirLoweringError> {
+) -> Result<LoweredFunction, MirLoweringError> {
     if typed.name_resolution(function.name.span) != Some(NameResolution::Function(function_id)) {
         return Err(error(
             function.name.span,
@@ -270,6 +291,7 @@ fn lower_function(
 
     let mut lowerer = FunctionLowerer {
         typed,
+        function_id,
         parameters: facts
             .parameter_ids()
             .iter()
@@ -284,6 +306,7 @@ fn lower_function(
         next_local: facts.local_count(),
         blocks: Vec::new(),
         loop_targets: Vec::new(),
+        closures: Vec::new(),
     };
 
     let entry = lowerer.new_block(function.body.span);
@@ -304,18 +327,26 @@ fn lower_function(
         )?;
     }
 
-    let (parameters, local_count, blocks) = lowerer.finish()?;
-
-    Ok(MirFunction {
-        id: function_id,
-        name: function.name.text.clone(),
+    let FinishedLowering {
         parameters,
-        parameter_types: facts.parameter_types().to_vec(),
         local_count,
-        return_type: facts.return_type().clone(),
-        entry,
         blocks,
-        span: function.span,
+        closures,
+    } = lowerer.finish()?;
+
+    Ok(LoweredFunction {
+        function: MirFunction {
+            id: function_id,
+            name: function.name.text.clone(),
+            parameters,
+            parameter_types: facts.parameter_types().to_vec(),
+            local_count,
+            return_type: facts.return_type().clone(),
+            entry,
+            blocks,
+            span: function.span,
+        },
+        closures,
     })
 }
 
@@ -333,12 +364,21 @@ struct PendingBlock {
 
 struct FunctionLowerer<'typed> {
     typed: &'typed TypedProgram,
+    function_id: HirFunctionId,
     parameters: Vec<LocalId>,
     type_parameters: Vec<TypeParameterId>,
     hir_local_count: usize,
     next_local: usize,
     blocks: Vec<PendingBlock>,
     loop_targets: Vec<LoopTargets>,
+    closures: Vec<MirClosure>,
+}
+
+struct FinishedLowering {
+    parameters: Vec<LocalId>,
+    local_count: usize,
+    blocks: Vec<MirBasicBlock>,
+    closures: Vec<MirClosure>,
 }
 
 impl FunctionLowerer<'_> {
@@ -397,6 +437,7 @@ impl FunctionLowerer<'_> {
                 Ok(Some(current))
             }
             Statement::While(statement) => self.lower_while(statement, current),
+            Statement::ForOf(statement) => self.lower_for_of(statement, current),
             Statement::Break(statement) => {
                 let targets = self.loop_targets.last().copied().ok_or_else(|| {
                     error(statement.span, "break outside a loop reached MIR lowering")
@@ -538,6 +579,154 @@ impl FunctionLowerer<'_> {
         Ok(Some(exit_block))
     }
 
+    fn lower_for_of(
+        &mut self,
+        statement: &ForOfStatement,
+        current: BasicBlockId,
+    ) -> Result<Option<BasicBlockId>, MirLoweringError> {
+        let iterable_type = self.expression_type(&statement.iterable, "for...of iterable")?;
+        if !matches!(iterable_type, Type::Array(_)) {
+            return Err(error(
+                statement.iterable.span(),
+                "for...of iterable does not have an array type",
+            ));
+        }
+        let binding = self.resolve_local(&statement.binding, "for...of binding")?;
+
+        let (current, iterable) = self.lower_expression(&statement.iterable, current)?;
+        let iterable_local = self.allocate_local();
+        self.push_statement(
+            current,
+            MirStatement::Store {
+                local: iterable_local,
+                value: iterable,
+                span: statement.iterable.span(),
+            },
+        )?;
+        let length_local = self.allocate_local();
+        self.push_statement(
+            current,
+            MirStatement::Store {
+                local: length_local,
+                value: MirExpression::Length {
+                    target: Box::new(MirExpression::Local {
+                        local: iterable_local,
+                        span: statement.iterable.span(),
+                    }),
+                    span: statement.iterable.span(),
+                },
+                span: statement.iterable.span(),
+            },
+        )?;
+        let index_local = self.allocate_local();
+        self.push_statement(
+            current,
+            MirStatement::Store {
+                local: index_local,
+                value: MirExpression::Integer {
+                    value: 0,
+                    span: statement.span,
+                },
+                span: statement.span,
+            },
+        )?;
+
+        let condition_block = self.new_block(statement.iterable.span());
+        let body_block = self.new_block(statement.body.span);
+        let increment_block = self.new_block(statement.span);
+        let exit_block = self.new_block(statement.span);
+        self.terminate(
+            current,
+            MirTerminator::Goto {
+                target: condition_block,
+                span: statement.span,
+            },
+        )?;
+        self.terminate(
+            condition_block,
+            MirTerminator::Branch {
+                condition: MirExpression::Binary {
+                    operator: BinaryOperator::Less,
+                    left: Box::new(MirExpression::Local {
+                        local: index_local,
+                        span: statement.span,
+                    }),
+                    right: Box::new(MirExpression::Local {
+                        local: length_local,
+                        span: statement.iterable.span(),
+                    }),
+                    span: statement.span,
+                },
+                then_target: body_block,
+                else_target: exit_block,
+                span: statement.span,
+            },
+        )?;
+        self.push_statement(
+            body_block,
+            MirStatement::Store {
+                local: binding,
+                value: MirExpression::Index {
+                    target: Box::new(MirExpression::Local {
+                        local: iterable_local,
+                        span: statement.iterable.span(),
+                    }),
+                    index: Box::new(MirExpression::Local {
+                        local: index_local,
+                        span: statement.span,
+                    }),
+                    span: statement.binding.span,
+                },
+                span: statement.binding.span,
+            },
+        )?;
+
+        self.loop_targets.push(LoopTargets {
+            break_target: exit_block,
+            continue_target: increment_block,
+        });
+        let body_result = self.lower_block(&statement.body, Some(body_block));
+        let _ = self.loop_targets.pop();
+        if let Some(body_end) = body_result? {
+            self.terminate(
+                body_end,
+                MirTerminator::Goto {
+                    target: increment_block,
+                    span: statement.body.span,
+                },
+            )?;
+        }
+
+        self.push_statement(
+            increment_block,
+            MirStatement::Store {
+                local: index_local,
+                value: MirExpression::Binary {
+                    operator: BinaryOperator::Add,
+                    left: Box::new(MirExpression::Local {
+                        local: index_local,
+                        span: statement.span,
+                    }),
+                    right: Box::new(MirExpression::Integer {
+                        value: 1,
+                        span: statement.span,
+                    }),
+                    span: statement.span,
+                },
+                span: statement.span,
+            },
+        )?;
+        self.terminate(
+            increment_block,
+            MirTerminator::Goto {
+                target: condition_block,
+                span: statement.span,
+            },
+        )?;
+
+        Ok(Some(exit_block))
+    }
+
     fn lower_return(
         &mut self,
         statement: &ReturnStatement,
@@ -656,7 +845,7 @@ impl FunctionLowerer<'_> {
                 member,
                 span,
             } => match self.typed.name_resolution(member.span) {
-                Some(NameResolution::Builtin(Builtin::ArrayLength)) => {
+                Some(NameResolution::Builtin(Builtin::ArrayLength | Builtin::StringLength)) => {
                     let (current, target) = self.lower_expression(object, current)?;
                     self.materialize(
                         current,
@@ -716,16 +905,54 @@ impl FunctionLowerer<'_> {
                     ),
                 )),
             },
-            Expression::Name(name) => {
-                let local = self.resolve_local(name, "value")?;
-                Ok((
-                    current,
-                    MirExpression::Local {
-                        local,
-                        span: name.span,
-                    },
-                ))
-            }
+            Expression::Name(name) => match self.typed.name_resolution(name.span) {
+                Some(NameResolution::Local(_)) => {
+                    let local = self.resolve_local(name, "value")?;
+                    Ok((
+                        current,
+                        MirExpression::Local {
+                            local,
+                            span: name.span,
+                        },
+                    ))
+                }
+                Some(NameResolution::Function(function)) => {
+                    let facts = self.typed.function_facts(function).ok_or_else(|| {
+                        error(name.span, "function value has no typed HIR function facts")
+                    })?;
+                    if !facts.type_parameters().is_empty() {
+                        return Err(error(
+                            name.span,
+                            "generic function reached MIR as a first-class value",
+                        ));
+                    }
+                    Ok((
+                        current,
+                        MirExpression::Function {
+                            function,
+                            span: name.span,
+                        },
+                    ))
+                }
+                Some(resolution) => Err(error(
+                    name.span,
+                    format!(
+                        "value `{}` resolved to `{resolution:?}` instead of a local or function",
+                        name.text
+                    ),
+                )),
+                None => Err(error(
+                    name.span,
+                    format!("value `{}` has no typed HIR resolution", name.text),
+                )),
+            },
+            Expression::Arrow {
+                closure,
+                parameters,
+                return_type: _,
+                body,
+                span,
+            } => self.lower_closure(*closure, parameters, body, *span, current),
             Expression::Unary {
                 operator,
                 expression,
@@ -1111,6 +1338,153 @@ impl FunctionLowerer<'_> {
         ))
     }
 
+    fn lower_closure(
+        &mut self,
+        closure: ClosureId,
+        parameters: &[Parameter],
+        body: &ArrowBody,
+        span: SourceSpan,
+        current: BasicBlockId,
+    ) -> Result<(BasicBlockId, MirExpression), MirLoweringError> {
+        if closure.owner() != self.function_id {
+            return Err(error(span, "closure identity has a foreign lexical owner"));
+        }
+        let facts = self
+            .typed
+            .closure_facts(closure)
+            .cloned()
+            .ok_or_else(|| error(span, "arrow expression has no typed HIR closure facts"))?;
+        self.validate_closure_facts(&facts, parameters, span)?;
+
+        let mut captures = Vec::with_capacity(facts.captures().len());
+        for capture in facts.captures() {
+            if capture.index() >= self.hir_local_count {
+                return Err(error(
+                    span,
+                    "closure capture is outside its owner local frame",
+                ));
+            }
+            captures.push(MirExpression::Local {
+                local: LocalId(capture.index()),
+                span,
+            });
+        }
+
+        let mut lowerer = FunctionLowerer {
+            typed: self.typed,
+            function_id: self.function_id,
+            parameters: facts
+                .parameter_ids()
+                .iter()
+                .map(|local| LocalId(local.index()))
+                .collect(),
+            type_parameters: self.type_parameters.clone(),
+            hir_local_count: self.hir_local_count,
+            next_local: self.hir_local_count,
+            blocks: Vec::new(),
+            loop_targets: Vec::new(),
+            closures: Vec::new(),
+        };
+        let entry = lowerer.new_block(body.span());
+        match body {
+            ArrowBody::Expression(expression) => {
+                let (end, value) = lowerer.lower_expression(expression, entry)?;
+                lowerer.terminate(
+                    end,
+                    MirTerminator::Return {
+                        value: Some(value),
+                        span: expression.span(),
+                    },
+                )?;
+            }
+            ArrowBody::Block(block) => {
+                if let Some(end) = lowerer.lower_block(block, Some(entry))? {
+                    if facts.return_type() != &Type::Unit {
+                        return Err(error(
+                            block.span,
+                            "non-Unit closure reached the end during MIR lowering",
+                        ));
+                    }
+                    lowerer.terminate(
+                        end,
+                        MirTerminator::Return {
+                            value: None,
+                            span: block.span,
+                        },
+                    )?;
+                }
+            }
+        }
+        let FinishedLowering {
+            parameters: closure_parameters,
+            local_count,
+            blocks,
+            closures: nested,
+        } = lowerer.finish()?;
+        self.closures.extend(nested);
+        self.closures.push(MirClosure {
+            id: closure,
+            captures: facts
+                .captures()
+                .iter()
+                .map(|local| LocalId(local.index()))
+                .collect(),
+            parameters: closure_parameters,
+            parameter_types: facts.parameter_types().to_vec(),
+            local_count,
+            return_type: facts.return_type().clone(),
+            entry,
+            blocks,
+            span,
+        });
+
+        self.materialize(
+            current,
+            MirExpression::Closure {
+                closure,
+                captures,
+                span,
+            },
+        )
+    }
+
+    fn validate_closure_facts(
+        &self,
+        facts: &ClosureFacts,
+        parameters: &[Parameter],
+        span: SourceSpan,
+    ) -> Result<(), MirLoweringError> {
+        if facts.parameter_ids().len() != parameters.len()
+            || facts.parameter_types().len() != parameters.len()
+        {
+            return Err(error(span, "closure has inconsistent typed HIR parameters"));
+        }
+        for (parameter, local) in parameters.iter().zip(facts.parameter_ids()) {
+            if self.typed.name_resolution(parameter.name.span)
+                != Some(NameResolution::Local(*local))
+            {
+                return Err(error(
+                    parameter.name.span,
+                    "closure parameter has no matching typed HIR local resolution",
+                ));
+            }
+        }
+        let expected = Type::Function {
+            parameters: facts.parameter_types().to_vec().into_boxed_slice(),
+            return_type: Box::new(facts.return_type().clone()),
+        };
+        if self.typed.expression_type(span) != Some(&expected) {
+            return Err(error(
+                span,
+                "closure signature does not match its typed HIR expression type",
+            ));
+        }
+        for ty in facts.parameter_types() {
+            self.validate_type(ty, span, "closure parameter")?;
+        }
+        self.validate_type(facts.return_type(), span, "closure result")
+    }
+
     fn lower_logical(
         &mut self,
         operator: BinaryOperator,
@@ -1196,70 +1570,119 @@ impl FunctionLowerer<'_> {
             );
         }
 
-        let Expression::Name(name) = callee else {
-            return Err(error(callee.span(), "non-name call reached MIR lowering"));
+        if let Expression::Member { object, member, .. } = callee {
+            let operation = match self.typed.name_resolution(member.span) {
+                Some(NameResolution::Builtin(Builtin::ArrayAppend)) => Some(ArrayIntrinsic::Append),
+                Some(NameResolution::Builtin(Builtin::ArrayConcat)) => Some(ArrayIntrinsic::Concat),
+                _ => None,
+            };
+            if let Some(operation) = operation {
+                return self
+                    .lower_array_intrinsic(object, member, arguments, operation, span, current);
+            }
+        }
+
+        if let Expression::Name(name) = callee {
+            let direct = match self.typed.name_resolution(name.span) {
+                Some(NameResolution::Function(resolved_function)) => {
+                    let call = self.typed.call_facts(span).ok_or_else(|| {
+                        error(
+                            span,
+                            "source function call has no typed HIR instantiation facts",
+                        )
+                    })?;
+                    if call.function() != resolved_function {
+                        return Err(error(
+                            span,
+                            "function call does not agree with its typed HIR name resolution",
+                        ));
+                    }
+                    self.validate_call_facts(call, arguments, span)?;
+                    Some(Callee::Function(call.function()))
+                }
+                Some(NameResolution::Builtin(Builtin::Print)) => {
+                    if self.typed.call_facts(span).is_some() {
+                        return Err(error(
+                            span,
+                            "print call unexpectedly has source function instantiation facts",
+                        ));
+                    }
+                    Some(Callee::Print)
+                }
+                Some(NameResolution::Builtin(Builtin::ToString)) => {
+                    if self.typed.call_facts(span).is_some() {
+                        return Err(error(
+                            span,
+                            "toString call unexpectedly has source function instantiation facts",
+                        ));
+                    }
+                    Some(Callee::ToString)
+                }
+                Some(NameResolution::Builtin(Builtin::ParseInt)) => {
+                    if self.typed.call_facts(span).is_some() {
+                        return Err(error(
+                            span,
+                            "parseInt call unexpectedly has source function instantiation facts",
+                        ));
+                    }
+                    Some(Callee::ParseInt)
+                }
+                _ => None,
+            };
+
+            if let Some(callee) = direct {
+                let mut lowered_arguments = Vec::with_capacity(arguments.len());
+                for argument in arguments {
+                    let (next, argument) = self.lower_expression(argument, current)?;
+                    current = next;
+                    lowered_arguments.push(argument);
+                }
+
+                return self.materialize(
+                    current,
+                    MirExpression::Call {
+                        callee,
+                        arguments: lowered_arguments,
+                        span,
+                    },
+                );
+            }
+        }
+
+        let callee_type = self
+            .typed
+            .expression_type(callee.span())
+            .ok_or_else(|| error(callee.span(), "indirect callee has no typed HIR type fact"))?;
+        let Type::Function {
+            parameters,
+            return_type: _,
+        } = callee_type
+        else {
+            return Err(error(
+                callee.span(),
+                "indirect callee does not have a typed HIR function type",
+            ));
         };
-        let callee = match self.typed.name_resolution(name.span) {
-            Some(NameResolution::Function(resolved_function)) => {
-                let call = self.typed.call_facts(span).ok_or_else(|| {
-                    error(
-                        span,
-                        "source function call has no typed HIR instantiation facts",
-                    )
-                })?;
-                if call.function() != resolved_function {
-                    return Err(error(
-                        span,
-                        "function call does not agree with its typed HIR name resolution",
-                    ));
-                }
-                self.validate_call_facts(call, arguments, span)?;
-                Callee::Function(call.function())
-            }
-            Some(NameResolution::Builtin(Builtin::Print)) => {
-                if self.typed.call_facts(span).is_some() {
-                    return Err(error(
-                        span,
-                        "print call unexpectedly has source function instantiation facts",
-                    ));
-                }
-                Callee::Print
-            }
-            Some(NameResolution::Local(_)) => {
+        if parameters.len() != arguments.len() {
+            return Err(error(
+                span,
+                "indirect call has inconsistent typed HIR argument count",
+            ));
+        }
+        for (index, (argument, expected)) in arguments.iter().zip(parameters).enumerate() {
+            let actual = self.expression_type(argument, "indirect call argument")?;
+            if actual != expected {
                 return Err(error(
-                    name.span,
-                    format!("local `{}` called as a function in MIR lowering", name.text),
-                ));
-            }
-            Some(
-                NameResolution::Record(_)
-                | NameResolution::Field(_)
-                | NameResolution::Union(_)
-                | NameResolution::Variant(_)
-                | NameResolution::Payload(_)
-                | NameResolution::TypeParameter(_),
-            ) => {
-                return Err(error(
-                    name.span,
+                    argument.span(),
                     format!(
-                        "non-callable name `{}` reached function-call lowering",
-                        name.text
+                        "indirect call argument {index} does not agree with its typed HIR function type"
                     ),
                 ));
             }
-            Some(NameResolution::Builtin(Builtin::ArrayLength)) => {
-                return Err(error(
-                    name.span,
-                    "array length builtin reached function-call lowering",
-                ));
-            }
-            None => {
-                return Err(error(
-                    name.span,
-                    format!("function `{}` has no typed HIR call resolution", name.text),
-                ));
-            }
-        };
+        }
+
+        let (next, callee) = self.lower_expression(callee, current)?;
+        current = next;
         let mut lowered_arguments = Vec::with_capacity(arguments.len());
         for argument in arguments {
             let (next, argument) = self.lower_expression(argument, current)?;
@@ -1269,9 +1692,84 @@ impl FunctionLowerer<'_> {
 
         self.materialize(
             current,
-            MirExpression::Call {
-                callee,
+            MirExpression::IndirectCall {
+                callee: Box::new(callee),
                 arguments: lowered_arguments,
+                span,
+            },
+        )
+    }
+
+    fn lower_array_intrinsic(
+        &mut self,
+        object: &Expression,
+        member: &Name,
+        arguments: &[Expression],
+        operation: ArrayIntrinsic,
+        span: SourceSpan,
+        current: BasicBlockId,
+    ) -> Result<(BasicBlockId, MirExpression), MirLoweringError> {
+        if arguments.len() != 1 {
+            return Err(error(
+                span,
+                "array intrinsic has inconsistent typed HIR argument count",
+            ));
+        }
+        if self.typed.call_facts(span).is_some() {
+            return Err(error(
+                span,
+                "array intrinsic unexpectedly has source function instantiation facts",
+            ));
+        }
+        let object_type = self.expression_type(object, "array intrinsic base")?;
+        let Type::Array(element) = object_type else {
+            return Err(error(
+                object.span(),
+                "array intrinsic base does not have an array type",
+            ));
+        };
+        let element_type = element.as_ref().clone();
+        let expected_argument = match operation {
+            ArrayIntrinsic::Append => &element_type,
+            ArrayIntrinsic::Concat => object_type,
+        };
+        let argument = arguments
+            .first()
+            .ok_or_else(|| error(span, "array intrinsic argument does not exist"))?;
+        if self.expression_type(argument, "array intrinsic argument")? != expected_argument {
+            return Err(error(
+                argument.span(),
+                "array intrinsic argument does not match its typed HIR base type",
+            ));
+        }
+        if self.typed.expression_type(span) != Some(object_type) {
+            return Err(error(
+                span,
+                "array intrinsic result does not match its typed HIR base type",
+            ));
+        }
+        let expected_resolution = match operation {
+            ArrayIntrinsic::Append => Builtin::ArrayAppend,
+            ArrayIntrinsic::Concat => Builtin::ArrayConcat,
+        };
+        if self.typed.name_resolution(member.span)
+            != Some(NameResolution::Builtin(expected_resolution))
+        {
+            return Err(error(
+                member.span,
+                "array intrinsic member has inconsistent typed HIR resolution",
+            ));
+        }
+
+        let (current, target) = self.lower_expression(object, current)?;
+        let (current, argument) = self.lower_expression(argument, current)?;
+        self.materialize(
+            current,
+            MirExpression::ArrayIntrinsic {
+                operation,
+                element_type,
+                target: Box::new(target),
+                argument: Box::new(argument),
                 span,
             },
         )
@@ -1456,6 +1954,15 @@ impl FunctionLowerer<'_> {
                 }
             }
             Type::Array(element) => self.validate_type(element, span, role),
+            Type::Function {
+                parameters,
+                return_type,
+            } => {
+                for parameter in parameters {
+                    self.validate_type(parameter, span, role)?;
+                }
+                self.validate_type(return_type, span, role)
+            }
             Type::Record {
                 definition,
                 arguments,
@@ -1663,11 +2170,12 @@ impl FunctionLowerer<'_> {
             })
     }
 
-    fn finish(self) -> Result<(Vec<LocalId>, usize, Vec<MirBasicBlock>), MirLoweringError> {
+    fn finish(self) -> Result<FinishedLowering, MirLoweringError> {
         let Self {
             parameters,
             next_local,
             blocks,
+            closures,
             ..
         } = self;
         let blocks = blocks
@@ -1684,7 +2192,12 @@ impl FunctionLowerer<'_> {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok((parameters, next_local, blocks))
+        Ok(FinishedLowering {
+            parameters,
+            local_count: next_local,
+            blocks,
+            closures,
+        })
     }
 }
 
@@ -1738,6 +2251,23 @@ fn instantiate_type(
         Type::Array(element) => Ok(Type::Array(Box::new(instantiate_type(
             element, parameters, arguments, span, role,
         )?))),
+        Type::Function {
+            parameters: function_parameters,
+            return_type,
+        } => Ok(Type::Function {
+            parameters: function_parameters
+                .iter()
+                .map(|parameter| instantiate_type(parameter, parameters, arguments, span, role))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_boxed_slice(),
+            return_type: Box::new(instantiate_type(
+                return_type,
+                parameters,
+                arguments,
+                span,
+                role,
+            )?),
+        }),
         Type::Record {
             definition,
             arguments: nested,
