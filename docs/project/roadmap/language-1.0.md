@@ -6,14 +6,13 @@ Deliver the [Nexa Language 1.0 Reference Core](../../spec/language-1.0.md): a
 statically checked, multi-file command-line language executed by the CFG MIR
 reference interpreter.
 
-Language Core v0.7 is fully delivered. It establishes bounded generic
-functions and nominal data, local type-argument inference, ordinary
-source-defined `Option`/`Result` unions, deterministic instance limits, and
-definition-level MIR erasure across module boundaries. Its normative contract
-and completed delivery record are the
-[v0.7 specification](../../spec/language-core-v0.7.md) and
-[v0.7 roadmap](language-core-v0.7.md). v0.8, function values and the practical
-core, is the active implementation milestone.
+Language Core v0.8 is fully delivered. It establishes exact function types,
+named function values, immutable lexical closures, deterministic array
+iteration, practical immutable-data intrinsics, and explicit conversion. Its
+normative contract and completed delivery record are the
+[v0.8 specification](../../spec/language-core-v0.8.md) and
+[v0.8 roadmap](language-core-v0.8.md). v0.9 stabilization is the active
+milestone and adds no language syntax.
 
 ## Delivery Milestones
 
@@ -63,7 +62,7 @@ core, is the active implementation milestone.
 - The complete [v0.7 delivery roadmap](language-core-v0.7.md) and verification
   gates are satisfied.
 
-### v0.8: Function Values And Practical Core (Active)
+### v0.8: Function Values And Practical Core (Delivered)
 
 - Add statically typed function types and indirect calls.
 - Add arrow-function expressions and immutable lexical captures.

@@ -1,0 +1,30 @@
+import { Batch, Result, apply, ok } from "./support.nexa";
+
+function read(result: Result<Int, String>): Int {
+  return match (result) {
+    case Result.Ok(value) => value;
+    case Result.Err(message) => 0;
+  };
+}
+
+function main(args: String[]): Unit {
+  const factor = 2;
+  const scale: (value: Int) => Int =
+    (value: Int): Int => {
+      return value * factor;
+    };
+  const invoke: (value: Int, transform: (value: Int) => Int) => Int = apply;
+  const input = parseInt(args[0]);
+  const batch: Batch<Int> = {
+    values: [input].append(1).concat([])
+  };
+  let total = 0;
+
+  for (const value of batch.values) {
+    total = total + invoke(value, scale);
+  }
+
+  const result = ok(total);
+  print(toString(read(result)));
+  print("Nexa🙂".length);
+}

@@ -265,6 +265,39 @@ fn nexac_check_and_run_execute_the_multi_file_generic_conformance_program(
 }
 
 #[test]
+fn nexac_check_and_run_execute_the_v0_8_multi_file_conformance_program(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let entry = fixture("accepted/practical_core/main.nexa");
+    let checked = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("check")
+        .arg(&entry)
+        .output()?;
+
+    assert!(
+        checked.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&checked.stdout), "ok\n");
+
+    let run = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("run")
+        .arg(entry)
+        .arg("--")
+        .arg("20")
+        .output()?;
+
+    assert!(
+        run.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n5\n");
+
+    Ok(())
+}
+
+#[test]
 fn nexac_check_and_run_preserve_one_generic_definition_across_a_diamond(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let entry = fixture("accepted/generic_diamond/main.nexa");
@@ -324,6 +357,130 @@ fn nexac_check_rejects_expanding_generic_recursion() -> Result<(), Box<dyn std::
         "rejected/expanding_generic_recursion.nexa",
         "E3010",
         ":3:17:",
+    )
+}
+
+#[test]
+fn nexac_check_renders_both_labels_for_a_mutable_closure_capture(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("check")
+        .arg(fixture("rejected/v08_mutable_capture.nexa"))
+        .output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert!(stderr.contains("E3011"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("v08_mutable_capture.nexa:3:38"),
+        "stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("v08_mutable_capture.nexa:2:7"),
+        "stderr: {stderr}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn nexac_check_renders_both_files_for_an_imported_generic_function_value(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("check")
+        .arg(fixture("rejected/v08_generic_value/main.nexa"))
+        .output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert!(stderr.contains("E3012"), "stderr: {stderr}");
+    assert!(stderr.contains("main.nexa:4:42"), "stderr: {stderr}");
+    assert!(stderr.contains("support.nexa:1:17"), "stderr: {stderr}");
+
+    Ok(())
+}
+
+#[test]
+fn nexac_check_renders_both_labels_for_a_local_generic_function_value(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("check")
+        .arg(fixture("rejected/v08_local_generic_value.nexa"))
+        .output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert!(stderr.contains("E3012"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("v08_local_generic_value.nexa:6:42"),
+        "stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("v08_local_generic_value.nexa:1:10"),
+        "stderr: {stderr}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn nexac_check_rejects_a_function_signature_mismatch_at_the_function_value(
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/v08_function_mismatch.nexa", "E3001", ":5:44:")
+}
+
+#[test]
+fn nexac_check_rejects_a_non_array_for_of_iterable_at_the_iterable(
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/v08_non_array_for.nexa", "E3001", ":2:23:")
+}
+
+#[test]
+fn nexac_check_renders_both_labels_for_assignment_to_a_for_of_binding(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("check")
+        .arg(fixture("rejected/v08_for_binding_assignment.nexa"))
+        .output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert!(stderr.contains("E2004"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("v08_for_binding_assignment.nexa:3:5"),
+        "stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("v08_for_binding_assignment.nexa:2:14"),
+        "stderr: {stderr}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn nexac_check_rejects_array_intrinsic_extraction_at_the_member_name(
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/v08_intrinsic_extraction.nexa", "E2005", ":3:25:")
+}
+
+#[test]
+fn nexac_check_rejects_array_intrinsic_arity_at_the_complete_call(
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at("rejected/v08_intrinsic_arity.nexa", "E2003", ":3:3:")
+}
+
+#[test]
+fn nexac_check_rejects_array_intrinsic_type_mismatch_at_the_argument(
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_check_rejects_at(
+        "rejected/v08_intrinsic_type_mismatch.nexa",
+        "E3001",
+        ":3:18:",
     )
 }
 
@@ -667,6 +824,28 @@ fn nexac_run_reports_array_bounds_and_preserves_output() -> Result<(), Box<dyn s
 }
 
 #[test]
+fn nexac_run_reports_malformed_parse_int_at_the_complete_call_and_preserves_output(
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_run_rejects_at(
+        "rejected/v08_parse_int_malformed.nexa",
+        "7\n",
+        "parseInt expected a complete ASCII decimal integer",
+        "v08_parse_int_malformed.nexa:3:17",
+    )
+}
+
+#[test]
+fn nexac_run_reports_parse_int_overflow_at_the_complete_call_and_preserves_output(
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_run_rejects_at(
+        "rejected/v08_parse_int_overflow.nexa",
+        "7\n",
+        "parseInt result is outside the Int range",
+        "v08_parse_int_overflow.nexa:3:17",
+    )
+}
+
+#[test]
 fn nexac_parse_prints_the_concrete_syntax_tree() -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
         .arg("parse")
@@ -873,6 +1052,27 @@ fn assert_check_rejects_with_location(
     if let Some(source_location) = source_location {
         assert!(stderr.contains(source_location), "stderr: {stderr}");
     }
+
+    Ok(())
+}
+
+fn assert_run_rejects_at(
+    fixture_path: &str,
+    expected_stdout: &str,
+    runtime_message: &str,
+    source_location: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("run")
+        .arg(fixture(fixture_path))
+        .output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let rendered_message = format!("runtime error: {runtime_message}");
+
+    assert!(!output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), expected_stdout);
+    assert!(stderr.contains(&rendered_message), "stderr: {stderr}");
+    assert!(stderr.contains(source_location), "stderr: {stderr}");
 
     Ok(())
 }

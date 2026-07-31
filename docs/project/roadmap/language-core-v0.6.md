@@ -5,8 +5,8 @@
 Language Core v0.6 is delivered. Its executable behavior is defined by the
 [v0.6 specification](../../spec/language-core-v0.6.md), and the compiler
 satisfies every exit criterion and verification gate below. v0.7 bounded
-generics and error values are now the active milestone in the
-[1.0 roadmap](language-1.0.md).
+generics and v0.8 practical-core function values have since been delivered;
+v0.9 stabilization is active in the [1.0 roadmap](language-1.0.md).
 
 ## Goal
 

@@ -3,12 +3,12 @@
 This directory records accepted language behavior and rejected alternatives.
 
 The current delivered core is
-[Language Core v0.7](language-core-v0.7.md). It extends
-[Language Core v0.6](language-core-v0.6.md) with bounded generic functions and
-nominal data, local type-argument inference, ordinary source-defined
-`Option`/`Result` unions, deterministic instance limits, and definition-level
-MIR erasure. Nexa remains a TypeScript-shaped language with its own native
-semantics, not a TypeScript implementation or compatibility layer.
+[Language Core v0.8](language-core-v0.8.md). It extends
+[Language Core v0.7](language-core-v0.7.md) with exact function types, named
+function values, immutable lexical closures, deterministic array iteration,
+practical immutable-data intrinsics, and explicit conversion. Nexa remains a
+TypeScript-shaped language with its own native semantics, not a TypeScript
+implementation or compatibility layer.
 
 The active target is the
 [Nexa Language 1.0 Reference Core](language-1.0.md). It adds nominal records,
@@ -17,11 +17,10 @@ generics, error values, and a practical immutable-data core through versioned
 milestones. The target document does not describe already-delivered behavior;
 each feature becomes normative only when its milestone is delivered.
 
-Language Core v0.7 is normative and delivered; its completed gates remain in
-the [v0.7 roadmap](../project/roadmap/language-core-v0.7.md). The active
-implementation milestone is v0.8, which targets typed function values,
-lexical closures, deterministic array iteration, and practical immutable-data
-operations under the broader
+Language Core v0.8 is normative and delivered; its completed gates remain in
+the [v0.8 roadmap](../project/roadmap/language-core-v0.8.md). The active
+implementation milestone is v0.9 stabilization, which freezes and hardens the
+delivered language without adding syntax under the broader
 [Nexa Language 1.0 roadmap](../project/roadmap/language-1.0.md).
 
 OXC and SWC are not part of the core language implementation. If TypeScript
@@ -34,4 +33,5 @@ v0.1 established the first checked and interpreted language slice, v0.2 added
 stateful CFG control flow, v0.3 added immutable strings and arrays, v0.4 added
 nominal records, v0.5 added tagged unions and matching, and v0.6 added
 multi-file modules. v0.7 added bounded generics and ordinary error values; v0.8
-is active and is not yet delivered.
+added function values, lexical closures, iteration, and practical immutable
+data operations.

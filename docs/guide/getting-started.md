@@ -28,25 +28,26 @@ cargo test --workspace
 ## Try the CLI
 
 ```bash
-cargo run -p nexac -- check examples/generic-modules/main.nexa
-cargo run -p nexac -- run examples/generic-modules/main.nexa
-cargo run -p nexac -- parse examples/generics.nexa
+cargo run -p nexac -- check examples/practical-core/main.nexa
+cargo run -p nexac -- run examples/practical-core/main.nexa -- 20
+cargo run -p nexac -- parse examples/practical-core/main.nexa
 ```
 
 `check` parses, resolves, and type-checks the program. `run` executes the
 checked module graph's entry-local `main` function through the MIR interpreter.
-The bundled generic two-module example prints:
+The bundled practical-core two-module example prints:
 
 ```text
 42
+5
 ```
 
-Language Core v0.7 adds bounded generic functions, records, and tagged unions;
-local type-argument inference; ordinary source-defined `Option<T>` and
-`Result<T, E>` values; and deterministic instance limits. It retains
-deterministic relative imports, private-by-default exports, cross-file
-diagnostics, immutable UTF-8 `String`, and homogeneous `T[]` values. A program
-may use either `main(): Unit` with no program arguments or
+Language Core v0.8 adds exact function values, typed arrow functions,
+immutable closure captures, array `for...of`, immutable `append`/`concat`,
+Unicode-scalar string length, and explicit integer/string conversion. It
+retains bounded generics, deterministic relative imports, private-by-default
+exports, cross-file diagnostics, immutable UTF-8 `String`, and homogeneous
+`T[]` values. A program may use either `main(): Unit` with no program arguments or
 `main(args: String[]): Unit` to receive arguments after a second `--`.
 
 Nexa adopts familiar TypeScript-shaped syntax, but it is not a TypeScript or

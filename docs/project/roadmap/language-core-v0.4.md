@@ -3,8 +3,8 @@
 ## Status
 
 Language Core v0.4 is delivered. The executable compiler satisfies every exit
-criterion below; v0.5 has since delivered tagged unions and matching, and v0.6
-is active in the [Nexa Language 1.0 roadmap](language-1.0.md).
+criterion below; v0.5 through v0.8 have since been delivered in the
+[Nexa Language 1.0 roadmap](language-1.0.md).
 
 ## Goal
 

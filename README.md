@@ -1,21 +1,20 @@
 # Nexa
 
-Nexa is a Rust bootstrap compiler workspace for Language Core v0.7: a
+Nexa is a Rust bootstrap compiler workspace for Language Core v0.8: a
 TypeScript-shaped language with independently specified native semantics.
 
-Language Core v0.7 is delivered. Development continues toward the
+Language Core v0.8 is delivered. Development continues toward the
 [Nexa Language 1.0 Reference Core](docs/spec/language-1.0.md): a statically
 checked, multi-file command-line language executed by the CFG MIR reference
 interpreter. The [1.0 roadmap](docs/project/roadmap/language-1.0.md) divides
 that work into independently testable language milestones.
 
 The current delivered specification is
-[Language Core v0.7](docs/spec/language-core-v0.7.md), which adds bounded
-generic functions and nominal data, local type-argument inference, ordinary
-source-defined `Option`/`Result` unions, and deterministic generic-instance
-limits. The active implementation milestone is v0.8: function values,
-closures, iteration, and practical immutable-data operations, tracked in the
-[1.0 roadmap](docs/project/roadmap/language-1.0.md).
+[Language Core v0.8](docs/spec/language-core-v0.8.md), which adds exact
+function types, named function values, lexical closures, array `for...of`,
+immutable `append`/`concat`, Unicode-scalar string length, and explicit integer
+and string conversion. The active v0.9 milestone freezes and hardens this
+surface without adding syntax.
 
 ## Layout
 
@@ -52,15 +51,16 @@ nexac -> nexa_source -> nexa_span
 
 ```bash
 cargo xtask check
-cargo run -p nexac -- check examples/generic-modules/main.nexa
-cargo run -p nexac -- run examples/generic-modules/main.nexa
-cargo run -p nexac -- parse examples/generics.nexa
+cargo run -p nexac -- check examples/practical-core/main.nexa
+cargo run -p nexac -- run examples/practical-core/main.nexa -- 20
+cargo run -p nexac -- parse examples/practical-core/main.nexa
 ```
 
-[Language Core v0.7](docs/spec/language-core-v0.7.md) builds on immutable UTF-8
+[Language Core v0.8](docs/spec/language-core-v0.8.md) builds on immutable UTF-8
 strings, homogeneous arrays, nominal records, tagged unions, exhaustive
-matching, and deterministic multi-file modules. It adds bounded generic
-functions, records, and unions while keeping type arguments out of the runtime.
+matching, deterministic multi-file modules, and bounded generics. Function
+values and closures lower through typed HIR and CFG MIR with stable identities
+and immutable capture snapshots rather than JavaScript runtime objects.
 Nexa intentionally borrows familiar TypeScript surface syntax without
 accepting TypeScript or JavaScript compatibility as a goal. A future TypeScript
 interop layer, if needed, belongs in an isolated adapter crate and must lower
@@ -68,6 +68,6 @@ into Nexa HIR without leaking a third-party AST or JavaScript runtime semantics
 into the core compiler.
 
 The 1.0 target deliberately excludes native AOT, UI, package management,
-exceptions, and full TypeScript compatibility. Statically typed function values
-and lexical closures are the active v0.8 milestone and must lower through HIR
-and MIR without importing JavaScript runtime semantics.
+exceptions, and full TypeScript compatibility. v0.9 adds conformance,
+determinism, recovery, fuzz-smoke, stress, and release-baseline coverage without
+expanding the delivered language syntax.

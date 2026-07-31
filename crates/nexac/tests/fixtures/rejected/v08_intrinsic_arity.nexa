@@ -1,0 +1,4 @@
+function main(): Unit {
+  const values = [1];
+  values.append();
+}

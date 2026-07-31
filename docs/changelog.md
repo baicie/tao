@@ -1,5 +1,23 @@
 # Changelog
 
+## Language Core v0.8 (Delivered)
+
+- Added exact function types, module-aware named function values, indirect
+  calls, typed arrow functions, and deterministic immutable closure captures.
+- Added array-only `for...of` with CFG lowering, nearest-loop control, and
+  per-iteration capture snapshots.
+- Added immutable array `append`/`concat`, Unicode-scalar `String.length`, and
+  explicit `toString`/`parseInt` conversion with fixed runtime failures.
+- Added stable `ClosureId` identities, closed-enum MIR call dispatch, shared
+  call-depth and step budgets, defensive runtime validation, and structured
+  failures for malformed programmatic MIR.
+- Added stable `E3011` and `E3012` diagnostics plus parser, semantic, MIR,
+  interpreter, and multi-file CLI coverage.
+
+The active implementation milestone is v0.9 stabilization. It freezes the 1.0
+surface and adds versioned conformance, recovery/fuzz smoke, determinism,
+stress, and release-baseline coverage without new syntax.
+
 ## Language Core v0.7 (Delivered)
 
 - Added bounded generic functions, nominal records, and tagged unions with
@@ -13,8 +31,7 @@
 - Added stable `E3008`, `E3009`, and `E3010` diagnostics, accepted/rejected
   conformance coverage, and executable single-file and multi-file examples.
 
-The active implementation milestone is v0.8: function values, lexical
-closures, `for...of`, and practical immutable-data operations.
+This milestone remains a supported predecessor of v0.8.
 
 ## Language Core v0.6 (Delivered)
 

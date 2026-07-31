@@ -2,11 +2,10 @@
 
 ## Status
 
-Language Core v0.7 is delivered and is the current executable language. Its
+Language Core v0.7 is delivered and remains a normative predecessor. Its
 implementation satisfies every exit criterion and verification gate in the
-[v0.7 roadmap](../project/roadmap/language-core-v0.7.md). Development continues
-with the v0.8 function-values and practical-core milestone in the
-[1.0 roadmap](../project/roadmap/language-1.0.md).
+[v0.7 roadmap](../project/roadmap/language-core-v0.7.md). The current executable
+language is [Language Core v0.8](language-core-v0.8.md).
 
 ## Product Contract
 
