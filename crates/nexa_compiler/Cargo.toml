@@ -2,6 +2,7 @@
 name = "nexa_compiler"
 description = "Compiler driver for the Nexa language front end."
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
