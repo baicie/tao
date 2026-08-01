@@ -1,0 +1,143 @@
+// Stable component contract fixture. It describes public descriptors only.
+
+descriptor ComponentError {
+  category: U32;
+  stable_code: U32;
+  safe_message: Optional<OwnedUtf8>;
+}
+
+descriptor AsyncPoll<T> {
+  state: Pending | Complete;
+  value: Optional<T>;
+}
+
+component field-console@1 {
+  profile application;
+  panic_strategy abort;
+  oom_strategy abort;
+  async_runtime_abi 1;
+  threading_model single-thread-with-owned-workers;
+
+  imports {
+    host filesystem@1;
+    host network@1;
+    host time@1;
+    host random@1;
+    host environment@1;
+    host process@1;
+    host ui@1;
+    host clipboard@1;
+    host camera@1;
+    host microphone@1;
+    host gpu@1;
+    host database@1;
+  }
+
+  capabilities {
+    filesystem scope ["offline-cache", "reports"];
+    network scope ["https://incidents.example.invalid"];
+    time scope ["monotonic", "timer"];
+    random scope ["correlation-id"];
+    environment scope ["FUTAO_SUPPORT_MODE"];
+    process scope ["field-support-v1"];
+    ui scope ["primary-window"];
+    clipboard scope ["write-text"];
+    camera scope ["still-image"];
+    microphone scope ["bounded-recording"];
+    gpu scope ["timeline-buffer"];
+    database scope ["field-cache"];
+  }
+
+  resource ApplicationContext;
+  resource AsyncRunOperation;
+
+  @id(0x100001)
+  function start(
+    context: take Handle<ApplicationContext>
+  ) -> Result<return_owned Handle<AsyncRunOperation>, ComponentError>;
+
+  @id(0x100002)
+  function poll(
+    operation: mut_borrow Handle<AsyncRunOperation>
+  ) -> Result<AsyncPoll<Unit>, ComponentError>;
+
+  @id(0x100003)
+  function cancel(
+    operation: mut_borrow Handle<AsyncRunOperation>
+  ) -> Result<Unit, ComponentError>;
+
+  @id(0x100004)
+  function close(
+    operation: take Handle<AsyncRunOperation>
+  ) -> Result<Unit, ComponentError>;
+}
+
+wasm adapter field-console-wasm@1 {
+  memory_model single-linear-memory;
+  maximum_memory_pages 1024;
+  shared_memory false;
+
+  descriptor MemoryView {
+    memory_id: U32;
+    offset: U64;
+    byte_length: U64;
+    element_type: AbiTypeId;
+    element_count: U64;
+    stride: U64;
+    alignment: U32;
+    access: Read | ReadWrite;
+    lifetime: Call | Owned;
+  }
+
+  rules {
+    validate offset_plus_length_before_access;
+    validate count_times_stride_before_access;
+    refresh_view_after_memory_grow;
+    copy_or_take_before_async_retention;
+    release_owned_output_with_declared_operation;
+  }
+}
+
+javascript adapter field-console-js@1 {
+  map Bool to boolean;
+  map U32 to checked_integer_number;
+  map U64 to bigint;
+  map Utf8 to string;
+  map Record to validated_frozen_own_properties;
+  map TaggedUnion to stable_tagged_object;
+  map Result to discriminated_result_object;
+  map Resource to generated_generation_checked_wrapper;
+
+  reject undefined;
+  reject implicit_null;
+  reject accessor_properties;
+  reject arbitrary_object;
+  reject raw_dom_node;
+  reject raw_javascript_function;
+
+  promise_is_adapter_only true;
+  abort_signal_maps_to cancellation_request;
+  finalizer_is_not_resource_cleanup true;
+}
+
+ui protocol field-console-ui@1 {
+  patch_operations [Create, SetProperty, Insert, Move, Remove, BindEvent];
+  event_delivery bounded_batch;
+  main_thread_affine [Window, UiRoot, UiEventStream];
+  validate_entire_patch_before_commit true;
+  raw_html false;
+  arbitrary_property_name false;
+  large_resources typed_handle_only;
+}
+
+distribution boundary {
+  expose stable_descriptors;
+  expose typed_resource_handles;
+  expose abi_and_capability_metadata;
+  forbid private_string_layout;
+  forbid private_vec_layout;
+  forbid async_frame_layout;
+  forbid MIR;
+  forbid NIR;
+  forbid LLVM_IR;
+}
