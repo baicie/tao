@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use nexa_compiler::{check_session, run_session_with_args, CompilerSession, RuntimeError};
+use nexa_compiler::{
+    check_session, compile_session, run_session_with_args, CompilerSession, RuntimeError,
+};
 use nexa_diagnostics::{Diagnostic, Severity};
 use nexa_parser::{parse_source, Parse};
 use nexa_source::SourceMap;
@@ -32,6 +34,11 @@ enum Command {
     /// Check a source file for front-end diagnostics.
     Check {
         /// Source file to check.
+        file: PathBuf,
+    },
+    /// Emit versioned canonical compiler-phase JSON for differential testing.
+    Dump {
+        /// Entry source whose reachable module graph will be dumped.
         file: PathBuf,
     },
     /// Check and execute a source file's `main` function.
@@ -77,6 +84,13 @@ fn main() -> Result<()> {
             }
 
             println!("ok");
+        }
+        Command::Dump { file } => {
+            let session = CompilerSession::build(FileSystemSourceProvider, &file)
+                .with_context(|| format!("failed to load {}", file.display()))?;
+            let output = compile_session(&session)?;
+
+            println!("{}", output.dumps().to_json()?);
         }
         Command::Run { file, arguments } => {
             let session = CompilerSession::build(FileSystemSourceProvider, &file)

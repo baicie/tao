@@ -313,6 +313,12 @@ impl MirClosure {
         &self.parameters
     }
 
+    /// Returns the number of capture, parameter, and local slots in the closure frame.
+    #[must_use]
+    pub const fn local_count(&self) -> usize {
+        self.local_count
+    }
+
     /// Returns parameter types in declaration order.
     #[must_use]
     pub fn parameter_types(&self) -> &[Type] {
@@ -361,6 +367,18 @@ impl MirFunction {
     #[must_use]
     pub fn parameter_count(&self) -> usize {
         self.parameters.len()
+    }
+
+    /// Returns parameter slots in declaration order.
+    #[must_use]
+    pub fn parameter_ids(&self) -> &[LocalId] {
+        &self.parameters
+    }
+
+    /// Returns the number of parameter and local slots in the function frame.
+    #[must_use]
+    pub const fn local_count(&self) -> usize {
+        self.local_count
     }
 
     /// Returns resolved parameter types in declaration order.

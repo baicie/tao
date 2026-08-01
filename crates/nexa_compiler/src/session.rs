@@ -617,10 +617,13 @@ fn import_path_is_valid(path: &str) -> bool {
     if remaining.is_empty() || remaining.iter().any(|component| component.is_empty()) {
         return false;
     }
-    remaining
-        .last()
-        .and_then(|component| component.strip_suffix(".nexa"))
-        .is_some_and(|stem| !stem.is_empty())
+    remaining.last().is_some_and(|component| {
+        [".ft", ".nexa"].iter().any(|extension| {
+            component
+                .strip_suffix(extension)
+                .is_some_and(|stem| !stem.is_empty())
+        })
+    })
 }
 
 fn invalid_path_diagnostic(import: &ImportSite) -> Diagnostic {
@@ -630,14 +633,14 @@ fn invalid_path_diagnostic(import: &ImportSite) -> Diagnostic {
     )
     .with_label(Label::primary(
         import.path_span,
-        "expected a relative path ending in `.nexa`",
+        "expected a relative path ending in `.ft` or `.nexa`",
     ))
 }
 
-fn import_failure_diagnostic(import: &ImportSite, error: &SourceLoadError) -> Diagnostic {
+fn import_failure_diagnostic(import: &ImportSite, _error: &SourceLoadError) -> Diagnostic {
     Diagnostic::error(
         IMPORT_SOURCE_ERROR,
-        format!("could not load import `{}`: {error}", import.specifier),
+        format!("could not load import `{}`", import.specifier),
     )
     .with_label(Label::primary(
         import.path_span,
@@ -741,6 +744,8 @@ mod tests {
     #[test]
     fn import_path_validation_accepts_the_portable_relative_matrix() {
         for path in [
+            "./a.ft",
+            "../a.ft",
             "./a.nexa",
             "../a.nexa",
             "../../a.nexa",
@@ -760,6 +765,7 @@ mod tests {
             "C:/a.nexa",
             "https://example.com/a.nexa",
             ".\\a.nexa",
+            "./a.FT",
             "./a.NEXA",
             "./a",
             "./",

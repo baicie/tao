@@ -26,13 +26,13 @@ cargo install --locked --path crates/nexac
 nexac --version
 ```
 
-The installed compiler reports version `0.0.2`. This pre-stable tool version
+The installed compiler reports version `0.0.3`. This pre-stable tool version
 implements the separately versioned Nexa Language 1.0 compatibility baseline.
 After the corresponding tag is published, install the same source revision
 without keeping a checkout:
 
 ```bash
-cargo install --locked --git https://github.com/baicie/nexa --tag v0.0.2 nexac
+cargo install --locked --git https://github.com/baicie/nexa --tag v0.0.3 nexac
 ```
 
 ## Test
@@ -47,6 +47,7 @@ cargo test --workspace
 nexac check examples/practical-core/main.nexa
 nexac run examples/practical-core/main.nexa -- 20
 nexac parse examples/practical-core/main.nexa
+nexac dump examples/futao-2-full-stack/baseline-1.0/main.ft
 ```
 
 `check` parses, resolves, and type-checks the program. `run` executes the

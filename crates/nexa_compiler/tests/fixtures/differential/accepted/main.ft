@@ -1,0 +1,5 @@
+import { answer } from "./support.ft";
+
+function main(): Unit {
+  print(answer());
+}
