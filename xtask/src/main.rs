@@ -258,7 +258,10 @@ fn release_check() -> Result<()> {
 
 fn run_canonical_dump_smoke(binary: &Path) -> Result<()> {
     let output = Command::new(binary)
-        .args(["dump", "examples/futao-2-full-stack/baseline-1.0/main.ft"])
+        .args([
+            "dump",
+            "crates/nexa_compiler/tests/fixtures/differential/accepted/main.ft",
+        ])
         .current_dir(workspace_root())
         .stdin(Stdio::null())
         .output()
@@ -269,19 +272,33 @@ fn run_canonical_dump_smoke(binary: &Path) -> Result<()> {
         String::from_utf8_lossy(&output.stderr)
     );
     ensure!(output.stderr.is_empty(), "canonical dump wrote stderr");
+    validate_canonical_dump(&output.stdout)
+}
+
+fn validate_canonical_dump(bytes: &[u8]) -> Result<()> {
     let dump: serde_json::Value =
-        serde_json::from_slice(&output.stdout).context("canonical dump was not valid JSON")?;
+        serde_json::from_slice(bytes).context("canonical dump was not valid JSON")?;
     ensure!(
         dump.get("schemaVersion")
             .and_then(serde_json::Value::as_u64)
             == Some(1),
         "canonical dump schemaVersion must be 1"
     );
+    let Some(artifacts) = dump.get("artifacts").and_then(serde_json::Value::as_array) else {
+        bail!("canonical dump artifacts must be an array");
+    };
     ensure!(
-        dump.get("artifacts")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|artifacts| artifacts.len() == 6),
+        artifacts.len() == 6,
         "canonical dump must contain all six compiler phases"
+    );
+    let nir_state = artifacts
+        .iter()
+        .find(|artifact| artifact.get("phase").and_then(serde_json::Value::as_str) == Some("nir"))
+        .and_then(|artifact| artifact.pointer("/artifact/state"))
+        .and_then(serde_json::Value::as_str);
+    ensure!(
+        nir_state == Some("produced"),
+        "canonical dump NIR phase must be produced"
     );
     Ok(())
 }
@@ -372,4 +389,37 @@ fn run_optional(cmd: &str, args: &[&str]) -> Result<()> {
     }
 
     run(cmd, args)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::validate_canonical_dump;
+
+    fn dump_with_nir_state(state: &str) -> Result<Vec<u8>, serde_json::Error> {
+        let phases = ["tokens", "cst", "diagnostics", "hir", "mir", "nir"];
+        serde_json::to_vec(&json!({
+            "schemaVersion": 1,
+            "artifacts": phases.map(|phase| json!({
+                "phase": phase,
+                "artifact": {"state": if phase == "nir" { state } else { "produced" }}
+            }))
+        }))
+    }
+
+    #[test]
+    fn release_dump_accepts_a_produced_nir_phase() -> Result<(), Box<dyn std::error::Error>> {
+        validate_canonical_dump(&dump_with_nir_state("produced")?)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn release_dump_rejects_a_deferred_nir_phase() -> Result<(), Box<dyn std::error::Error>> {
+        let error = validate_canonical_dump(&dump_with_nir_state("deferred")?).err();
+
+        assert!(matches!(error, Some(error) if error.to_string().contains("must be produced")));
+        Ok(())
+    }
 }
