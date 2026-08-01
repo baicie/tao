@@ -1,5 +1,6 @@
 //! Repository automation tasks for Nexa.
 
+mod bootstrap;
 mod conformance;
 
 use std::path::{Path, PathBuf};
@@ -41,6 +42,12 @@ enum Task {
     Perf,
     /// Run every required local Language 1.0 release-candidate gate.
     ReleaseCheck,
+    /// Validate the pinned Stage 0 and internal bootstrap artifact contract.
+    BootstrapContract {
+        /// Manifest to validate. Relative paths are resolved from the current directory.
+        #[arg(long, value_name = "PATH")]
+        manifest: Option<PathBuf>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -64,6 +71,10 @@ fn main() -> Result<()> {
         Task::FuzzSmoke => fuzz_smoke()?,
         Task::Perf => perf()?,
         Task::ReleaseCheck => release_check()?,
+        Task::BootstrapContract { manifest } => {
+            let manifest = manifest.unwrap_or_else(bootstrap::default_manifest_path);
+            bootstrap::run(&manifest)?;
+        }
     }
 
     Ok(())
@@ -73,7 +84,8 @@ fn check() -> Result<()> {
     run("cargo", &["fmt", "--all", "--", "--check"])?;
     lint()?;
     test()?;
-    doc()
+    doc()?;
+    bootstrap::run(&bootstrap::default_manifest_path())
 }
 
 fn lint() -> Result<()> {

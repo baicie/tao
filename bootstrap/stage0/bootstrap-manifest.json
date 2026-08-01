@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "toolchainVersion": "0.0.2",
+  "languageVersion": "1.0",
+  "stage0": {
+    "implementation": "rust",
+    "compiler": "nexac",
+    "compilerVersion": "0.0.1",
+    "source": {
+      "repository": "https://github.com/baicie/nexa",
+      "commit": "9293a7b59ff3b6625ca09091f7ad50234638981f",
+      "archiveDigest": "sha256:15ea2ee9205e327293353aa6ece756ef511c9425e740f89d5b62694ae571f492",
+      "cargoLockDigest": "sha256:4f68e587c3772126b16cba2d1ad1fcf56cd1ef653b6c33ba03d596ab0d7c9504"
+    },
+    "build": {
+      "rustVersion": "1.80.0",
+      "cargoLocked": true,
+      "profile": "release"
+    },
+    "distribution": "source-only"
+  },
+  "bootstrapOutput": {
+    "kind": "internal-nir",
+    "stability": "toolchain-internal",
+    "consumer": "rust-backend",
+    "comparison": "normalized-c2-c3",
+    "publicExtension": null,
+    "signatureEnvelopeIncluded": false
+  },
+  "stableComponent": {
+    "kind": "stable-component",
+    "extension": ".nexc",
+    "includesNir": false,
+    "separateLifecycle": true
+  }
+}
