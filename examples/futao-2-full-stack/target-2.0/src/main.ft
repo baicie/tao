@@ -1,0 +1,92 @@
+// Component entry point for the complete Futao 2.0 contract fixture.
+
+import { AppError, fromChannel, fromHost } from "./errors.ft";
+import { IncidentBatch, IncidentState, Severity } from "./model.ft";
+import { Platform, RandomHost } from "./platform.ft";
+import { runUi } from "./ui.ft";
+import {
+  EvidenceMessage,
+  SyncReport,
+  captureEvidence,
+  exportReport,
+  newEvidenceActor,
+  runSupportTool,
+  synchronize,
+} from "./workflows.ft";
+
+function correlationId(take random: RandomHost): Result<String, AppError> {
+  let bytes = Vec.withCapacity<U8>(16);
+  bytes.resize(16, 0);
+  fromHost(random.fill(bytes.asMutSlice()))?;
+  return Ok(Hex.encode(bytes.freeze()));
+}
+
+function seedBatch(take id: String): IncidentBatch {
+  return {
+    correlationId: id,
+    incidents: [{
+      id: { value: "INC-42" },
+      title: "Gateway unavailable",
+      severity: Severity.Critical,
+      state: IncidentState.Open,
+      evidence: [],
+    }],
+  };
+}
+
+@componentExport("field-console/run@1")
+export async function run(
+  take platform: Platform,
+): Result<Unit, AppError> {
+  const id = correlationId(platform.random)?;
+  const batch = seedBatch(id);
+  const uiBatch = batch.clone();
+  const deadline = fromHost(platform.time.after(30_000_000_000))?;
+  const evidenceChannel = Channel.bounded<EvidenceMessage>(64);
+  let actor = Actor.spawn(newEvidenceActor(), 64);
+  const auditSender = actor.sender();
+
+  const report = (await TaskScope.run(
+    async (mut scope): Result<SyncReport, AppError> => {
+      const syncTask = scope.spawn(synchronize(
+        platform.network,
+        platform.database,
+        batch,
+        deadline,
+      ));
+      const captureTask = scope.spawn(captureEvidence(
+        platform.camera,
+        platform.microphone,
+        evidenceChannel.sender,
+        auditSender,
+      ));
+      const supportTask = scope.spawn(runSupportTool(
+        platform.environment,
+        platform.process,
+      ));
+      const uiTask = scope.spawn(runUi(
+        platform.ui,
+        platform.clipboard,
+        platform.gpu,
+        uiBatch,
+        evidenceChannel.receiver,
+      ));
+
+      const syncReport = await syncTask?;
+      await captureTask?;
+      const supportExitCode = await supportTask?;
+      await uiTask?;
+      fromChannel(await actor.shutdown())?;
+
+      if (supportExitCode != 0) {
+        panic("trusted support tool violated its exit contract");
+      }
+
+      return Ok(syncReport);
+    },
+  ))?;
+
+  // Explicit close makes filesystem flush errors observable as AppError.
+  exportReport(platform.filesystem, report)?;
+  return Ok(Unit);
+}
