@@ -1,0 +1,78 @@
+type Result<T, E> =
+  | Ok(value: T)
+  | Err(error: E);
+
+type Severity =
+  | Critical()
+  | Warning()
+  | Info();
+
+type Incident = {
+  title: String;
+  severity: Severity;
+  acknowledged: Bool;
+};
+
+type Batch<T> = {
+  values: T[];
+};
+
+function severityScore(severity: Severity): Int {
+  return match (severity) {
+    case Severity.Critical() => 10;
+    case Severity.Warning() => 4;
+    case Severity.Info() => 1;
+  };
+}
+
+function activeScore(incident: Incident): Int {
+  if (incident.acknowledged) {
+    return 0;
+  }
+
+  return severityScore(incident.severity);
+}
+
+function readBatch(result: Result<Batch<Incident>, String>): Batch<Incident> {
+  return match (result) {
+    case Result.Ok(batch) => batch;
+    case Result.Err(message) => { values: [] };
+  };
+}
+
+function main(): Unit {
+  const multiplier = 2;
+  const adjust: (value: Int) => Int =
+    (value: Int): Int => {
+      return value * multiplier;
+    };
+  const loaded: Result<Batch<Incident>, String> = Result.Ok({
+    values: [
+      {
+        title: "Gateway unavailable",
+        severity: Severity.Critical(),
+        acknowledged: false
+      },
+      {
+        title: "Queue latency",
+        severity: Severity.Warning(),
+        acknowledged: true
+      },
+      {
+        title: "Field note",
+        severity: Severity.Info(),
+        acknowledged: false
+      }
+    ]
+  });
+  const batch = readBatch(loaded);
+  let total = 0;
+
+  for (const incident of batch.values) {
+    total = total + adjust(activeScore(incident));
+  }
+
+  print("Incident Field Console");
+  print(total);
+  print(batch.values.length);
+}
