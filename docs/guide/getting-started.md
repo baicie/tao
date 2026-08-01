@@ -19,6 +19,16 @@ cd nexa
 cargo build --workspace
 ```
 
+To install the self-use CLI from that checkout:
+
+```bash
+cargo install --locked --path crates/nexac
+nexac --version
+```
+
+The installed compiler reports version `0.0.1`. This pre-stable tool version
+implements the separately versioned Nexa Language 1.0 compatibility baseline.
+
 ## Test
 
 ```bash

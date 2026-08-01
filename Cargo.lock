@@ -130,7 +130,7 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
 name = "nexa_compiler"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "nexa_diagnostics",
  "nexa_hir",
@@ -144,14 +144,14 @@ dependencies = [
 
 [[package]]
 name = "nexa_diagnostics"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "nexa_span",
 ]
 
 [[package]]
 name = "nexa_hir"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "nexa_diagnostics",
  "nexa_parser",
@@ -161,7 +161,7 @@ dependencies = [
 
 [[package]]
 name = "nexa_mir"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "nexa_hir",
  "nexa_parser",
@@ -170,7 +170,7 @@ dependencies = [
 
 [[package]]
 name = "nexa_parser"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "nexa_diagnostics",
  "nexa_span",
@@ -180,7 +180,7 @@ dependencies = [
 
 [[package]]
 name = "nexa_source"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "nexa_span",
  "thiserror",
@@ -188,11 +188,11 @@ dependencies = [
 
 [[package]]
 name = "nexa_span"
-version = "0.1.0"
+version = "0.0.1"
 
 [[package]]
 name = "nexa_syntax"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "nexa_span",
  "rowan",
@@ -200,7 +200,7 @@ dependencies = [
 
 [[package]]
 name = "nexac"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -336,7 +336,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",
