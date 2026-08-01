@@ -47,6 +47,9 @@ enum Task {
         /// Manifest to validate. Relative paths are resolved from the current directory.
         #[arg(long, value_name = "PATH")]
         manifest: Option<PathBuf>,
+        /// Rebuild and smoke-test Stage 0 from the pinned source commit.
+        #[arg(long)]
+        rebuild_stage0: bool,
     },
 }
 
@@ -71,9 +74,12 @@ fn main() -> Result<()> {
         Task::FuzzSmoke => fuzz_smoke()?,
         Task::Perf => perf()?,
         Task::ReleaseCheck => release_check()?,
-        Task::BootstrapContract { manifest } => {
+        Task::BootstrapContract {
+            manifest,
+            rebuild_stage0,
+        } => {
             let manifest = manifest.unwrap_or_else(bootstrap::default_manifest_path);
-            bootstrap::run(&manifest)?;
+            bootstrap::run(&manifest, rebuild_stage0)?;
         }
     }
 
@@ -85,7 +91,7 @@ fn check() -> Result<()> {
     lint()?;
     test()?;
     doc()?;
-    bootstrap::run(&bootstrap::default_manifest_path())
+    bootstrap::run(&bootstrap::default_manifest_path(), false)
 }
 
 fn lint() -> Result<()> {
@@ -175,6 +181,7 @@ fn perf() -> Result<()> {
 
 fn release_check() -> Result<()> {
     check()?;
+    bootstrap::run(&bootstrap::default_manifest_path(), true)?;
     run(
         "cargo",
         &[

@@ -15,6 +15,7 @@ nexa_diagnostics.workspace = true
 nexa_source.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 
 [lints]
 workspace = true
