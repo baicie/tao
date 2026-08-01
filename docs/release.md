@@ -68,10 +68,10 @@ separate, explicitly authorized operation. The completed integration process,
 not the command by itself, declares Nexa Language 1.0 Reference Core delivered.
 
 The self-use compiler is versioned independently as `nexac 0.0.1`. After a
-release commit is merged to `main`, create and push the matching annotated tag:
+release commit is squash-merged to `mvp`, create and push the matching annotated tag:
 
 ```bash
-git switch main
+git switch mvp
 git pull --ff-only
 git tag -a v0.0.1 -m "nexac 0.0.1"
 git push origin v0.0.1
@@ -79,7 +79,7 @@ git push origin v0.0.1
 
 The [release workflow](https://github.com/baicie/nexa/actions/workflows/release.yml)
 rejects a tag that does not exactly match the Cargo package version or does not
-point to `main`. It then runs the complete release and security gates, builds
+point to `mvp`. It then runs the complete release and security gates, builds
 and smoke-tests Rust 1.80 binaries on Linux, macOS, and Windows, verifies the
 archives after extraction, attaches `.tar.gz` archives and SHA-256 files, and
 publishes the result as a GitHub prerelease. It does not publish any crate to

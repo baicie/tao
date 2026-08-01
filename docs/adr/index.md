@@ -19,6 +19,7 @@
 | [ADR-008](008-wasm-js-ffi-ui-host.md) | Accepted | Wasm memory descriptor、JavaScript adapter 与跨平台 UI Host |
 | [ADR-009](009-package-lockfile-artifacts-signing.md) | Accepted | Package、lockfile、稳定组件、签名、provenance 与可复现构建 |
 | [ADR-010](010-futao-language-name.md) | Accepted | Futao 正式名称、`.ft`、工具链标识与历史兼容迁移边界 |
+| [ADR-011](011-toolchain-versioning-and-self-hosting-gate.md) | Accepted | `0.0.x` 自举迭代、`0.1.0` 发布门槛与 `mvp` 合并治理 |
 
 ## Dependency Order
 
@@ -68,3 +69,8 @@ ADR-009 package, lockfile, component artifact, and signing
 
 ADR-010 是横跨上述阶段的命名决策，不改变 ADR-004 至 ADR-009 的技术依赖顺序。历史文档中的
 Nexa 标识保留用于追溯；新的 2.0 示例和后续规范使用 Futao 标识。
+
+ADR-011 定义自举工具链的发布门槛。ADR-004 至 ADR-009 是完整平台能力的依赖顺序，
+不是要求在 `0.1.0` 前一次交付的 release critical path；自举只实现其中被 Bootstrap
+Profile 实际依赖的最小子集。逐版本交付见
+[Futao 0.1.0 自举实施计划](../implementation/self-hosting-0.1.0.md)。
