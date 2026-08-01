@@ -27,7 +27,7 @@
   "bootstrapOutput": {
     "kind": "internal-nir",
     "stability": "toolchain-internal",
-    "consumer": "rust-backend",
+    "consumer": "rust-verifier-backend",
     "comparison": "normalized-c2-c3",
     "publicExtension": null,
     "signatureEnvelopeIncluded": false

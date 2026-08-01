@@ -182,7 +182,7 @@ impl BootstrapManifest {
         expect(
             "bootstrapOutput.consumer",
             &self.bootstrap_output.consumer,
-            "rust-backend",
+            "rust-verifier-backend",
         )?;
         expect(
             "bootstrapOutput.comparison",
@@ -321,7 +321,7 @@ fn rebuild_stage0(manifest: &BootstrapManifest, root: &Path) -> Result<()> {
         .current_dir(root);
     run_status(&mut add, "create Stage 0 worktree")?;
 
-    let build_result = build_and_smoke_stage0(manifest, root, &worktree);
+    let build_result = build_and_smoke_stage0(manifest, &worktree);
     let mut remove = Command::new("git");
     remove
         .arg("worktree")
@@ -335,14 +335,8 @@ fn rebuild_stage0(manifest: &BootstrapManifest, root: &Path) -> Result<()> {
     cleanup_result
 }
 
-fn build_and_smoke_stage0(
-    manifest: &BootstrapManifest,
-    root: &Path,
-    worktree: &Path,
-) -> Result<()> {
-    let target = root
-        .join("target/bootstrap")
-        .join(format!("stage0-{}", manifest.stage0.compiler_version));
+fn build_and_smoke_stage0(manifest: &BootstrapManifest, worktree: &Path) -> Result<()> {
+    let target = stage0_target_dir(worktree);
     let manifest_path = worktree.join("Cargo.toml");
     let mut build = Command::new("cargo");
     build
@@ -389,6 +383,10 @@ fn build_and_smoke_stage0(
     Ok(())
 }
 
+fn stage0_target_dir(worktree: &Path) -> PathBuf {
+    worktree.join("target")
+}
+
 fn run_status(command: &mut Command, description: &str) -> Result<()> {
     let status = command
         .stdin(Stdio::null())
@@ -414,7 +412,9 @@ fn valid_lower_hex(value: &str, length: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_manifest, verify_digest, verify_source, workspace_root};
+    use std::path::Path;
+
+    use super::{parse_manifest, stage0_target_dir, verify_digest, verify_source, workspace_root};
 
     const ACCEPTED: &str = include_str!("../../bootstrap/stage0/bootstrap-manifest.json");
     const PUBLIC_NIR: &str =
@@ -429,6 +429,7 @@ mod tests {
         assert_eq!(manifest.stage0.compiler_version, "0.0.1");
         assert_eq!(manifest.bootstrap_stdlib.version, None);
         assert_eq!(manifest.bootstrap_output.kind, "internal-nir");
+        assert_eq!(manifest.bootstrap_output.consumer, "rust-verifier-backend");
         assert_eq!(manifest.bootstrap_output.public_extension, None);
         assert!(!manifest.stable_component.includes_nir);
 
@@ -465,6 +466,13 @@ mod tests {
             matches!(error, Some(error) if error.to_string().contains("fixture digest mismatch"))
         );
         Ok(())
+    }
+
+    #[test]
+    fn stage0_rebuild_uses_a_fresh_target_inside_the_detached_worktree() {
+        let worktree = Path::new("detached-stage0");
+
+        assert_eq!(stage0_target_dir(worktree), worktree.join("target"));
     }
 
     #[test]
