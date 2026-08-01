@@ -245,6 +245,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexa_nir"
+version = "0.0.4"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "nexa_parser"
 version = "0.0.4"
 dependencies = [

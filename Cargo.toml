@@ -7,6 +7,7 @@ members = [
     "crates/nexa_parser",
     "crates/nexa_hir",
     "crates/nexa_mir",
+    "crates/nexa_nir",
     "crates/nexa_storage",
     "crates/nexa_compiler",
     "crates/nexac",
@@ -36,6 +37,7 @@ nexa_syntax = { path = "crates/nexa_syntax", version = "0.0.4" }
 nexa_parser = { path = "crates/nexa_parser", version = "0.0.4" }
 nexa_hir = { path = "crates/nexa_hir", version = "0.0.4" }
 nexa_mir = { path = "crates/nexa_mir", version = "0.0.4" }
+nexa_nir = { path = "crates/nexa_nir", version = "0.0.4" }
 nexa_storage = { path = "crates/nexa_storage", version = "0.0.4" }
 nexa_compiler = { path = "crates/nexa_compiler", version = "0.0.4" }
 
