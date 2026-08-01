@@ -1,0 +1,215 @@
+// Typed Host resources hide slots, generations, rights, and platform objects.
+
+import { HostError } from "./errors.ft";
+
+export type Deadline = {
+  monotonicNanos: U64;
+};
+
+export type HttpRequest = {
+  method: String;
+  url: String;
+  headers: Array<String>;
+  body: Array<U8>;
+};
+
+export type ProcessRequest = {
+  executableId: String;
+  arguments: Array<String>;
+};
+
+export type CaptureOptions = {
+  maximumBytes: U64;
+  contentType: String;
+};
+
+@derive(Copy)
+export type UiNodeId = {
+  value: U64;
+};
+
+@derive(Copy)
+export type EventHandlerId = {
+  value: U64;
+};
+
+export enum UiElement {
+  Column,
+  Heading,
+  Text,
+  Button,
+  Timeline,
+}
+
+export enum UiProperty {
+  TextContent,
+  Severity,
+  AccessibilityLabel,
+  GpuResource,
+}
+
+export class UiResourceRef {
+  private typedHandle: U64;
+}
+
+export enum UiPropertyValue {
+  Text(String),
+  Integer(I64),
+  Resource(UiResourceRef),
+}
+
+export enum UiEventType {
+  Click,
+  Submit,
+  KeyTransition,
+}
+
+export enum UiPatchOperation {
+  Create(UiNodeId, UiElement),
+  SetProperty(UiNodeId, UiProperty, UiPropertyValue),
+  Insert(UiNodeId, UiNodeId, U64),
+  Move(UiNodeId, UiNodeId, U64),
+  Remove(UiNodeId),
+  BindEvent(UiNodeId, UiEventType, EventHandlerId),
+}
+
+export type UiPatchBatch = {
+  sequence: U64;
+  schemaVersion: U32;
+  operations: Array<UiPatchOperation>;
+  resourceRefs: Array<UiResourceRef>;
+};
+
+export type UiEvent = {
+  handlerId: EventHandlerId;
+  eventType: UiEventType;
+  text: String?;
+};
+
+export type UiEventBatch = {
+  sequence: U64;
+  events: Array<UiEvent>;
+};
+
+export resource FileHandle {
+  function writeAll(mut self, bytes: Slice<U8>): Result<Unit, HostError>;
+  function closeIgnoringError(mut self): Unit;
+  function close(take self): Result<Unit, HostError>;
+}
+
+export resource HttpOperation {
+  async function response(take self): Result<Array<U8>, HostError>;
+  function cancel(mut self): Unit;
+  function close(take self): Result<Unit, HostError>;
+}
+
+export resource ProcessHandle {
+  async function wait(take self): Result<I32, HostError>;
+  function terminate(mut self): Result<Unit, HostError>;
+}
+
+export resource CaptureHandle {
+  async function finish(take self): Result<Array<U8>, HostError>;
+  function cancel(mut self): Unit;
+}
+
+export resource DatabaseConnection {
+  function execute(
+    mut self,
+    statementId: String,
+    parameters: Array<String>,
+  ): Result<U64, HostError>;
+
+  function closeIgnoringError(mut self): Unit;
+  function close(take self): Result<Unit, HostError>;
+}
+
+export resource WindowHandle {
+  function closeIgnoringError(mut self): Unit;
+  function close(take self): Result<Unit, HostError>;
+}
+
+export resource UiRootHandle {
+  function apply(take batch: UiPatchBatch): Result<Unit, HostError>;
+  function events(maximumBatch: U32): Result<UiEventStream, HostError>;
+  function closeIgnoringError(mut self): Unit;
+  function close(take self): Result<Unit, HostError>;
+}
+
+export resource UiEventStream {
+  async function next(mut self): Result<UiEventBatch?, HostError>;
+  function closeIgnoringError(mut self): Unit;
+  function close(take self): Result<Unit, HostError>;
+}
+
+export resource GpuBufferHandle {
+  function resourceRef(self): UiResourceRef;
+  function closeIgnoringError(mut self): Unit;
+  function close(take self): Result<Unit, HostError>;
+}
+
+export interface FilesystemHost {
+  function read(path: String): Result<Array<U8>, HostError>;
+  function create(path: String): Result<FileHandle, HostError>;
+}
+
+export interface NetworkHost {
+  function start(take request: HttpRequest): Result<HttpOperation, HostError>;
+}
+
+export interface TimeHost {
+  function now(): Result<Deadline, HostError>;
+  function after(durationNanos: U64): Result<Deadline, HostError>;
+}
+
+export interface RandomHost {
+  function fill(mut bytes: MutSlice<U8>): Result<Unit, HostError>;
+}
+
+export interface EnvironmentHost {
+  function read(name: String): Result<String?, HostError>;
+}
+
+export interface ProcessHost {
+  function spawn(take request: ProcessRequest): Result<ProcessHandle, HostError>;
+}
+
+export interface UiHost {
+  function openWindow(title: String): Result<WindowHandle, HostError>;
+  function attachRoot(window: WindowHandle): Result<UiRootHandle, HostError>;
+}
+
+export interface ClipboardHost {
+  function writeText(text: String): Result<Unit, HostError>;
+}
+
+export interface CameraHost {
+  function capture(options: CaptureOptions): Result<CaptureHandle, HostError>;
+}
+
+export interface MicrophoneHost {
+  function record(options: CaptureOptions): Result<CaptureHandle, HostError>;
+}
+
+export interface GpuHost {
+  function upload(bytes: Slice<U8>): Result<GpuBufferHandle, HostError>;
+}
+
+export interface DatabaseHost {
+  function open(name: String): Result<DatabaseConnection, HostError>;
+}
+
+export type Platform = {
+  filesystem: FilesystemHost;
+  network: NetworkHost;
+  time: TimeHost;
+  random: RandomHost;
+  environment: EnvironmentHost;
+  process: ProcessHost;
+  ui: UiHost;
+  clipboard: ClipboardHost;
+  camera: CameraHost;
+  microphone: MicrophoneHost;
+  gpu: GpuHost;
+  database: DatabaseHost;
+};

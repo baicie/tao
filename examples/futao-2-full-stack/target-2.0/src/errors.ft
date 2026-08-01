@@ -1,0 +1,65 @@
+// Recoverable failures remain values; panic is reserved for broken invariants.
+
+export enum HostErrorCategory {
+  Denied,
+  NotFound,
+  Unavailable,
+  InvalidInput,
+  BudgetExceeded,
+  Revoked,
+  Unknown,
+}
+
+export type HostError = {
+  category: HostErrorCategory;
+  stableCode: U32;
+  safeMessage: String?;
+};
+
+export enum AppError {
+  Host(HostError),
+  InvalidIncident(String),
+  DeadlineExceeded,
+  ChannelClosed,
+  ExplicitCloseFailed(HostError),
+}
+
+export function mapHostError(take error: HostError): AppError {
+  return AppError.Host(error);
+}
+
+export function fromHost<T>(
+  take result: Result<T, HostError>,
+): Result<T, AppError> {
+  return match (result) {
+    case Ok(value) => Ok(value);
+    case Err(error) => Err(AppError.Host(error));
+  };
+}
+
+export function fromChannel<T>(
+  take result: Result<T, ChannelError>,
+): Result<T, AppError> {
+  return match (result) {
+    case Ok(value) => Ok(value);
+    case Err(ChannelError.Closed) => Err(AppError.ChannelClosed);
+  };
+}
+
+export function requireTitle(title: String): Result<Unit, AppError> {
+  if (title.byteLength == 0) {
+    return Err(AppError.InvalidIncident("incident title is empty"));
+  }
+
+  return Ok(Unit);
+}
+
+export function reportRecoverable(error: AppError): String {
+  return match (error) {
+    case AppError.Host(host) => "host operation failed";
+    case AppError.InvalidIncident(message) => message.clone();
+    case AppError.DeadlineExceeded => "operation deadline exceeded";
+    case AppError.ChannelClosed => "workflow channel closed";
+    case AppError.ExplicitCloseFailed(host) => "resource close failed";
+  };
+}

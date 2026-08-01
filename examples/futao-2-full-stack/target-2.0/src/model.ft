@@ -1,0 +1,97 @@
+// Futao 2.0 contract fixture. This file is not executable by nexac 0.0.1.
+
+export enum Severity {
+  Critical,
+  Warning,
+  Info,
+}
+
+export enum IncidentState {
+  Open,
+  Acknowledged,
+  Resolved,
+}
+
+export enum EvidenceKind {
+  Photo,
+  Audio,
+  OperatorNote,
+}
+
+export type IncidentId = {
+  value: String;
+};
+
+export type EvidenceSummary = {
+  kind: EvidenceKind;
+  contentType: String;
+  byteLength: U64;
+};
+
+export type Incident = {
+  id: IncidentId;
+  title: String;
+  severity: Severity;
+  state: IncidentState;
+  evidence: Array<EvidenceSummary>;
+};
+
+export type IncidentBatch = {
+  correlationId: String;
+  incidents: Array<Incident>;
+};
+
+export class IncidentDraft {
+  private id: IncidentId;
+  private title: String;
+  private severity: Severity;
+  private evidence: Vec<EvidenceSummary>;
+
+  public function addEvidence(
+    mut self,
+    take summary: EvidenceSummary,
+  ): Unit {
+    self.evidence.push(summary);
+  }
+
+  public function finish(take self): Incident {
+    return {
+      id: self.id,
+      title: self.title,
+      severity: self.severity,
+      state: IncidentState.Open,
+      evidence: self.evidence.freeze(),
+    };
+  }
+}
+
+export function severityScore(severity: Severity): I32 {
+  return match (severity) {
+    case Severity.Critical => 10;
+    case Severity.Warning => 4;
+    case Severity.Info => 1;
+  };
+}
+
+export function acknowledge(mut incident: Incident): Unit {
+  incident.state = IncidentState.Acknowledged;
+}
+
+export function appendForUpload(
+  mut queue: Vec<Incident>,
+  take incident: Incident,
+): Unit {
+  queue.push(incident);
+}
+
+export function totalActiveScore(incidents: Array<Incident>): I32 {
+  let total = 0;
+
+  for (const incident of incidents) {
+    if (incident.state == IncidentState.Open) {
+      total = total + severityScore(incident.severity);
+    }
+  }
+
+  return total;
+}
