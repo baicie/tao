@@ -1,6 +1,9 @@
 #![forbid(unsafe_code)]
 //! Compiler-driver entry points for the Nexa language front end.
 
+mod canonical;
+mod core;
+mod differential;
 mod session;
 
 use std::collections::{HashMap, HashSet};
@@ -14,7 +17,18 @@ use nexa_mir::{lower as lower_mir, run_with_args as run_mir_with_args, Execution
 use nexa_parser::parse_source;
 use nexa_span::FileId;
 
-pub use nexa_mir::RuntimeError;
+pub use core::{
+    compile, compile_session, CanonicalArtifact, CanonicalArtifactState, CanonicalArtifactStatus,
+    CanonicalDiagnostic, CanonicalDumps, CanonicalLabel, CanonicalLabelStyle, CanonicalPhase,
+    CanonicalSeverity, CompileError, CompilerInput, CompilerOptions, CompilerOutput,
+    CompilerSource, LanguageVersion, CANONICAL_DUMP_SCHEMA_VERSION,
+};
+pub use differential::{
+    CompilerAdapter, CompilerAdapterState, CompilerImplementation, DifferenceClassification,
+    DifferentialHarness, DifferentialIssue, DifferentialIssueKind, DifferentialOutcome,
+    DifferentialReport, RustReferenceCompiler,
+};
+pub use nexa_mir::{MirProgram, RuntimeError};
 pub use session::{CompilerSession, ImportEdge, SessionBuildError, SessionModule};
 
 /// The result of checking one Nexa source file.

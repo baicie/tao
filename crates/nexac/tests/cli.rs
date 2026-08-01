@@ -37,6 +37,74 @@ fn nexac_check_accepts_a_language_core_program() -> Result<(), Box<dyn std::erro
 }
 
 #[test]
+fn nexac_check_and_run_accept_the_futao_source_entry() -> Result<(), Box<dyn std::error::Error>> {
+    let entry = workspace_file("examples/futao-2-full-stack/baseline-1.0/main.ft");
+    let checked = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("check")
+        .arg(&entry)
+        .output()?;
+    assert!(
+        checked.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+
+    let run = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("run")
+        .arg(entry)
+        .output()?;
+    assert!(
+        run.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        include_str!("../../../examples/futao-2-full-stack/baseline-1.0/expected.stdout")
+    );
+
+    Ok(())
+}
+
+#[test]
+fn canonical_dump_is_identical_across_host_process_state() -> Result<(), Box<dyn std::error::Error>>
+{
+    let entry = workspace_file("examples/futao-2-full-stack/baseline-1.0/main.ft");
+    let first = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("dump")
+        .arg(&entry)
+        .current_dir(workspace_file("examples"))
+        .env("LANG", "C")
+        .env("LC_ALL", "C")
+        .env("TZ", "UTC")
+        .output()?;
+    let second = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("dump")
+        .arg(&entry)
+        .current_dir(workspace_file("crates"))
+        .env("LANG", "zh_CN.UTF-8")
+        .env("LC_ALL", "zh_CN.UTF-8")
+        .env("TZ", "Asia/Shanghai")
+        .env("NEXA_UNRELATED_HASH_SEED", "different")
+        .output()?;
+
+    assert!(
+        first.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(
+        second.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    assert_eq!(first.stdout, second.stdout);
+    assert!(!String::from_utf8_lossy(&first.stdout).contains(&entry.display().to_string()));
+
+    Ok(())
+}
+
+#[test]
 fn nexac_check_accepts_stateful_control_flow() -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
         .arg("check")
@@ -1033,6 +1101,12 @@ fn fixture(path: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
+        .join(path)
+}
+
+fn workspace_file(path: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
         .join(path)
 }
 

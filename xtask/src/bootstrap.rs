@@ -109,7 +109,11 @@ fn parse_manifest(text: &str) -> Result<BootstrapManifest> {
 impl BootstrapManifest {
     fn validate(&self) -> Result<()> {
         ensure!(self.schema_version == 1, "schemaVersion must be 1");
-        expect("toolchainVersion", &self.toolchain_version, "0.0.2")?;
+        expect(
+            "toolchainVersion",
+            &self.toolchain_version,
+            env!("CARGO_PKG_VERSION"),
+        )?;
         expect("languageVersion", &self.language_version, "1.0")?;
 
         expect("stage0.implementation", &self.stage0.implementation, "rust")?;

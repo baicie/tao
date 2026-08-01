@@ -19,7 +19,7 @@ and the completed integration evidence is retained in the
 
 The language compatibility version and compiler package version are separate.
 The complete Language 1.0 reference core currently ships as the self-use
-`nexac 0.0.2`; Rust crate APIs and distribution remain intentionally unstable.
+`nexac 0.0.3`; Rust crate APIs and distribution remain intentionally unstable.
 
 ## Layout
 
@@ -62,7 +62,12 @@ cargo xtask bootstrap-contract
 cargo run -p nexac -- check examples/practical-core/main.nexa
 cargo run -p nexac -- run examples/practical-core/main.nexa -- 20
 cargo run -p nexac -- parse examples/practical-core/main.nexa
+cargo run -p nexac -- dump examples/futao-2-full-stack/baseline-1.0/main.ft
 ```
+
+The `0.0.3` explicit compiler input and canonical differential schema is
+documented in
+[docs/implementation/differential-0.0.3.md](docs/implementation/differential-0.0.3.md).
 
 Install the self-use CLI from a local checkout with:
 
@@ -75,11 +80,11 @@ Version tags publish checked Linux, macOS, and Windows archives with SHA-256
 files through [GitHub Releases](https://github.com/baicie/nexa/releases). The
 compiler remains a prerelease and is not published to crates.io.
 
-After `v0.0.2` is published, the same version can be installed reproducibly
+After `v0.0.3` is published, the same version can be installed reproducibly
 from its tag:
 
 ```bash
-cargo install --locked --git https://github.com/baicie/nexa --tag v0.0.2 nexac
+cargo install --locked --git https://github.com/baicie/nexa --tag v0.0.3 nexac
 ```
 
 Nexa intentionally borrows familiar TypeScript surface syntax without

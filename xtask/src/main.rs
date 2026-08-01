@@ -6,7 +6,7 @@ mod conformance;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
@@ -214,7 +214,38 @@ fn release_check() -> Result<()> {
         &["run", "examples/practical-core/main.nexa", "--", "20"],
         "42\n5\n",
     )?;
+    run_canonical_dump_smoke(&binary)?;
     run(pnpm_program(), &["--dir", "docs", "build"])
+}
+
+fn run_canonical_dump_smoke(binary: &Path) -> Result<()> {
+    let output = Command::new(binary)
+        .args(["dump", "examples/futao-2-full-stack/baseline-1.0/main.ft"])
+        .current_dir(workspace_root())
+        .stdin(Stdio::null())
+        .output()
+        .with_context(|| format!("failed to run {} dump", binary.display()))?;
+    ensure!(
+        output.status.success(),
+        "canonical dump smoke failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    ensure!(output.stderr.is_empty(), "canonical dump wrote stderr");
+    let dump: serde_json::Value =
+        serde_json::from_slice(&output.stdout).context("canonical dump was not valid JSON")?;
+    ensure!(
+        dump.get("schemaVersion")
+            .and_then(serde_json::Value::as_u64)
+            == Some(1),
+        "canonical dump schemaVersion must be 1"
+    );
+    ensure!(
+        dump.get("artifacts")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|artifacts| artifacts.len() == 6),
+        "canonical dump must contain all six compiler phases"
+    );
+    Ok(())
 }
 
 const fn pnpm_program() -> &'static str {

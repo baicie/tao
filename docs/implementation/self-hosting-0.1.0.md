@@ -11,7 +11,7 @@ Accepted 状态解释为对应实现已经存在。
 
 ## 当前基线
 
-* 工具链版本：`0.0.2`。
+* 工具链版本：`0.0.3`。
 * Stage 0：固定为 `nexac 0.0.1` Rust 实现，覆盖 Lexer、Parser、Resolver、Type Checker、HIR、CFG MIR、
   reference interpreter、诊断、conformance 与 release gate。
 * 语言名称：新设计和源码使用 Futao / `.ft`；现有 Nexa / `.nexa` 输入在迁移策略
@@ -19,7 +19,8 @@ Accepted 状态解释为对应实现已经存在。
 * 默认分支：`mvp`。
 * 已接受架构：ADR-000 至 ADR-011。
 * `0.0.2` 已收敛产物边界：自举输出是内部 NIR，公共 stable component 仍由 ADR-009 定义为 `.nexc`。
-* 下一里程碑：`0.0.3` Futao 源码入口、纯 compiler core 与 differential 基础设施。
+* `0.0.3` 已建立 Futao 源码入口、纯 compiler core 与 differential 基础设施。
+* 下一里程碑：`0.0.4` 自举 ownership/storage kernel。
 
 ## 关键依赖
 
@@ -91,6 +92,16 @@ source archive/Cargo.lock SHA-256、Rust 1.80 与 locked release recipe；
 
 验收：同输入重复执行产出相同 dump；路径、locale、hash iteration 不改变结果；失败
 fixture 具有稳定 diagnostic code 与 span。
+
+交付状态：已实现。`CompilerInput` 只接受显式 UTF-8 逻辑 source identity 和源码集合，
+拒绝 Host 路径、重复 source 与缺失 entry；`CompilerOutput` 返回稳定 source ordinal、结构化
+diagnostic、typed HIR、完整 CFG MIR 以及 token/CST/diagnostic/HIR/MIR/NIR 六阶段状态。
+`.ft` 和历史 `.nexa` 均可作为 entry/import，混合图作为迁移期兼容合同保留。
+`nexac dump` 输出 schema version 1 canonical JSON；输入顺序、逻辑根目录、进程工作目录、
+locale、时区与 Rust `HashMap` 随机种子不进入比较结果。当前 Rust reference adapter 可执行，
+Futao adapter 明确报告 unavailable；NIR 明确报告计划于 `0.0.5` 提供，不存在占位 crate
+或伪产物。详细 schema 与分类规则见
+[`differential-0.0.3.md`](differential-0.0.3.md)。
 
 ### `0.0.4`：只交付自举需要的运行时子集
 

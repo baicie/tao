@@ -531,9 +531,10 @@ target-independent feature/profile inputs
 normalized Stage output digest
 ```
 
-当前 `0.0.2` manifest 固定 `nexac 0.0.1` source commit、source archive SHA-256、
+`0.0.2` 建立的 manifest contract 固定 `nexac 0.0.1` source commit、source archive SHA-256、
 `Cargo.lock` SHA-256、Rust 1.80 和 locked release recipe。由于 `v0.0.1` 尚无 tag 或
 GitHub Release，distribution 明确记录为 `source-only`，不得伪造 binary provenance。
+顶层 `toolchainVersion` 随后续 `0.0.x` 里程碑推进；上述 Stage 0 字段保持冻结。
 
 ### 9.3 确定性与规范化
 
@@ -1129,7 +1130,7 @@ checksums.txt
 }
 ```
 
-`0.0.2` 的完整 checked-in schema 见
+`0.0.2` 起使用的完整 checked-in schema 见
 [`bootstrap/stage0/bootstrap-manifest.json`](https://github.com/baicie/nexa/blob/mvp/bootstrap/stage0/bootstrap-manifest.json)。
 Stage 1/2/3 出现后，manifest 扩展各 Stage 的 normalized NIR digest、verifier/backend
 identity 和 reproducibility result；不会把签名时间混入 Stage 比较。

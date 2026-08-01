@@ -179,6 +179,12 @@ impl TypedProgram {
         self.functions.iter().find(|facts| facts.id == function)
     }
 
+    /// Returns resolved function signatures and local-slot facts in stable source order.
+    #[must_use]
+    pub fn functions(&self) -> &[FunctionFacts] {
+        &self.functions
+    }
+
     /// Returns semantic facts for one stable arrow-function site.
     #[must_use]
     pub fn closure_facts(&self, closure: ClosureId) -> Option<&ClosureFacts> {
@@ -221,16 +227,35 @@ impl TypedProgram {
         self.variant_constructions.get(&span)
     }
 
+    /// Iterates over all resolved tagged-union constructor calls.
+    pub fn variant_constructions(
+        &self,
+    ) -> impl Iterator<Item = (SourceSpan, &VariantConstructionFacts)> {
+        self.variant_constructions
+            .iter()
+            .map(|(span, facts)| (*span, facts))
+    }
+
     /// Returns the resolved generic instantiation selected by a function call.
     #[must_use]
     pub fn call_facts(&self, span: SourceSpan) -> Option<&CallFacts> {
         self.calls.get(&span)
     }
 
+    /// Iterates over all resolved direct function calls.
+    pub fn calls(&self) -> impl Iterator<Item = (SourceSpan, &CallFacts)> {
+        self.calls.iter().map(|(span, facts)| (*span, facts))
+    }
+
     /// Returns resolved control-flow and binding facts for a match expression.
     #[must_use]
     pub fn match_facts(&self, span: SourceSpan) -> Option<&MatchFacts> {
         self.matches.get(&span)
+    }
+
+    /// Iterates over all resolved tagged-union match expressions.
+    pub fn matches(&self) -> impl Iterator<Item = (SourceSpan, &MatchFacts)> {
+        self.matches.iter().map(|(span, facts)| (*span, facts))
     }
 }
 
@@ -421,6 +446,12 @@ impl RecordFacts {
         &self.fields
     }
 
+    /// Returns the declared record-name token range.
+    #[must_use]
+    pub const fn name_span(&self) -> SourceSpan {
+        self.name_span
+    }
+
     /// Returns the record declaration's source range.
     #[must_use]
     pub const fn span(&self) -> SourceSpan {
@@ -474,6 +505,12 @@ impl UnionFacts {
         &self.variants
     }
 
+    /// Returns the declared union-name token range.
+    #[must_use]
+    pub const fn name_span(&self) -> SourceSpan {
+        self.name_span
+    }
+
     /// Returns the union declaration's source range.
     #[must_use]
     pub const fn span(&self) -> SourceSpan {
@@ -508,6 +545,12 @@ impl VariantFacts {
     #[must_use]
     pub fn payloads(&self) -> &[PayloadFacts] {
         &self.payloads
+    }
+
+    /// Returns the declared variant-name token range.
+    #[must_use]
+    pub const fn name_span(&self) -> SourceSpan {
+        self.name_span
     }
 
     /// Returns the variant declaration's source range.
@@ -550,6 +593,12 @@ impl PayloadFacts {
     #[must_use]
     pub const fn span(&self) -> SourceSpan {
         self.span
+    }
+
+    /// Returns the payload type-syntax range.
+    #[must_use]
+    pub const fn type_span(&self) -> SourceSpan {
+        self.type_span
     }
 }
 
@@ -716,6 +765,12 @@ impl RecordFieldFacts {
     #[must_use]
     pub const fn span(&self) -> SourceSpan {
         self.span
+    }
+
+    /// Returns the field type-syntax range.
+    #[must_use]
+    pub const fn type_span(&self) -> SourceSpan {
+        self.type_span
     }
 }
 

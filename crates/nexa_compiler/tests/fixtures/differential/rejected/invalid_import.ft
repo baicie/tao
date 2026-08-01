@@ -1,0 +1,5 @@
+import { answer } from "./support.ts";
+
+function main(): Unit {
+  print(answer());
+}

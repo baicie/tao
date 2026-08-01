@@ -1,5 +1,17 @@
 # Changelog
 
+## Compiler Package 0.0.3 (Differential Foundation)
+
+- Added `.ft` entry and import support without removing historical `.nexa`
+  fixtures; mixed graphs are retained as the explicit migration contract.
+- Added the explicit in-memory compiler core boundary and versioned canonical
+  phase dumps for tokens, CST, diagnostic structure, typed HIR, and full MIR.
+- Recorded NIR and the Futao compiler adapter as unavailable instead of
+  creating placeholder implementations, and made unclassified differences
+  fail closed in the differential harness.
+- Added `nexac dump` for reproducible cross-process comparison and deterministic
+  accepted/rejected corpus coverage.
+
 ## Compiler Package 0.0.2 (Bootstrap Contract)
 
 - Accepted ADR-000 after aligning self-hosting with the private NIR and stable
