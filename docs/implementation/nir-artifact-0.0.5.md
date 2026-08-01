@@ -46,7 +46,8 @@ deterministic order. It rejects:
 
 - duplicate, sparse, or otherwise invalid canonical identities;
 - missing types, functions, blocks, terminators, or SSA values;
-- use before definition and incompatible edge/block arguments;
+- invalid source ranges, entry-block parameters or predecessors, use before
+  definition, and incompatible edge/block arguments;
 - result-shape, call-signature, intrinsic-signature, branch, and return type
   mismatches;
 - copy of owned values, move/drop of non-owned values, reuse after consumption,
@@ -63,7 +64,8 @@ both must pass through the same boundary.
 stack alignment, and endianness as explicit inputs. It never derives them from
 the machine running the compiler. `TargetLayout` accepts 32-bit and
 64-bit pointer widths and checks every alignment, padding, stride, and size
-calculation.
+calculation. Deserialization routes through the same checked constructor, so
+artifact or Host data cannot bypass those invariants.
 
 Scalar, pointer/borrow/handle/function-reference, struct, and fixed-array
 layouts are supported. Unknown types, invalid alignment, by-value recursive

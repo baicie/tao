@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
 use crate::{NirType, TypeId, VerifiedModule};
@@ -94,7 +94,7 @@ impl ValueLayout {
 }
 
 /// Explicit target data layout used only after target-neutral NIR verification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TargetLayout {
     pointer_width: u16,
@@ -102,6 +102,33 @@ pub struct TargetLayout {
     aggregate_alignment: u64,
     stack_alignment: u64,
     endianness: Endianness,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TargetLayoutFields {
+    pointer_width: u16,
+    pointer_alignment: u64,
+    aggregate_alignment: u64,
+    stack_alignment: u64,
+    endianness: Endianness,
+}
+
+impl<'de> Deserialize<'de> for TargetLayout {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let fields = TargetLayoutFields::deserialize(deserializer)?;
+        Self::new(
+            fields.pointer_width,
+            fields.pointer_alignment,
+            fields.aggregate_alignment,
+            fields.stack_alignment,
+            fields.endianness,
+        )
+        .map_err(serde::de::Error::custom)
+    }
 }
 
 impl TargetLayout {

@@ -101,6 +101,143 @@ fn builder_rejects_duplicate_ids() {
 }
 
 #[test]
+fn builder_rejects_invalid_handle_kinds() {
+    let mut module = minimal_module();
+
+    let error = module
+        .define_type(
+            TypeId::new(5),
+            NirType::Handle {
+                handle_kind: "../host-file".to_owned(),
+                ownership: nexa_nir::ValueOwnership::Owned,
+            },
+        )
+        .expect_err("handle registry identities must be portable");
+
+    assert_eq!(error.code(), "E5000");
+}
+
+#[test]
+fn verifier_rejects_invalid_module_identifiers() {
+    let module = mutate(&returning_integer(), |value| {
+        value["moduleId"] = serde_json::json!("../escape");
+    });
+
+    let error =
+        Verifier::verify(module).expect_err("builder checks must be independently enforced");
+
+    assert_eq!(error.code(), VerificationCode::InvalidIdentity);
+}
+
+#[test]
+fn verifier_rejects_invalid_deserialized_handle_kinds() {
+    let mut module = ModuleBuilder::new("handle-module").expect("module identity is valid");
+    module
+        .define_type(
+            TypeId::new(0),
+            NirType::Handle {
+                handle_kind: "host-file".to_owned(),
+                ownership: nexa_nir::ValueOwnership::Owned,
+            },
+        )
+        .expect("handle kind is valid");
+    let module = mutate(&module.finish(), |value| {
+        value["types"][0]["ty"]["handle_kind"] = serde_json::json!("../host-file");
+    });
+
+    let error =
+        Verifier::verify(module).expect_err("artifact handles must be independently checked");
+
+    assert_eq!(error.code(), VerificationCode::InvalidIdentity);
+}
+
+#[test]
+fn verifier_rejects_reversed_source_spans() {
+    let module = mutate(&returning_integer(), |value| {
+        value["functions"][0]["blocks"][0]["instructions"][0]["span"] = serde_json::json!({
+            "source": 0,
+            "start": 7,
+            "end": 3
+        });
+    });
+
+    let error = Verifier::verify(module).expect_err("source spans must be half-open ranges");
+
+    assert_eq!(error.code(), VerificationCode::InvalidInstruction);
+}
+
+#[test]
+fn verifier_rejects_entry_block_parameters() {
+    let mut module = minimal_module();
+    module
+        .define_function(MAIN, "main", [], I64, ENTRY)
+        .expect("function definition is valid");
+    module
+        .define_block(MAIN, ENTRY, [TypedValue::new(ValueId::new(0), I64)])
+        .expect("entry block is unique");
+    module
+        .set_terminator(
+            MAIN,
+            ENTRY,
+            Terminator::Return {
+                value: Some(ValueId::new(0)),
+            },
+            SPAN,
+        )
+        .expect("terminator is unique");
+
+    let error = Verifier::verify(module.finish())
+        .expect_err("entry block parameters have no predecessor to define them");
+
+    assert_eq!(error.code(), VerificationCode::InvalidIdentity);
+}
+
+#[test]
+fn verifier_rejects_control_flow_back_to_the_entry_block() {
+    let mut module = minimal_module();
+    module
+        .define_function(
+            MAIN,
+            "main",
+            [TypedValue::new(ValueId::new(0), OWNED_I64)],
+            UNIT,
+            ENTRY,
+        )
+        .expect("function definition is valid");
+    module
+        .define_block(MAIN, ENTRY, [])
+        .expect("entry block is unique");
+    module
+        .append_instruction(
+            MAIN,
+            ENTRY,
+            InstructionId::new(0),
+            None,
+            Operation::Drop {
+                value: ValueId::new(0),
+            },
+            SPAN,
+        )
+        .expect("instruction is valid");
+    module
+        .set_terminator(
+            MAIN,
+            ENTRY,
+            Terminator::Goto {
+                target: ENTRY,
+                arguments: vec![],
+            },
+            SPAN,
+        )
+        .expect("terminator is unique");
+
+    let error = Verifier::verify(module.finish())
+        .expect_err("the function entry cannot reactivate consumed parameters");
+
+    assert_eq!(error.code(), VerificationCode::InvalidIdentity);
+}
+
+#[test]
 fn verifier_rejects_unknown_type_ids() {
     let module = mutate(&returning_integer(), |value| {
         value["functions"][0]["returnType"] = serde_json::json!(99);

@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use thiserror::Error;
 
+use crate::builder::validate_identifier;
 use crate::model::{
     BasicBlock, BlockId, Function, FunctionId, IntrinsicId, NirType, Operation, Terminator, TypeId,
     TypedValue, UnverifiedModule, ValueId, ValueOwnership,
@@ -102,6 +103,7 @@ impl Verifier {
     ///
     /// Returns the first invariant violation in deterministic canonical order.
     pub fn verify(mut module: UnverifiedModule) -> Result<VerifiedModule, VerificationError> {
+        verify_identifier(&module.module_id, "module")?;
         module.types.sort_by_key(|definition| definition.id);
         module.functions.sort_by_key(|function| function.id);
         verify_dense_ids(
@@ -119,6 +121,9 @@ impl Verifier {
             .map(|definition| (definition.id, &definition.ty))
             .collect::<BTreeMap<_, _>>();
         for definition in &module.types {
+            if let NirType::Handle { handle_kind, .. } = &definition.ty {
+                verify_identifier(handle_kind, "handle kind")?;
+            }
             for referenced in definition.ty.referenced_types() {
                 require_type(&types, referenced, "type definition")?;
             }
@@ -126,6 +131,7 @@ impl Verifier {
 
         let mut function_names = BTreeSet::new();
         for function in &module.functions {
+            verify_identifier(&function.name, "function")?;
             if !function_names.insert(function.name.as_str()) {
                 return fail(
                     VerificationCode::InvalidIdentity,
@@ -185,6 +191,34 @@ fn verify_function(
             ),
         );
     }
+    if blocks
+        .get(&function.entry)
+        .is_some_and(|parameters| !parameters.is_empty())
+    {
+        return fail(
+            VerificationCode::InvalidIdentity,
+            format!(
+                "function {} entry block {} must not declare block parameters",
+                function.id.index(),
+                function.entry.index()
+            ),
+        );
+    }
+    for block in &function.blocks {
+        if block.terminator.as_ref().is_some_and(|terminator| {
+            terminator_targets_entry(&terminator.terminator, function.entry)
+        }) {
+            return fail(
+                VerificationCode::InvalidIdentity,
+                format!(
+                    "block {} targets function {} entry block {}",
+                    block.id.index(),
+                    function.id.index(),
+                    function.entry.index()
+                ),
+            );
+        }
+    }
 
     let mut all_values = BTreeMap::new();
     for parameter in &function.parameters {
@@ -238,6 +272,10 @@ fn verify_block(
     }
 
     for instruction in &block.instructions {
+        verify_span(
+            instruction.span,
+            &format!("instruction {}", instruction.id.index()),
+        )?;
         verify_operation(
             instruction,
             types,
@@ -255,6 +293,10 @@ fn verify_block(
         code: VerificationCode::MissingTerminator,
         message: format!("block {} has no terminator", block.id.index()),
     })?;
+    verify_span(
+        terminator.span,
+        &format!("block {} terminator", block.id.index()),
+    )?;
     verify_terminator(
         &terminator.terminator,
         function.return_type,
@@ -264,6 +306,18 @@ fn verify_block(
         &visible,
         &active_owned,
     )
+}
+
+const fn terminator_targets_entry(terminator: &Terminator, entry: BlockId) -> bool {
+    match terminator {
+        Terminator::Goto { target, .. } => target.index() == entry.index(),
+        Terminator::Branch {
+            then_target,
+            else_target,
+            ..
+        } => then_target.index() == entry.index() || else_target.index() == entry.index(),
+        Terminator::Return { .. } | Terminator::Unreachable => false,
+    }
 }
 
 fn verify_operation(
@@ -651,6 +705,27 @@ fn require_type<'a>(
         code: VerificationCode::UnknownType,
         message: format!("{context} references unknown type {}", id.index()),
     })
+}
+
+fn verify_identifier(identifier: &str, kind: &str) -> Result<(), VerificationError> {
+    validate_identifier(identifier).map_err(|_| VerificationError {
+        code: VerificationCode::InvalidIdentity,
+        message: format!("{kind} identifier `{identifier}` is invalid"),
+    })
+}
+
+fn verify_span(span: crate::NirSpan, context: &str) -> Result<(), VerificationError> {
+    if span.start() > span.end() {
+        return fail(
+            VerificationCode::InvalidInstruction,
+            format!(
+                "{context} has reversed source span {}..{}",
+                span.start(),
+                span.end()
+            ),
+        );
+    }
+    Ok(())
 }
 
 fn verify_dense_ids(

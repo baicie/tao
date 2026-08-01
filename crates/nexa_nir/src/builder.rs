@@ -5,6 +5,9 @@ use crate::model::{
     Operation, SpannedTerminator, Terminator, TypeDefinition, TypeId, TypedValue, UnverifiedModule,
 };
 
+/// Maximum canonical byte length of a portable NIR identifier.
+pub const MAX_NIR_IDENTIFIER_BYTES: usize = 255;
+
 /// A structural NIR construction failure.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum BuilderError {
@@ -89,6 +92,9 @@ impl ModuleBuilder {
             .any(|definition| definition.id == id)
         {
             return Err(duplicate("type", id.index()));
+        }
+        if let NirType::Handle { handle_kind, .. } = &ty {
+            validate_identifier(handle_kind)?;
         }
         self.module.types.push(TypeDefinition { id, ty });
         Ok(())
@@ -246,9 +252,9 @@ fn duplicate(kind: &'static str, id: u32) -> BuilderError {
     BuilderError::DuplicateId { kind, id }
 }
 
-fn validate_identifier(identifier: &str) -> Result<(), BuilderError> {
+pub(crate) fn validate_identifier(identifier: &str) -> Result<(), BuilderError> {
     let valid = !identifier.is_empty()
-        && identifier.len() <= 255
+        && identifier.len() <= MAX_NIR_IDENTIFIER_BYTES
         && identifier.bytes().all(|byte| {
             byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b':' | b'/')
         })
