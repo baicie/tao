@@ -1,0 +1,7 @@
+type Pair = | Both(left: Int, right: Int);
+function read(pair: Pair): Int {
+  return match (pair) {
+    case Pair.Both(left) => left;
+  };
+}
+function main(): Unit {}

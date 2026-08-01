@@ -1,4 +1,4 @@
-.PHONY: check fmt lint test doc security
+.PHONY: check fmt lint test doc conformance fuzz-smoke perf release-check security
 
 check:
 	cargo xtask check
@@ -14,6 +14,18 @@ test:
 
 doc:
 	cargo xtask doc
+
+conformance:
+	cargo xtask conformance
+
+fuzz-smoke:
+	cargo xtask fuzz-smoke
+
+perf:
+	cargo xtask perf
+
+release-check:
+	cargo xtask release-check
 
 security:
 	cargo xtask security

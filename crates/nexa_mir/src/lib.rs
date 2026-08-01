@@ -9,9 +9,13 @@ mod execute;
 mod lower;
 mod mir;
 
-pub use execute::{run, Execution, RuntimeError, RuntimeFailure, Value};
+pub use execute::{
+    run, run_with_args, CallableValue, Execution, RuntimeError, RuntimeFailure, Value,
+};
 pub use lower::{lower, MirLoweringError};
 pub use mir::{
-    BasicBlockId, Callee, FunctionId, LocalId, MirBasicBlock, MirExpression, MirFunction,
-    MirProgram, MirStatement, MirTerminator,
+    ArrayIntrinsic, BasicBlockId, Callee, LocalId, MirBasicBlock, MirClosure, MirExpression,
+    MirFunction, MirPayload, MirProgram, MirRecord, MirRecordField, MirStatement, MirTerminator,
+    MirUnion, MirVariant,
 };
+pub use nexa_hir::{ClosureId, FunctionId, ModuleId};

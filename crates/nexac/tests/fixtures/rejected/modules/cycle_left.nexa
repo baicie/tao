@@ -1,0 +1,3 @@
+import { right } from "./cycle_right.nexa";
+export function left(): Int { return right(); }
+function main(): Unit {}

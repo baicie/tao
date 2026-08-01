@@ -7,8 +7,17 @@ cargo xtask check
 cargo xtask fmt
 cargo xtask lint
 cargo xtask test
+cargo xtask conformance
+cargo xtask fuzz-smoke
+cargo xtask perf
+cargo xtask release-check
 cargo xtask security
 ```
+
+`cargo xtask release-check` validates the Language 1.0 compatibility baseline
+without publishing, tagging, pushing, or deploying. See
+[Language 1.0 Release Validation](release.md)
+for the complete gate and toolchain boundary.
 
 ## Adding a Crate
 

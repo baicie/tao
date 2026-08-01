@@ -1,0 +1,20 @@
+function main(): Unit {
+  let value = 0;
+  let total = 0;
+
+  while (value < 8) {
+    value = value + 1;
+
+    if (value === 2) {
+      continue;
+    }
+
+    if (value === 6) {
+      break;
+    }
+
+    total = total + value;
+  }
+
+  print(total);
+}

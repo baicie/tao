@@ -1,0 +1,6 @@
+function increment(value: Int): Int {
+  return value + 1;
+}
+function main(): Unit {
+  const operation: (value: Bool) => Bool = increment;
+}

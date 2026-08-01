@@ -1,0 +1,6 @@
+function main(): Unit {
+  const values = [1, 2, 3];
+  for (const value of values) {
+    print(value);
+  }
+}

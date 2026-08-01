@@ -1,0 +1,5 @@
+import { identity } from "./support.nexa";
+
+function main(): Unit {
+  const operation: (value: Int) => Int = identity;
+}

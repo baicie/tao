@@ -1,0 +1,4 @@
+type User = { name: String; };
+function main(): Unit {
+  const user: User = { name: "Ada", age: 42 };
+}

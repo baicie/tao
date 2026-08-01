@@ -1,0 +1,5 @@
+import { Box, box, identity } from "./core.nexa";
+
+export function right(): Box<String> {
+  return box(identity("nexa"));
+}

@@ -1,0 +1,5 @@
+type Phantom<T> = {
+  value: Int;
+};
+
+function main(): Unit {}

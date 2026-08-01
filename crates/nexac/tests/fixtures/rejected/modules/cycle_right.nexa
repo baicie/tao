@@ -1,0 +1,2 @@
+import { left } from "./cycle_left.nexa";
+export function right(): Int { return left(); }

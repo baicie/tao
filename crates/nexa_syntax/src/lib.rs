@@ -135,6 +135,92 @@ pub enum SyntaxKind {
     ArgumentList = 62,
     /// Tokens skipped during parser recovery.
     Error = 63,
+    /// A quoted string literal token with its original escape spelling.
+    String = 64,
+    /// The `String` type keyword.
+    StringKw = 65,
+    /// `[`.
+    LBracket = 66,
+    /// `]`
+    RBracket = 67,
+    /// `.`
+    Dot = 68,
+    /// A string literal expression.
+    StringLiteral = 69,
+    /// An array type such as `Int[]`.
+    ArrayType = 70,
+    /// An array literal expression.
+    ArrayExpression = 71,
+    /// An indexed access expression.
+    IndexExpression = 72,
+    /// A named member access expression.
+    MemberExpression = 73,
+    /// The `type` keyword.
+    TypeKw = 74,
+    /// A top-level named record declaration.
+    RecordDeclaration = 75,
+    /// The braced body of a named record declaration.
+    RecordBody = 76,
+    /// One named and typed record field declaration.
+    RecordFieldDeclaration = 77,
+    /// A record literal expression.
+    RecordExpression = 78,
+    /// One named field initializer in a record literal.
+    RecordFieldInitializer = 79,
+    /// The `match` keyword.
+    MatchKw = 80,
+    /// The `case` keyword.
+    CaseKw = 81,
+    /// The `default` keyword.
+    DefaultKw = 82,
+    /// `|`
+    Pipe = 83,
+    /// `=>`
+    FatArrow = 84,
+    /// A top-level tagged union declaration.
+    UnionDeclaration = 85,
+    /// One constructor variant in a tagged union declaration.
+    UnionVariant = 86,
+    /// The named fields carried by a union variant.
+    VariantPayload = 87,
+    /// A value-producing exhaustive branch expression.
+    MatchExpression = 88,
+    /// One `case` or `default` branch in a match expression.
+    MatchArm = 89,
+    /// A qualified union variant pattern.
+    VariantPattern = 90,
+    /// The bindings introduced by a union variant pattern.
+    PatternBindingList = 91,
+    /// The `import` keyword.
+    ImportKw = 92,
+    /// The `export` keyword.
+    ExportKw = 93,
+    /// The `from` keyword.
+    FromKw = 94,
+    /// A top-level named import declaration.
+    ImportDeclaration = 95,
+    /// The comma-separated names in an import declaration.
+    ImportList = 96,
+    /// An exported top-level function, record, or union declaration.
+    ExportedDeclaration = 97,
+    /// The declared type parameters on a generic declaration.
+    TypeParameterList = 98,
+    /// One declared generic type parameter.
+    TypeParameter = 99,
+    /// The type arguments applied to a named type reference.
+    TypeArgumentList = 100,
+    /// The `for` keyword.
+    ForKw = 101,
+    /// A callable type such as `(value: Int) => Int`.
+    FunctionType = 102,
+    /// An arrow function expression.
+    ArrowExpression = 103,
+    /// The expression or block body of an arrow function.
+    ArrowBody = 104,
+    /// An iteration over an array value.
+    ForStatement = 105,
+    /// The immutable binding introduced by a `for...of` statement.
+    ForBinding = 106,
 }
 
 impl SyntaxKind {
@@ -210,6 +296,49 @@ impl SyntaxKind {
             61 => Self::ParenthesizedExpression,
             62 => Self::ArgumentList,
             63 => Self::Error,
+            64 => Self::String,
+            65 => Self::StringKw,
+            66 => Self::LBracket,
+            67 => Self::RBracket,
+            68 => Self::Dot,
+            69 => Self::StringLiteral,
+            70 => Self::ArrayType,
+            71 => Self::ArrayExpression,
+            72 => Self::IndexExpression,
+            73 => Self::MemberExpression,
+            74 => Self::TypeKw,
+            75 => Self::RecordDeclaration,
+            76 => Self::RecordBody,
+            77 => Self::RecordFieldDeclaration,
+            78 => Self::RecordExpression,
+            79 => Self::RecordFieldInitializer,
+            80 => Self::MatchKw,
+            81 => Self::CaseKw,
+            82 => Self::DefaultKw,
+            83 => Self::Pipe,
+            84 => Self::FatArrow,
+            85 => Self::UnionDeclaration,
+            86 => Self::UnionVariant,
+            87 => Self::VariantPayload,
+            88 => Self::MatchExpression,
+            89 => Self::MatchArm,
+            90 => Self::VariantPattern,
+            91 => Self::PatternBindingList,
+            92 => Self::ImportKw,
+            93 => Self::ExportKw,
+            94 => Self::FromKw,
+            95 => Self::ImportDeclaration,
+            96 => Self::ImportList,
+            97 => Self::ExportedDeclaration,
+            98 => Self::TypeParameterList,
+            99 => Self::TypeParameter,
+            100 => Self::TypeArgumentList,
+            101 => Self::ForKw,
+            102 => Self::FunctionType,
+            103 => Self::ArrowExpression,
+            104 => Self::ArrowBody,
+            105 => Self::ForStatement,
+            106 => Self::ForBinding,
             _ => unreachable!("invalid Nexa syntax kind: {raw}"),
         }
     }
@@ -306,6 +435,7 @@ pub fn tokenize(source: &str) -> Vec<Token> {
                 consume_while(&mut chars, |next| next.is_ascii_digit());
                 SyntaxKind::Int
             }
+            '"' => consume_string(&mut chars),
             '/' if matches!(chars.peek(), Some((_, '/'))) => {
                 let _ = chars.next();
                 consume_while(&mut chars, |next| next != '\n');
@@ -314,13 +444,15 @@ pub fn tokenize(source: &str) -> Vec<Token> {
             '=' => consume_equals(&mut chars),
             '!' => consume_bang(&mut chars),
             '&' => consume_required_pair(&mut chars, '&', SyntaxKind::AmpAmp),
-            '|' => consume_required_pair(&mut chars, '|', SyntaxKind::PipePipe),
+            '|' => consume_optional_pair(&mut chars, '|', SyntaxKind::Pipe, SyntaxKind::PipePipe),
             '<' => consume_optional_equals(&mut chars, SyntaxKind::Lt, SyntaxKind::LtEq),
             '>' => consume_optional_equals(&mut chars, SyntaxKind::Gt, SyntaxKind::GtEq),
             '(' => SyntaxKind::LParen,
             ')' => SyntaxKind::RParen,
             '{' => SyntaxKind::LBrace,
             '}' => SyntaxKind::RBrace,
+            '[' => SyntaxKind::LBracket,
+            ']' => SyntaxKind::RBracket,
             ',' => SyntaxKind::Comma,
             ';' => SyntaxKind::Semicolon,
             ':' => SyntaxKind::Colon,
@@ -328,6 +460,7 @@ pub fn tokenize(source: &str) -> Vec<Token> {
             '-' => SyntaxKind::Minus,
             '*' => SyntaxKind::Star,
             '/' => SyntaxKind::Slash,
+            '.' => SyntaxKind::Dot,
             _ => SyntaxKind::Unknown,
         };
 
@@ -354,17 +487,66 @@ fn keyword_kind(kind: SyntaxKind, text: &str) -> SyntaxKind {
         "while" => SyntaxKind::WhileKw,
         "break" => SyntaxKind::BreakKw,
         "continue" => SyntaxKind::ContinueKw,
+        "for" => SyntaxKind::ForKw,
         "return" => SyntaxKind::ReturnKw,
         "true" => SyntaxKind::TrueKw,
         "false" => SyntaxKind::FalseKw,
         "Int" => SyntaxKind::IntKw,
         "Bool" => SyntaxKind::BoolKw,
+        "String" => SyntaxKind::StringKw,
         "Unit" => SyntaxKind::UnitKw,
+        "type" => SyntaxKind::TypeKw,
+        "match" => SyntaxKind::MatchKw,
+        "case" => SyntaxKind::CaseKw,
+        "default" => SyntaxKind::DefaultKw,
+        "import" => SyntaxKind::ImportKw,
+        "export" => SyntaxKind::ExportKw,
+        "from" => SyntaxKind::FromKw,
         _ => SyntaxKind::Ident,
     }
 }
 
+fn consume_string(chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>) -> SyntaxKind {
+    let mut valid = true;
+
+    while let Some((_, character)) = chars.peek().copied() {
+        match character {
+            '"' => {
+                let _ = chars.next();
+                return if valid {
+                    SyntaxKind::String
+                } else {
+                    SyntaxKind::Unknown
+                };
+            }
+            '\n' | '\r' => return SyntaxKind::Unknown,
+            '\\' => {
+                let _ = chars.next();
+                match chars.peek().copied() {
+                    Some((_, '"' | '\\' | 'n' | 'r' | 't')) => {
+                        let _ = chars.next();
+                    }
+                    Some((_, '\n' | '\r')) | None => return SyntaxKind::Unknown,
+                    Some(_) => {
+                        valid = false;
+                        let _ = chars.next();
+                    }
+                }
+            }
+            _ => {
+                let _ = chars.next();
+            }
+        }
+    }
+
+    SyntaxKind::Unknown
+}
+
 fn consume_equals(chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>) -> SyntaxKind {
+    if consume_if(chars, '>') {
+        return SyntaxKind::FatArrow;
+    }
+
     if !consume_if(chars, '=') {
         return SyntaxKind::Eq;
     }
@@ -409,6 +591,19 @@ fn consume_required_pair(
     }
 }
 
+fn consume_optional_pair(
+    chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>,
+    expected: char,
+    single: SyntaxKind,
+    combined: SyntaxKind,
+) -> SyntaxKind {
+    if consume_if(chars, expected) {
+        combined
+    } else {
+        single
+    }
+}
+
 fn consume_if(chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>, expected: char) -> bool {
     if matches!(chars.peek(), Some((_, character)) if *character == expected) {
         let _ = chars.next();
@@ -429,7 +624,7 @@ fn consume_while(
 
 #[cfg(test)]
 mod tests {
-    use super::{tokenize, SyntaxKind};
+    use super::{tokenize, SyntaxKind, TextRange};
 
     #[test]
     fn tokenizes_language_core_keywords_and_operators() {
@@ -496,7 +691,7 @@ mod tests {
 
     #[test]
     fn tokenizes_stateful_control_flow_keywords_and_logical_operators() {
-        let tokens = tokenize("let while break continue && ||");
+        let tokens = tokenize("let while for break continue && ||");
         let kinds: Vec<_> = tokens.iter().map(|token| token.kind()).collect();
 
         assert_eq!(
@@ -505,6 +700,8 @@ mod tests {
                 SyntaxKind::LetKw,
                 SyntaxKind::Whitespace,
                 SyntaxKind::WhileKw,
+                SyntaxKind::Whitespace,
+                SyntaxKind::ForKw,
                 SyntaxKind::Whitespace,
                 SyntaxKind::BreakKw,
                 SyntaxKind::Whitespace,
@@ -518,7 +715,26 @@ mod tests {
     }
 
     #[test]
-    fn single_logical_operator_characters_are_unknown_tokens() {
+    fn tokenizes_for_as_a_keyword_and_keeps_of_contextual() {
+        let tokens = tokenize("for of before often");
+
+        assert_eq!(
+            tokens
+                .iter()
+                .filter(|token| !token.kind().is_trivia())
+                .map(|token| (token.kind(), token.text()))
+                .collect::<Vec<_>>(),
+            [
+                (SyntaxKind::ForKw, "for"),
+                (SyntaxKind::Ident, "of"),
+                (SyntaxKind::Ident, "before"),
+                (SyntaxKind::Ident, "often"),
+            ]
+        );
+    }
+
+    #[test]
+    fn single_ampersand_is_unknown_and_single_pipe_is_a_union_separator() {
         let tokens = tokenize("& |");
 
         assert_eq!(
@@ -529,7 +745,167 @@ mod tests {
             [
                 (SyntaxKind::Unknown, "&"),
                 (SyntaxKind::Whitespace, " "),
-                (SyntaxKind::Unknown, "|"),
+                (SyntaxKind::Pipe, "|"),
+            ]
+        );
+    }
+
+    #[test]
+    fn tokenizes_tagged_union_and_match_keywords_without_breaking_logical_or() {
+        let tokens = tokenize("type Choice = | None(); match case default => | ||");
+
+        assert_eq!(
+            tokens
+                .iter()
+                .filter(|token| !token.kind().is_trivia())
+                .map(|token| (token.kind(), token.text()))
+                .collect::<Vec<_>>(),
+            [
+                (SyntaxKind::TypeKw, "type"),
+                (SyntaxKind::Ident, "Choice"),
+                (SyntaxKind::Eq, "="),
+                (SyntaxKind::Pipe, "|"),
+                (SyntaxKind::Ident, "None"),
+                (SyntaxKind::LParen, "("),
+                (SyntaxKind::RParen, ")"),
+                (SyntaxKind::Semicolon, ";"),
+                (SyntaxKind::MatchKw, "match"),
+                (SyntaxKind::CaseKw, "case"),
+                (SyntaxKind::DefaultKw, "default"),
+                (SyntaxKind::FatArrow, "=>"),
+                (SyntaxKind::Pipe, "|"),
+                (SyntaxKind::PipePipe, "||"),
+            ]
+        );
+    }
+
+    #[test]
+    fn tokenizes_module_keywords_without_reserving_adjacent_identifiers() {
+        let tokens = tokenize("import imported export exported from fromValue");
+
+        assert_eq!(
+            tokens
+                .iter()
+                .filter(|token| !token.kind().is_trivia())
+                .map(|token| (token.kind(), token.text()))
+                .collect::<Vec<_>>(),
+            [
+                (SyntaxKind::ImportKw, "import"),
+                (SyntaxKind::Ident, "imported"),
+                (SyntaxKind::ExportKw, "export"),
+                (SyntaxKind::Ident, "exported"),
+                (SyntaxKind::FromKw, "from"),
+                (SyntaxKind::Ident, "fromValue"),
+            ]
+        );
+    }
+
+    #[test]
+    fn tokenizes_string_types_literals_and_array_punctuation() {
+        let tokens = tokenize(r#"String[] = ["line\n\"quote\"\\tail"].length"#);
+
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| (token.kind(), token.text()))
+                .collect::<Vec<_>>(),
+            [
+                (SyntaxKind::StringKw, "String"),
+                (SyntaxKind::LBracket, "["),
+                (SyntaxKind::RBracket, "]"),
+                (SyntaxKind::Whitespace, " "),
+                (SyntaxKind::Eq, "="),
+                (SyntaxKind::Whitespace, " "),
+                (SyntaxKind::LBracket, "["),
+                (SyntaxKind::String, r#""line\n\"quote\"\\tail""#),
+                (SyntaxKind::RBracket, "]"),
+                (SyntaxKind::Dot, "."),
+                (SyntaxKind::Ident, "length"),
+            ]
+        );
+    }
+
+    #[test]
+    fn tokenizes_the_type_keyword_and_record_field_names() {
+        let tokens = tokenize("type User = { name: String; };");
+
+        assert_eq!(
+            tokens
+                .iter()
+                .filter(|token| !token.kind().is_trivia())
+                .map(|token| (token.kind(), token.text()))
+                .collect::<Vec<_>>(),
+            [
+                (SyntaxKind::TypeKw, "type"),
+                (SyntaxKind::Ident, "User"),
+                (SyntaxKind::Eq, "="),
+                (SyntaxKind::LBrace, "{"),
+                (SyntaxKind::Ident, "name"),
+                (SyntaxKind::Colon, ":"),
+                (SyntaxKind::StringKw, "String"),
+                (SyntaxKind::Semicolon, ";"),
+                (SyntaxKind::RBrace, "}"),
+                (SyntaxKind::Semicolon, ";"),
+            ]
+        );
+    }
+
+    #[test]
+    fn unicode_string_literal_uses_a_byte_range_and_preserves_text() {
+        let source = "\"Nexa \u{4f60}\u{597d}\"";
+        let tokens = tokenize(source);
+
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| (token.kind(), token.range(), token.text()))
+                .collect::<Vec<_>>(),
+            [(SyntaxKind::String, TextRange::new(0, source.len()), source)]
+        );
+    }
+
+    #[test]
+    fn invalid_string_escape_is_one_lossless_unknown_token() {
+        let tokens = tokenize(r#""bad\q";"#);
+
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| (token.kind(), token.text()))
+                .collect::<Vec<_>>(),
+            [
+                (SyntaxKind::Unknown, r#""bad\q""#),
+                (SyntaxKind::Semicolon, ";"),
+            ]
+        );
+    }
+
+    #[test]
+    fn zero_string_escape_is_an_unknown_token() {
+        let tokens = tokenize(r#""bad\0""#);
+
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| (token.kind(), token.text()))
+                .collect::<Vec<_>>(),
+            [(SyntaxKind::Unknown, r#""bad\0""#)]
+        );
+    }
+
+    #[test]
+    fn unterminated_string_stops_before_the_next_line() {
+        let tokens = tokenize("\"unterminated\nnext");
+
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| (token.kind(), token.text()))
+                .collect::<Vec<_>>(),
+            [
+                (SyntaxKind::Unknown, "\"unterminated"),
+                (SyntaxKind::Whitespace, "\n"),
+                (SyntaxKind::Ident, "next"),
             ]
         );
     }
@@ -601,6 +977,49 @@ mod tests {
             SyntaxKind::ParenthesizedExpression,
             SyntaxKind::ArgumentList,
             SyntaxKind::Error,
+            SyntaxKind::String,
+            SyntaxKind::StringKw,
+            SyntaxKind::LBracket,
+            SyntaxKind::RBracket,
+            SyntaxKind::Dot,
+            SyntaxKind::StringLiteral,
+            SyntaxKind::ArrayType,
+            SyntaxKind::ArrayExpression,
+            SyntaxKind::IndexExpression,
+            SyntaxKind::MemberExpression,
+            SyntaxKind::TypeKw,
+            SyntaxKind::RecordDeclaration,
+            SyntaxKind::RecordBody,
+            SyntaxKind::RecordFieldDeclaration,
+            SyntaxKind::RecordExpression,
+            SyntaxKind::RecordFieldInitializer,
+            SyntaxKind::MatchKw,
+            SyntaxKind::CaseKw,
+            SyntaxKind::DefaultKw,
+            SyntaxKind::Pipe,
+            SyntaxKind::FatArrow,
+            SyntaxKind::UnionDeclaration,
+            SyntaxKind::UnionVariant,
+            SyntaxKind::VariantPayload,
+            SyntaxKind::MatchExpression,
+            SyntaxKind::MatchArm,
+            SyntaxKind::VariantPattern,
+            SyntaxKind::PatternBindingList,
+            SyntaxKind::ImportKw,
+            SyntaxKind::ExportKw,
+            SyntaxKind::FromKw,
+            SyntaxKind::ImportDeclaration,
+            SyntaxKind::ImportList,
+            SyntaxKind::ExportedDeclaration,
+            SyntaxKind::TypeParameterList,
+            SyntaxKind::TypeParameter,
+            SyntaxKind::TypeArgumentList,
+            SyntaxKind::ForKw,
+            SyntaxKind::FunctionType,
+            SyntaxKind::ArrowExpression,
+            SyntaxKind::ArrowBody,
+            SyntaxKind::ForStatement,
+            SyntaxKind::ForBinding,
         ];
 
         for kind in kinds {

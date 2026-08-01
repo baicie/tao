@@ -1,0 +1,3 @@
+function main(): Unit {
+  const result = match (42) { default => 0; };
+}

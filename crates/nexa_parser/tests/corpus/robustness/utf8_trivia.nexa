@@ -1,0 +1,6 @@
+// Unicode trivia: 你好, мир, 🙂
+function main(): Unit {
+  // Strings retain UTF-8 byte offsets.
+  const greeting: String = "你好, мир 🙂";
+  print(greeting);
+}

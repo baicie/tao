@@ -1,18 +1,87 @@
-use nexa_hir::{BinaryOperator, Type, UnaryOperator};
+use nexa_hir::{
+    BinaryOperator, ClosureId, FieldId, FunctionId, ModuleId, PayloadId, RecordId, Type,
+    UnaryOperator, UnionId, VariantId,
+};
 use nexa_span::SourceSpan;
 
 /// A complete Nexa program in resolved middle intermediate representation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MirProgram {
+    pub(crate) modules: Vec<ModuleId>,
+    pub(crate) entry_module: ModuleId,
+    pub(crate) entry: Option<FunctionId>,
+    pub(crate) records: Vec<MirRecord>,
+    pub(crate) unions: Vec<MirUnion>,
     pub(crate) functions: Vec<MirFunction>,
+    pub(crate) closures: Vec<MirClosure>,
     pub(crate) span: SourceSpan,
 }
 
 impl MirProgram {
+    /// Returns modules in deterministic compiler-session discovery order.
+    #[must_use]
+    pub fn modules(&self) -> &[ModuleId] {
+        &self.modules
+    }
+
+    /// Returns the compiler session's entry-module identity.
+    #[must_use]
+    pub const fn entry_module(&self) -> ModuleId {
+        self.entry_module
+    }
+
+    /// Returns the already resolved entry function, when one was declared.
+    #[must_use]
+    pub const fn entry_function(&self) -> Option<FunctionId> {
+        self.entry
+    }
+
+    /// Returns nominal record layouts in stable source order.
+    #[must_use]
+    pub fn records(&self) -> &[MirRecord] {
+        &self.records
+    }
+
+    /// Returns nominal tagged union layouts in stable source order.
+    #[must_use]
+    pub fn unions(&self) -> &[MirUnion] {
+        &self.unions
+    }
+
     /// Returns all functions in their stable source-order identifiers.
     #[must_use]
     pub fn functions(&self) -> &[MirFunction] {
         &self.functions
+    }
+
+    /// Returns one function by its complete module-owned identity.
+    #[must_use]
+    pub fn function(&self, id: FunctionId) -> Option<&MirFunction> {
+        self.functions.iter().find(|function| function.id == id)
+    }
+
+    /// Returns all closure bodies in stable owner and source order.
+    #[must_use]
+    pub fn closures(&self) -> &[MirClosure] {
+        &self.closures
+    }
+
+    /// Returns one closure body by its stable source identity.
+    #[must_use]
+    pub fn closure(&self, id: ClosureId) -> Option<&MirClosure> {
+        self.closures.iter().find(|closure| closure.id == id)
+    }
+
+    /// Returns one record layout by its complete module-owned identity.
+    #[must_use]
+    pub fn record(&self, id: RecordId) -> Option<&MirRecord> {
+        self.records.iter().find(|record| record.id == id)
+    }
+
+    /// Returns one union layout by its complete module-owned identity.
+    #[must_use]
+    pub fn union(&self, id: UnionId) -> Option<&MirUnion> {
+        self.unions.iter().find(|union| union.id == id)
     }
 
     /// Returns the source range covered by the program.
@@ -22,11 +91,188 @@ impl MirProgram {
     }
 }
 
+/// A nominal record layout resolved before MIR execution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirRecord {
+    pub(crate) id: RecordId,
+    pub(crate) name: String,
+    pub(crate) fields: Vec<MirRecordField>,
+    pub(crate) span: SourceSpan,
+}
+
+impl MirRecord {
+    /// Returns the record's stable source-order identifier.
+    #[must_use]
+    pub const fn id(&self) -> RecordId {
+        self.id
+    }
+
+    /// Returns the declared record name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns fields in declaration and runtime-layout order.
+    #[must_use]
+    pub fn fields(&self) -> &[MirRecordField] {
+        &self.fields
+    }
+
+    /// Returns the record declaration's source range.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
+
+/// One typed field in a resolved nominal record layout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirRecordField {
+    pub(crate) id: FieldId,
+    pub(crate) name: String,
+    pub(crate) ty: Type,
+    pub(crate) span: SourceSpan,
+}
+
+impl MirRecordField {
+    /// Returns the field's stable declaration-order identifier.
+    #[must_use]
+    pub const fn id(&self) -> FieldId {
+        self.id
+    }
+
+    /// Returns the declared field name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the resolved field type.
+    #[must_use]
+    pub const fn ty(&self) -> &Type {
+        &self.ty
+    }
+
+    /// Returns the field declaration's source range.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
+
+/// A nominal tagged union layout resolved before MIR execution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirUnion {
+    pub(crate) id: UnionId,
+    pub(crate) name: String,
+    pub(crate) variants: Vec<MirVariant>,
+    pub(crate) span: SourceSpan,
+}
+
+impl MirUnion {
+    /// Returns the union's stable source-order identifier.
+    #[must_use]
+    pub const fn id(&self) -> UnionId {
+        self.id
+    }
+
+    /// Returns the declared union name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns variants in declaration and runtime-tag order.
+    #[must_use]
+    pub fn variants(&self) -> &[MirVariant] {
+        &self.variants
+    }
+
+    /// Returns the union declaration's source range.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
+
+/// One resolved tagged union variant layout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirVariant {
+    pub(crate) id: VariantId,
+    pub(crate) name: String,
+    pub(crate) payloads: Vec<MirPayload>,
+    pub(crate) span: SourceSpan,
+}
+
+impl MirVariant {
+    /// Returns this variant's owner-scoped identifier.
+    #[must_use]
+    pub const fn id(&self) -> VariantId {
+        self.id
+    }
+
+    /// Returns the declared variant name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns positional payloads in declaration order.
+    #[must_use]
+    pub fn payloads(&self) -> &[MirPayload] {
+        &self.payloads
+    }
+
+    /// Returns the variant declaration's source range.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
+
+/// One resolved positional variant payload layout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirPayload {
+    pub(crate) id: PayloadId,
+    pub(crate) name: String,
+    pub(crate) ty: Type,
+    pub(crate) span: SourceSpan,
+}
+
+impl MirPayload {
+    /// Returns this payload's owner-scoped identifier.
+    #[must_use]
+    pub const fn id(&self) -> PayloadId {
+        self.id
+    }
+
+    /// Returns the payload declaration name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the resolved payload type.
+    #[must_use]
+    pub const fn ty(&self) -> &Type {
+        &self.ty
+    }
+
+    /// Returns the payload declaration's source range.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
+
 /// A function after local and function-name resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MirFunction {
+    pub(crate) id: FunctionId,
     pub(crate) name: String,
     pub(crate) parameters: Vec<LocalId>,
+    pub(crate) parameter_types: Vec<Type>,
     pub(crate) local_count: usize,
     pub(crate) return_type: Type,
     pub(crate) entry: BasicBlockId,
@@ -34,7 +280,77 @@ pub struct MirFunction {
     pub(crate) span: SourceSpan,
 }
 
+/// A closure body after capture, parameter, and local resolution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirClosure {
+    pub(crate) id: ClosureId,
+    pub(crate) captures: Vec<LocalId>,
+    pub(crate) parameters: Vec<LocalId>,
+    pub(crate) parameter_types: Vec<Type>,
+    pub(crate) local_count: usize,
+    pub(crate) return_type: Type,
+    pub(crate) entry: BasicBlockId,
+    pub(crate) blocks: Vec<MirBasicBlock>,
+    pub(crate) span: SourceSpan,
+}
+
+impl MirClosure {
+    /// Returns the stable arrow-site identity.
+    #[must_use]
+    pub const fn id(&self) -> ClosureId {
+        self.id
+    }
+
+    /// Returns capture slots in typed-HIR first-use order.
+    #[must_use]
+    pub fn captures(&self) -> &[LocalId] {
+        &self.captures
+    }
+
+    /// Returns parameter slots in declaration order.
+    #[must_use]
+    pub fn parameter_ids(&self) -> &[LocalId] {
+        &self.parameters
+    }
+
+    /// Returns parameter types in declaration order.
+    #[must_use]
+    pub fn parameter_types(&self) -> &[Type] {
+        &self.parameter_types
+    }
+
+    /// Returns the declared result type.
+    #[must_use]
+    pub const fn return_type(&self) -> &Type {
+        &self.return_type
+    }
+
+    /// Returns the closure entry block.
+    #[must_use]
+    pub const fn entry_block(&self) -> BasicBlockId {
+        self.entry
+    }
+
+    /// Returns closure CFG blocks in stable order.
+    #[must_use]
+    pub fn blocks(&self) -> &[MirBasicBlock] {
+        &self.blocks
+    }
+
+    /// Returns the arrow expression's source range.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
+
 impl MirFunction {
+    /// Returns the function's stable module-owned identity.
+    #[must_use]
+    pub const fn id(&self) -> FunctionId {
+        self.id
+    }
+
     /// Returns the source name of the function.
     #[must_use]
     pub fn name(&self) -> &str {
@@ -47,10 +363,16 @@ impl MirFunction {
         self.parameters.len()
     }
 
+    /// Returns resolved parameter types in declaration order.
+    #[must_use]
+    pub fn parameter_types(&self) -> &[Type] {
+        &self.parameter_types
+    }
+
     /// Returns the declared return type.
     #[must_use]
-    pub const fn return_type(&self) -> Type {
-        self.return_type
+    pub const fn return_type(&self) -> &Type {
+        &self.return_type
     }
 
     /// Returns the entry block for this function.
@@ -78,18 +400,6 @@ pub struct LocalId(pub(crate) usize);
 
 impl LocalId {
     /// Returns the slot's zero-based index within its function frame.
-    #[must_use]
-    pub const fn index(self) -> usize {
-        self.0
-    }
-}
-
-/// A resolved function identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FunctionId(pub(crate) usize);
-
-impl FunctionId {
-    /// Returns the function's zero-based index within its program.
     #[must_use]
     pub const fn index(self) -> usize {
         self.0
@@ -178,6 +488,17 @@ pub enum MirTerminator {
         /// The source range of the control-flow statement.
         span: SourceSpan,
     },
+    /// Dispatches a tagged union local through a dense variant target table.
+    SwitchVariant {
+        /// The local containing the scrutinee value.
+        scrutinee: LocalId,
+        /// The expected nominal union identity.
+        union: UnionId,
+        /// Targets indexed by variant declaration order.
+        targets: Vec<BasicBlockId>,
+        /// The full match expression range.
+        span: SourceSpan,
+    },
     /// Returns from the current function.
     Return {
         /// The optional returned value.
@@ -202,6 +523,109 @@ pub enum MirExpression {
         /// The literal value.
         value: bool,
         /// The literal's source range.
+        span: SourceSpan,
+    },
+    /// An immutable UTF-8 string value.
+    String {
+        /// The decoded string contents.
+        value: String,
+        /// The literal's source range.
+        span: SourceSpan,
+    },
+    /// Produces a first-class reference to a non-generic source function.
+    Function {
+        /// The resolved module-owned function identity.
+        function: FunctionId,
+        /// The identifier's source range.
+        span: SourceSpan,
+    },
+    /// Creates a closure by snapshotting resolved captures in order.
+    Closure {
+        /// The stable arrow-site identity.
+        closure: ClosureId,
+        /// Capture expressions in semantic first-use order.
+        captures: Vec<MirExpression>,
+        /// The full arrow expression range.
+        span: SourceSpan,
+    },
+    /// Constructs an immutable array in element evaluation order.
+    Array {
+        /// The element expressions in source order.
+        elements: Vec<MirExpression>,
+        /// The full array literal range.
+        span: SourceSpan,
+    },
+    /// Constructs an immutable nominal record in declaration field order.
+    Record {
+        /// The record's resolved nominal identity.
+        record: RecordId,
+        /// Field values in declaration and runtime-layout order.
+        fields: Vec<MirExpression>,
+        /// The full record literal range.
+        span: SourceSpan,
+    },
+    /// Constructs one resolved tagged union variant.
+    Variant {
+        /// The union's resolved nominal identity.
+        union: UnionId,
+        /// The selected owner-scoped variant identity.
+        variant: VariantId,
+        /// Payload values in declaration order.
+        payloads: Vec<MirExpression>,
+        /// The full constructor call range.
+        span: SourceSpan,
+    },
+    /// Reads an element from an immutable array.
+    Index {
+        /// The evaluated array expression.
+        target: Box<MirExpression>,
+        /// The evaluated integer index.
+        index: Box<MirExpression>,
+        /// The full indexing expression range.
+        span: SourceSpan,
+    },
+    /// Reads the element count of an immutable array.
+    Length {
+        /// The evaluated array expression.
+        target: Box<MirExpression>,
+        /// The full member expression range.
+        span: SourceSpan,
+    },
+    /// Applies an immutable array operation to one evaluated base and argument.
+    ArrayIntrinsic {
+        /// The statically selected array operation.
+        operation: ArrayIntrinsic,
+        /// The validated source array's element type.
+        element_type: Type,
+        /// The evaluated base array.
+        target: Box<MirExpression>,
+        /// The evaluated element or array argument.
+        argument: Box<MirExpression>,
+        /// The full member-call range.
+        span: SourceSpan,
+    },
+    /// Reads a resolved field from an immutable nominal record.
+    Field {
+        /// The evaluated record expression.
+        target: Box<MirExpression>,
+        /// The expected nominal record identity.
+        record: RecordId,
+        /// The resolved field identity.
+        field: FieldId,
+        /// The full member expression range.
+        span: SourceSpan,
+    },
+    /// Projects one resolved positional payload from a selected variant.
+    VariantPayload {
+        /// The local containing the matched union value.
+        source: LocalId,
+        /// The expected nominal union identity.
+        union: UnionId,
+        /// The selected owner-scoped variant identity.
+        variant: VariantId,
+        /// The projected owner-scoped payload identity.
+        payload: PayloadId,
+        /// The pattern binding's source range.
         span: SourceSpan,
     },
     /// Reads a local slot.
@@ -240,6 +664,15 @@ pub enum MirExpression {
         /// The full call range.
         span: SourceSpan,
     },
+    /// Calls a callable value produced by an expression.
+    IndirectCall {
+        /// The callable expression, evaluated before every argument.
+        callee: Box<MirExpression>,
+        /// Call arguments in source order.
+        arguments: Vec<MirExpression>,
+        /// The full call range.
+        span: SourceSpan,
+    },
 }
 
 impl MirExpression {
@@ -249,12 +682,33 @@ impl MirExpression {
         match self {
             Self::Integer { span, .. }
             | Self::Boolean { span, .. }
+            | Self::String { span, .. }
+            | Self::Function { span, .. }
+            | Self::Closure { span, .. }
+            | Self::Array { span, .. }
+            | Self::Record { span, .. }
+            | Self::Variant { span, .. }
+            | Self::Index { span, .. }
+            | Self::Length { span, .. }
+            | Self::ArrayIntrinsic { span, .. }
+            | Self::Field { span, .. }
+            | Self::VariantPayload { span, .. }
             | Self::Local { span, .. }
             | Self::Unary { span, .. }
             | Self::Binary { span, .. }
-            | Self::Call { span, .. } => *span,
+            | Self::Call { span, .. }
+            | Self::IndirectCall { span, .. } => *span,
         }
     }
+}
+
+/// A statically resolved immutable array operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArrayIntrinsic {
+    /// Returns the base array followed by one value.
+    Append,
+    /// Returns the base array followed by every value in another array.
+    Concat,
 }
 
 /// A resolved callable target.
@@ -262,6 +716,10 @@ impl MirExpression {
 pub enum Callee {
     /// A user-defined function.
     Function(FunctionId),
-    /// The built-in integer printing function.
+    /// The built-in scalar printing function.
     Print,
+    /// The canonical integer-to-string conversion.
+    ToString,
+    /// The complete ASCII decimal string-to-integer conversion.
+    ParseInt,
 }

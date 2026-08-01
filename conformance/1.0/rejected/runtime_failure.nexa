@@ -1,0 +1,8 @@
+function fail(): Int {
+  print(7);
+  return 1 / 0;
+}
+
+function main(): Unit {
+  print(fail());
+}

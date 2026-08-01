@@ -3,9 +3,209 @@ use nexa_span::SourceSpan;
 /// A complete Nexa source file after syntax lowering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
+    /// The stable identity of the module that owns these declarations.
+    pub module: ModuleId,
+    /// All named imports in source order.
+    pub imports: Vec<ImportDeclaration>,
+    /// All top-level nominal record declarations in source order.
+    pub records: Vec<RecordDeclaration>,
+    /// All top-level nominal tagged union declarations in source order.
+    pub unions: Vec<UnionDeclaration>,
     /// All top-level function declarations in source order.
     pub functions: Vec<Function>,
     /// The source range covered by the source file node.
+    pub span: SourceSpan,
+}
+
+/// One source-level named import before module resolution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportDeclaration {
+    /// Imported names in source order.
+    pub names: Vec<Name>,
+    /// The decoded import path before semantic path validation.
+    pub path: String,
+    /// The exact range of the quoted path token.
+    pub path_span: SourceSpan,
+    /// The import declaration's full source range.
+    pub span: SourceSpan,
+}
+
+/// Whether a top-level declaration is visible to importing modules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Visibility {
+    /// Visible only inside the defining module.
+    Private,
+    /// Available for explicit named import from another module.
+    Exported,
+}
+
+/// A stable first-discovery identifier for one source module.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ModuleId(usize);
+
+impl ModuleId {
+    /// The entry module in every compiler session.
+    pub const ENTRY: Self = Self(0);
+
+    /// Creates a module identifier from its zero-based discovery index.
+    #[must_use]
+    pub const fn new(index: usize) -> Self {
+        Self(index)
+    }
+
+    /// Returns the zero-based discovery index within the compiler session.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.0
+    }
+}
+
+/// A kind-safe identity for any top-level definition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DefId {
+    /// A source function.
+    Function(FunctionId),
+    /// A nominal immutable record.
+    Record(RecordId),
+    /// A nominal tagged union.
+    Union(UnionId),
+}
+
+impl DefId {
+    /// Returns the module that owns this definition.
+    #[must_use]
+    pub const fn module(self) -> ModuleId {
+        match self {
+            Self::Function(function) => function.module(),
+            Self::Record(record) => record.module(),
+            Self::Union(union) => union.module(),
+        }
+    }
+}
+
+/// A stable source-order identifier for a function owned by one module.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FunctionId {
+    module: ModuleId,
+    index: usize,
+}
+
+impl FunctionId {
+    /// Creates an entry-module function identifier for single-file callers.
+    #[must_use]
+    pub const fn new(index: usize) -> Self {
+        Self::in_module(ModuleId::ENTRY, index)
+    }
+
+    /// Creates a function identifier from its owner and module-local index.
+    #[must_use]
+    pub const fn in_module(module: ModuleId, index: usize) -> Self {
+        Self { module, index }
+    }
+
+    /// Returns the module that owns this function.
+    #[must_use]
+    pub const fn module(self) -> ModuleId {
+        self.module
+    }
+
+    /// Returns the zero-based source index within the owning module.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.index
+    }
+}
+
+/// A stable source-order identifier for a closure owned by one function.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ClosureId {
+    owner: FunctionId,
+    source_index: usize,
+}
+
+impl ClosureId {
+    /// Creates a closure identifier from its owner and source-order index.
+    #[must_use]
+    pub const fn new(owner: FunctionId, source_index: usize) -> Self {
+        Self {
+            owner,
+            source_index,
+        }
+    }
+
+    /// Returns the source function that lexically owns this closure.
+    #[must_use]
+    pub const fn owner(self) -> FunctionId {
+        self.owner
+    }
+
+    /// Returns the zero-based source index within the owning function.
+    #[must_use]
+    pub const fn source_index(self) -> usize {
+        self.source_index
+    }
+}
+
+/// A nominal immutable record declaration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordDeclaration {
+    /// The declared record name.
+    pub name: Name,
+    /// Generic type parameters in declaration order.
+    pub type_parameters: Vec<TypeParameter>,
+    /// The declaration's module visibility.
+    pub visibility: Visibility,
+    /// Fields in declaration order.
+    pub fields: Vec<RecordFieldDeclaration>,
+    /// The declaration's full source range.
+    pub span: SourceSpan,
+}
+
+/// One named field in a record declaration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordFieldDeclaration {
+    /// The declared field name.
+    pub name: Name,
+    /// The declared field type.
+    pub ty: TypeReference,
+    /// The field declaration's full source range.
+    pub span: SourceSpan,
+}
+
+/// A nominal tagged union declaration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnionDeclaration {
+    /// The declared union name.
+    pub name: Name,
+    /// Generic type parameters in declaration order.
+    pub type_parameters: Vec<TypeParameter>,
+    /// The declaration's module visibility.
+    pub visibility: Visibility,
+    /// Variants in declaration order.
+    pub variants: Vec<UnionVariantDeclaration>,
+    /// The declaration's full source range.
+    pub span: SourceSpan,
+}
+
+/// One variant in a nominal tagged union.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnionVariantDeclaration {
+    /// The declared variant name.
+    pub name: Name,
+    /// Positional payload declarations in source order.
+    pub payloads: Vec<VariantPayloadDeclaration>,
+    /// The variant declaration's full source range.
+    pub span: SourceSpan,
+}
+
+/// One named positional payload in a tagged union variant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VariantPayloadDeclaration {
+    /// The payload's declaration name.
+    pub name: Name,
+    /// The payload's declared type.
+    pub ty: TypeReference,
+    /// The payload declaration's full source range.
     pub span: SourceSpan,
 }
 
@@ -14,6 +214,10 @@ pub struct Program {
 pub struct Function {
     /// The declared function name.
     pub name: Name,
+    /// Generic type parameters in declaration order.
+    pub type_parameters: Vec<TypeParameter>,
+    /// The declaration's module visibility.
+    pub visibility: Visibility,
     /// Function parameters in declaration order.
     pub parameters: Vec<Parameter>,
     /// The declared result type.
@@ -44,34 +248,396 @@ pub struct Name {
     pub span: SourceSpan,
 }
 
-/// A source-level type reference.
+/// One source-declared generic type parameter before semantic resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TypeReference {
-    /// The resolved built-in type name.
-    pub kind: Type,
-    /// The exact range of the type token.
+pub struct TypeParameter {
+    /// The declared type-parameter name.
+    pub name: Name,
+    /// The complete source range of the declaration.
     pub span: SourceSpan,
 }
 
-/// The closed set of Language Core value types.
+/// A source-level type reference.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeReference {
+    /// The source type spelling before semantic name resolution.
+    pub kind: TypeReferenceKind,
+    /// The complete source range of the type syntax.
+    pub span: SourceSpan,
+}
+
+/// A source-level type spelling before semantic name resolution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeReferenceKind {
+    /// The built-in signed integer type.
+    Int,
+    /// The built-in boolean type.
+    Bool,
+    /// The built-in UTF-8 string type.
+    String,
+    /// The built-in no-value result type.
+    Unit,
+    /// A named nominal type with optional generic arguments.
+    Named {
+        /// The source-written type-constructor name.
+        name: Name,
+        /// Type arguments in source order.
+        arguments: Vec<TypeReference>,
+    },
+    /// An immutable homogeneous array type.
+    Array(Box<TypeReference>),
+    /// A function value with named source parameters.
+    Function {
+        /// Function parameters in source order.
+        parameters: Vec<Parameter>,
+        /// The function's result type.
+        return_type: Box<TypeReference>,
+    },
+}
+
+/// A stable source-order identifier for a nominal record owned by one module.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RecordId {
+    module: ModuleId,
+    index: usize,
+}
+
+impl RecordId {
+    /// Creates an entry-module record identifier for single-file callers.
+    #[must_use]
+    pub const fn new(index: usize) -> Self {
+        Self::in_module(ModuleId::ENTRY, index)
+    }
+
+    /// Creates a record identifier from its owner and module-local index.
+    #[must_use]
+    pub const fn in_module(module: ModuleId, index: usize) -> Self {
+        Self { module, index }
+    }
+
+    /// Returns the module that owns this record.
+    #[must_use]
+    pub const fn module(self) -> ModuleId {
+        self.module
+    }
+
+    /// Returns the zero-based source index within the owning module.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.index
+    }
+}
+
+/// A stable field identifier scoped to one nominal record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FieldId {
+    record: RecordId,
+    index: usize,
+}
+
+impl FieldId {
+    /// Creates a field identifier from its record and declaration-order index.
+    #[must_use]
+    pub const fn new(record: RecordId, index: usize) -> Self {
+        Self { record, index }
+    }
+
+    /// Returns the record that owns this field.
+    #[must_use]
+    pub const fn record(self) -> RecordId {
+        self.record
+    }
+
+    /// Returns the zero-based declaration-order index within the record.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.index
+    }
+}
+
+/// A stable source-order identifier for a nominal tagged union owned by one module.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UnionId {
+    module: ModuleId,
+    index: usize,
+}
+
+impl UnionId {
+    /// Creates an entry-module union identifier for single-file callers.
+    #[must_use]
+    pub const fn new(index: usize) -> Self {
+        Self::in_module(ModuleId::ENTRY, index)
+    }
+
+    /// Creates a union identifier from its owner and module-local index.
+    #[must_use]
+    pub const fn in_module(module: ModuleId, index: usize) -> Self {
+        Self { module, index }
+    }
+
+    /// Returns the module that owns this union.
+    #[must_use]
+    pub const fn module(self) -> ModuleId {
+        self.module
+    }
+
+    /// Returns the zero-based source index within the owning module.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.index
+    }
+}
+
+/// A stable variant identifier scoped to one nominal tagged union.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct VariantId {
+    union: UnionId,
+    index: usize,
+}
+
+impl VariantId {
+    /// Creates a variant identifier from its union and declaration-order index.
+    #[must_use]
+    pub const fn new(union: UnionId, index: usize) -> Self {
+        Self { union, index }
+    }
+
+    /// Returns the union that owns this variant.
+    #[must_use]
+    pub const fn union(self) -> UnionId {
+        self.union
+    }
+
+    /// Returns the zero-based declaration-order index within the union.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.index
+    }
+}
+
+/// A stable payload identifier scoped to one tagged union variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PayloadId {
+    variant: VariantId,
+    index: usize,
+}
+
+impl PayloadId {
+    /// Creates a payload identifier from its variant and positional index.
+    #[must_use]
+    pub const fn new(variant: VariantId, index: usize) -> Self {
+        Self { variant, index }
+    }
+
+    /// Returns the variant that owns this payload.
+    #[must_use]
+    pub const fn variant(self) -> VariantId {
+        self.variant
+    }
+
+    /// Returns the zero-based positional index within the variant.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.index
+    }
+}
+
+/// The declaration that owns a generic type parameter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TypeParameterOwner {
+    /// A generic source function.
+    Function(FunctionId),
+    /// A generic nominal record.
+    Record(RecordId),
+    /// A generic nominal tagged union.
+    Union(UnionId),
+}
+
+impl TypeParameterOwner {
+    /// Returns the module that owns this generic declaration.
+    #[must_use]
+    pub const fn module(self) -> ModuleId {
+        match self {
+            Self::Function(function) => function.module(),
+            Self::Record(record) => record.module(),
+            Self::Union(union) => union.module(),
+        }
+    }
+
+    /// Returns the owning declaration's kind-safe definition identity.
+    #[must_use]
+    pub const fn definition(self) -> DefId {
+        match self {
+            Self::Function(function) => DefId::Function(function),
+            Self::Record(record) => DefId::Record(record),
+            Self::Union(union) => DefId::Union(union),
+        }
+    }
+}
+
+impl From<DefId> for TypeParameterOwner {
+    fn from(definition: DefId) -> Self {
+        match definition {
+            DefId::Function(function) => Self::Function(function),
+            DefId::Record(record) => Self::Record(record),
+            DefId::Union(union) => Self::Union(union),
+        }
+    }
+}
+
+/// A stable declaration-order identity for one generic type parameter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TypeParameterId {
+    owner: TypeParameterOwner,
+    index: usize,
+}
+
+impl TypeParameterId {
+    /// Creates a type-parameter identity from its owner and declaration index.
+    #[must_use]
+    pub const fn new(owner: TypeParameterOwner, index: usize) -> Self {
+        Self { owner, index }
+    }
+
+    /// Returns the generic declaration that owns this parameter.
+    #[must_use]
+    pub const fn owner(self) -> TypeParameterOwner {
+        self.owner
+    }
+
+    /// Returns the zero-based declaration-order index within the owner.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.index
+    }
+}
+
+/// The closed set of Language Core value types.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     /// A signed 64-bit integer.
     Int,
     /// A boolean value.
     Bool,
+    /// A UTF-8 string value.
+    String,
+    /// An immutable homogeneous array value.
+    Array(Box<Type>),
+    /// A first-class function value.
+    Function {
+        /// Parameter types in declaration order.
+        parameters: Box<[Type]>,
+        /// The function's result type.
+        return_type: Box<Type>,
+    },
+    /// A generic type parameter resolved to its owner and declaration index.
+    Parameter(TypeParameterId),
+    /// A nominal immutable record value.
+    Record {
+        /// The generic record declaration.
+        definition: RecordId,
+        /// Resolved type arguments in declaration order.
+        arguments: Box<[Type]>,
+    },
+    /// A nominal tagged union value.
+    Union {
+        /// The generic union declaration.
+        definition: UnionId,
+        /// Resolved type arguments in declaration order.
+        arguments: Box<[Type]>,
+    },
     /// The result type for expressions with no value.
     Unit,
 }
 
 impl std::fmt::Display for Type {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(match self {
-            Self::Int => "Int",
-            Self::Bool => "Bool",
-            Self::Unit => "Unit",
-        })
+        match self {
+            Self::Int => formatter.write_str("Int"),
+            Self::Bool => formatter.write_str("Bool"),
+            Self::String => formatter.write_str("String"),
+            Self::Array(element) => write!(formatter, "{element}[]"),
+            Self::Function {
+                parameters,
+                return_type,
+            } => {
+                formatter.write_str("(")?;
+                for (index, parameter) in parameters.iter().enumerate() {
+                    if index != 0 {
+                        formatter.write_str(", ")?;
+                    }
+                    write!(formatter, "{parameter}")?;
+                }
+                write!(formatter, ") => {return_type}")
+            }
+            Self::Parameter(parameter) => match parameter.owner() {
+                TypeParameterOwner::Function(function) => write!(
+                    formatter,
+                    "function#{}:{}::parameter#{}",
+                    function.module().index(),
+                    function.index(),
+                    parameter.index()
+                ),
+                TypeParameterOwner::Record(record) => write!(
+                    formatter,
+                    "record#{}:{}::parameter#{}",
+                    record.module().index(),
+                    record.index(),
+                    parameter.index()
+                ),
+                TypeParameterOwner::Union(union) => write!(
+                    formatter,
+                    "union#{}:{}::parameter#{}",
+                    union.module().index(),
+                    union.index(),
+                    parameter.index()
+                ),
+            },
+            Self::Record {
+                definition,
+                arguments,
+            } => {
+                write!(
+                    formatter,
+                    "record#{}:{}",
+                    definition.module().index(),
+                    definition.index()
+                )?;
+                format_type_arguments(formatter, arguments)
+            }
+            Self::Union {
+                definition,
+                arguments,
+            } => {
+                write!(
+                    formatter,
+                    "union#{}:{}",
+                    definition.module().index(),
+                    definition.index()
+                )?;
+                format_type_arguments(formatter, arguments)
+            }
+            Self::Unit => formatter.write_str("Unit"),
+        }
     }
+}
+
+fn format_type_arguments(
+    formatter: &mut std::fmt::Formatter<'_>,
+    arguments: &[Type],
+) -> std::fmt::Result {
+    if arguments.is_empty() {
+        return Ok(());
+    }
+
+    formatter.write_str("<")?;
+    for (index, argument) in arguments.iter().enumerate() {
+        if index != 0 {
+            formatter.write_str(", ")?;
+        }
+        write!(formatter, "{argument}")?;
+    }
+    formatter.write_str(">")
 }
 
 /// A braced sequence of statements.
@@ -96,6 +662,8 @@ pub enum Statement {
     If(IfStatement),
     /// A conditional loop.
     While(WhileStatement),
+    /// An immutable iteration over an array's elements.
+    ForOf(ForOfStatement),
     /// An exit from the nearest enclosing loop.
     Break(BreakStatement),
     /// A jump to the next iteration of the nearest enclosing loop.
@@ -167,6 +735,19 @@ pub struct WhileStatement {
     pub span: SourceSpan,
 }
 
+/// A loop that visits each element of an immutable array in source order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForOfStatement {
+    /// The immutable element binding introduced for each iteration.
+    pub binding: Name,
+    /// The array expression evaluated once before iteration begins.
+    pub iterable: Expression,
+    /// The repeated statement body.
+    pub body: Block,
+    /// The statement's full source range.
+    pub span: SourceSpan,
+}
+
 /// An exit from the nearest enclosing loop.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BreakStatement {
@@ -216,8 +797,69 @@ pub enum Expression {
         /// The literal token range.
         span: SourceSpan,
     },
+    /// A decoded UTF-8 string literal.
+    String {
+        /// The literal value after escape decoding.
+        value: String,
+        /// The literal token range.
+        span: SourceSpan,
+    },
+    /// An immutable array literal.
+    Array {
+        /// Elements in source order.
+        elements: Vec<Expression>,
+        /// The full expression range.
+        span: SourceSpan,
+    },
+    /// An immutable record literal whose type is supplied by context.
+    Record {
+        /// Field initializers in source order.
+        fields: Vec<RecordFieldInitializer>,
+        /// The full expression range.
+        span: SourceSpan,
+    },
+    /// An exhaustive tagged-union match expression.
+    Match {
+        /// The tagged union value inspected exactly once.
+        scrutinee: Box<Expression>,
+        /// Match arms in source order.
+        arms: Vec<MatchArm>,
+        /// The full match expression range.
+        span: SourceSpan,
+    },
+    /// An indexed array access.
+    Index {
+        /// The array-valued expression.
+        collection: Box<Expression>,
+        /// The integer index expression.
+        index: Box<Expression>,
+        /// The full expression range.
+        span: SourceSpan,
+    },
+    /// A named member access.
+    Member {
+        /// The expression whose member is read.
+        object: Box<Expression>,
+        /// The selected member name.
+        member: Name,
+        /// The full expression range.
+        span: SourceSpan,
+    },
     /// A reference to a named local value.
     Name(Name),
+    /// A typed closure expression.
+    Arrow {
+        /// Stable closure identity within the lexically owning function.
+        closure: ClosureId,
+        /// Closure parameters in source order.
+        parameters: Vec<Parameter>,
+        /// The declared closure result type.
+        return_type: TypeReference,
+        /// The expression or block evaluated when the closure is called.
+        body: ArrowBody,
+        /// The full expression range.
+        span: SourceSpan,
+    },
     /// A prefix operator application.
     Unary {
         /// The prefix operator.
@@ -263,11 +905,91 @@ impl Expression {
         match self {
             Self::Integer { span, .. }
             | Self::Boolean { span, .. }
+            | Self::String { span, .. }
+            | Self::Array { span, .. }
+            | Self::Record { span, .. }
+            | Self::Match { span, .. }
+            | Self::Index { span, .. }
+            | Self::Member { span, .. }
+            | Self::Arrow { span, .. }
             | Self::Unary { span, .. }
             | Self::Binary { span, .. }
             | Self::Call { span, .. }
             | Self::Parenthesized { span, .. } => *span,
             Self::Name(name) => name.span,
+        }
+    }
+}
+
+/// The body form selected by a source arrow expression.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArrowBody {
+    /// A single value-producing expression.
+    Expression(Box<Expression>),
+    /// A braced statement body with explicit return behavior.
+    Block(Block),
+}
+
+impl ArrowBody {
+    /// Returns the complete source range of this arrow body.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        match self {
+            Self::Expression(expression) => expression.span(),
+            Self::Block(block) => block.span,
+        }
+    }
+}
+
+/// One named initializer in an immutable record literal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordFieldInitializer {
+    /// The source-written field name.
+    pub name: Name,
+    /// The initializer expression.
+    pub value: Expression,
+    /// The initializer's full source range.
+    pub span: SourceSpan,
+}
+
+/// One expression arm in a tagged-union match.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchArm {
+    /// The variant or default pattern selecting this arm.
+    pub pattern: MatchPattern,
+    /// The expression evaluated when the pattern is selected.
+    pub value: Expression,
+    /// The arm's full source range.
+    pub span: SourceSpan,
+}
+
+/// A non-nested v0.5 match pattern.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MatchPattern {
+    /// A qualified variant pattern with positional immutable bindings.
+    Variant {
+        /// The source-written union qualifier.
+        union: Name,
+        /// The source-written variant name.
+        variant: Name,
+        /// Positional payload bindings in source order.
+        bindings: Vec<Name>,
+        /// The full pattern range.
+        span: SourceSpan,
+    },
+    /// A catch-all pattern covering every remaining variant.
+    Default {
+        /// The `default` token range.
+        span: SourceSpan,
+    },
+}
+
+impl MatchPattern {
+    /// Returns the complete source range of this pattern.
+    #[must_use]
+    pub const fn span(&self) -> SourceSpan {
+        match self {
+            Self::Variant { span, .. } | Self::Default { span } => *span,
         }
     }
 }

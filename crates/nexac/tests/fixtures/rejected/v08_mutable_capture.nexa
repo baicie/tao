@@ -1,0 +1,4 @@
+function main(): Unit {
+  let value = 1;
+  const read: () => Int = (): Int => value;
+}

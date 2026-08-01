@@ -1,0 +1,20 @@
+type User = {
+  name: String;
+  scores: Int[];
+};
+
+function total(values: Int[]): Int {
+  let index = 0;
+  let result = 0;
+  while (index < values.length) {
+    result = result + values[index];
+    index = index + 1;
+  }
+  return result;
+}
+
+function main(): Unit {
+  const user: User = { scores: [20, 22], name: "Ada" };
+  print(user.name);
+  print(total(user.scores));
+}

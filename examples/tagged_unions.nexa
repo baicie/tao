@@ -1,0 +1,15 @@
+type List =
+  | Empty()
+  | Node(head: Int, tail: List);
+
+function sum(values: List): Int {
+  return match (values) {
+    case List.Empty() => 0;
+    case List.Node(head, tail) => head + sum(tail);
+  };
+}
+
+function main(): Unit {
+  const values = List.Node(20, List.Node(22, List.Empty()));
+  print(sum(values));
+}

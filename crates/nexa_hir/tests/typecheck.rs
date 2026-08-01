@@ -1,6 +1,9 @@
 //! Semantic regression tests for the Nexa Language Core.
 
-use nexa_hir::{lower, type_check, Analysis, LoweringError};
+use nexa_hir::{
+    lower, type_check, Analysis, Builtin, Expression, FunctionId, LocalId, LoweringError,
+    NameResolution, Statement, Type, TypeReferenceKind,
+};
 use nexa_parser::parse_source;
 use nexa_span::{FileId, SourceSpan, TextRange};
 
@@ -69,6 +72,119 @@ function main(): Unit {
 }
 
 #[test]
+fn type_check_accepts_and_decodes_string_expressions() -> Result<(), Box<dyn std::error::Error>> {
+    let source = "function main(): Unit {\n  const message: String = \"Nexa\\n\" + \"\u{4e16}\u{754c}\";\n  if (message === \"Nexa\\n\u{4e16}\u{754c}\") {\n    print(message);\n  }\n}";
+    let analysis = analyze(source)?;
+    let typed = analysis.typed().ok_or_else(|| {
+        std::io::Error::other(format!("diagnostics: {:?}", analysis.diagnostics()))
+    })?;
+    let Statement::Const(declaration) = &typed.program().functions[0].body.statements[0] else {
+        return Err(std::io::Error::other("expected const declaration").into());
+    };
+    let Expression::Binary { left, .. } = &declaration.initializer else {
+        return Err(std::io::Error::other("expected string concatenation").into());
+    };
+    let Expression::String { value, .. } = left.as_ref() else {
+        return Err(std::io::Error::other("expected decoded string literal").into());
+    };
+
+    assert_eq!(
+        (
+            value.as_str(),
+            declaration.annotation.as_ref().map(|ty| &ty.kind)
+        ),
+        ("Nexa\n", Some(&TypeReferenceKind::String))
+    );
+
+    Ok(())
+}
+
+#[test]
+fn type_check_accepts_nested_arrays_index_length_and_main_args(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let analysis = analyze(
+        r#"function first(values: Int[]): Int {
+  return values[0];
+}
+
+function main(args: String[]): Unit {
+  const rows: Int[][] = [[], [20, 22]];
+  print(args.length);
+  print(first(rows[1]));
+}"#,
+    )?;
+
+    assert!(
+        analysis.is_ok(),
+        "unexpected diagnostics: {:?}",
+        analysis.diagnostics()
+    );
+
+    Ok(())
+}
+
+#[test]
+fn type_check_contextualizes_empty_arrays_in_every_supported_position(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let analysis = analyze(
+        r#"function empty(): Int[] {
+  return [];
+}
+
+function consume(values: Int[]): Unit {}
+
+function main(): Unit {
+  let values: Int[] = [];
+  values = [];
+  consume([]);
+  consume(empty());
+}"#,
+    )?;
+
+    assert!(
+        analysis.is_ok(),
+        "unexpected diagnostics: {:?}",
+        analysis.diagnostics()
+    );
+
+    Ok(())
+}
+
+#[test]
+fn type_check_rejects_unconstrained_and_heterogeneous_arrays(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let analysis = analyze("function main(): Unit { const empty = []; const mixed = [1, true]; }")?;
+
+    assert_eq!(diagnostic_count(&analysis, "E3001"), 2);
+
+    Ok(())
+}
+
+#[test]
+fn type_check_rejects_invalid_array_indexes_members_and_equality(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let analysis = analyze(
+        r#"function main(): Unit {
+  const values = [1, 2];
+  const wrongIndex = values[false];
+  const wrongBase = 1[0];
+  print(values.capacity);
+  const same = values === values;
+}"#,
+    )?;
+
+    assert_eq!(
+        (
+            diagnostic_count(&analysis, "E3001"),
+            diagnostic_count(&analysis, "E2005")
+        ),
+        (3, 1)
+    );
+
+    Ok(())
+}
+
+#[test]
 fn type_check_allows_mutable_shadowing_in_nested_scopes() -> Result<(), Box<dyn std::error::Error>>
 {
     let analysis = analyze(
@@ -87,6 +203,200 @@ fn type_check_allows_mutable_shadowing_in_nested_scopes() -> Result<(), Box<dyn 
         "unexpected diagnostics: {:?}",
         analysis.diagnostics()
     );
+
+    Ok(())
+}
+
+#[test]
+fn type_check_rejects_unit_array_elements_and_unprintable_values(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let analysis = analyze(
+        "function main(): Unit { const empty: Unit[] = []; const values = [print(1)]; print([1]); }",
+    )?;
+
+    assert_eq!(diagnostic_count(&analysis, "E3001"), 3);
+
+    Ok(())
+}
+
+#[test]
+fn type_check_rejects_string_coercion_and_indexing_but_accepts_length(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let analysis = analyze(
+        r#"function main(): Unit {
+  const mixed = "answer: " + 42;
+  print("Nexa".length);
+  const indexed = "Nexa"[0];
+}"#,
+    )?;
+
+    assert_eq!(diagnostic_count(&analysis, "E3001"), 2);
+    assert_eq!(diagnostic_count(&analysis, "E2005"), 0);
+
+    Ok(())
+}
+
+#[test]
+fn type_check_rejects_invalid_main_signatures() -> Result<(), Box<dyn std::error::Error>> {
+    let wrong_argument = analyze("function main(args: Int[]): Unit {}")?;
+    let wrong_arity = analyze("function main(left: String[], right: String[]): Unit {}")?;
+    let wrong_return = analyze("function main(): Int { return 0; }")?;
+
+    assert!([&wrong_argument, &wrong_arity, &wrong_return]
+        .into_iter()
+        .all(|analysis| has_diagnostic(analysis, "E3003")));
+
+    Ok(())
+}
+
+#[test]
+fn typed_program_records_stable_types_and_name_resolutions(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = r#"function identity(value: Int): Int {
+  return value;
+}
+
+function main(args: String[]): Unit {
+  let total = identity(1);
+  if (true) {
+    const total = 2;
+    print(total);
+  }
+  total = total + args.length;
+  print(total);
+}"#;
+    let analysis = analyze(source)?;
+    let typed = analysis.typed().ok_or_else(|| {
+        std::io::Error::other(format!("diagnostics: {:?}", analysis.diagnostics()))
+    })?;
+    let identity_declaration = prefix_span(source, "identity(value", "identity".len())?;
+    let identity_call = prefix_span(source, "identity(1)", "identity".len())?;
+    let value_declaration = prefix_span(source, "value: Int", "value".len())?;
+    let value_reference = prefix_span(source, "value;", "value".len())?;
+    let outer_total = prefix_span(source, "total = identity", "total".len())?;
+    let inner_total = prefix_span(source, "total = 2", "total".len())?;
+    let assignment_total = prefix_span(source, "total = total +", "total".len())?;
+    let length = prefix_span(source, "length", "length".len())?;
+    let member = prefix_span(source, "args.length", "args.length".len())?;
+
+    assert_eq!(
+        (
+            typed.name_resolution(identity_declaration),
+            typed.name_resolution(identity_call),
+            typed.name_resolution(value_declaration),
+            typed.name_resolution(value_reference),
+            typed.name_resolution(outer_total),
+            typed.name_resolution(inner_total),
+            typed.name_resolution(assignment_total),
+            typed.name_resolution(length),
+            typed.expression_type(member),
+            typed
+                .function_facts(FunctionId::new(0))
+                .map(|facts| (facts.parameter_ids(), facts.local_count())),
+            typed
+                .function_facts(FunctionId::new(1))
+                .map(|facts| (facts.parameter_ids(), facts.local_count()))
+        ),
+        (
+            Some(NameResolution::Function(FunctionId::new(0))),
+            Some(NameResolution::Function(FunctionId::new(0))),
+            Some(NameResolution::Local(LocalId::new(0))),
+            Some(NameResolution::Local(LocalId::new(0))),
+            Some(NameResolution::Local(LocalId::new(1))),
+            Some(NameResolution::Local(LocalId::new(2))),
+            Some(NameResolution::Local(LocalId::new(1))),
+            Some(NameResolution::Builtin(Builtin::ArrayLength)),
+            Some(&Type::Int),
+            Some((&[LocalId::new(0)][..], 1)),
+            Some((&[LocalId::new(0)][..], 3))
+        )
+    );
+
+    Ok(())
+}
+
+#[test]
+fn typed_program_records_exact_immutable_data_expression_types(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = r#"function main(): Unit {
+  const values = ["Nexa"];
+  print(values[0]);
+  print(values.length);
+}"#;
+    let analysis = analyze(source)?;
+    let typed = analysis.typed().ok_or_else(|| {
+        std::io::Error::other(format!("diagnostics: {:?}", analysis.diagnostics()))
+    })?;
+    let string = prefix_span(source, r#""Nexa""#, r#""Nexa""#.len())?;
+    let array = prefix_span(source, r#"["Nexa"]"#, r#"["Nexa"]"#.len())?;
+    let index = prefix_span(source, "values[0]", "values[0]".len())?;
+    let member = prefix_span(source, "values.length", "values.length".len())?;
+    let string_array = Type::Array(Box::new(Type::String));
+
+    assert_eq!(
+        (
+            typed.expression_type(string),
+            typed.expression_type(array),
+            typed.expression_type(index),
+            typed.expression_type(member)
+        ),
+        (
+            Some(&Type::String),
+            Some(&string_array),
+            Some(&Type::String),
+            Some(&Type::Int)
+        )
+    );
+
+    Ok(())
+}
+
+#[test]
+fn immutable_data_diagnostics_keep_precise_primary_spans() -> Result<(), Box<dyn std::error::Error>>
+{
+    let source = r#"function main(): Unit {
+  const values = [1, 2];
+  const invalid = values[false];
+  print(values.capacity);
+  const mixed = [1, true];
+}"#;
+    let analysis = analyze(source)?;
+
+    assert_eq!(
+        (
+            primary_spans(&analysis, "E3001"),
+            primary_spans(&analysis, "E2005")
+        ),
+        (
+            vec![
+                prefix_span(source, "false", "false".len())?,
+                prefix_span(source, "true", "true".len())?
+            ],
+            vec![prefix_span(source, "capacity", "capacity".len())?]
+        )
+    );
+
+    Ok(())
+}
+
+#[test]
+fn typed_program_keeps_fact_spans_unique() -> Result<(), Box<dyn std::error::Error>> {
+    let analysis = analyze(
+        "function main(args: String[]): Unit { const values = [1, 2]; print(values[0] + args.length); }",
+    )?;
+    let typed = analysis.typed().ok_or_else(|| {
+        std::io::Error::other(format!("diagnostics: {:?}", analysis.diagnostics()))
+    })?;
+    let expression_spans = typed
+        .expression_types()
+        .map(|(span, _)| span)
+        .collect::<std::collections::HashSet<_>>();
+    let resolution_spans = typed
+        .name_resolutions()
+        .map(|(span, _)| span)
+        .collect::<std::collections::HashSet<_>>();
+
+    assert_eq!((expression_spans.len(), resolution_spans.len()), (10, 7));
 
     Ok(())
 }
@@ -161,6 +471,39 @@ fn type_check_reports_incorrect_call_arity() -> Result<(), Box<dyn std::error::E
     let analysis = analyze("function main(): Unit { print(); }")?;
 
     assert!(has_diagnostic(&analysis, "E2003"));
+
+    Ok(())
+}
+
+#[test]
+fn call_arity_labels_complete_calls_and_the_source_declaration(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = r#"function consume(value: Int): Unit {}
+function main(): Unit { consume(); print(1, 2); }"#;
+    let analysis = analyze(source)?;
+    let label_spans = analysis
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.code().as_str() == "E2003")
+        .map(|diagnostic| {
+            diagnostic
+                .labels()
+                .iter()
+                .map(|label| label.span())
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        label_spans,
+        [
+            vec![
+                prefix_span(source, "consume()", "consume()".len())?,
+                prefix_span(source, "consume(value", "consume".len())?,
+            ],
+            vec![prefix_span(source, "print(1, 2)", "print(1, 2)".len())?],
+        ]
+    );
 
     Ok(())
 }

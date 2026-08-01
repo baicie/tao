@@ -9,11 +9,20 @@ mod check;
 mod hir;
 mod lower;
 
-pub use check::{type_check, Analysis, TypedProgram};
-pub use hir::{
-    AssignmentStatement, BinaryOperator, Block, BreakStatement, ConstDeclaration,
-    ContinueStatement, Expression, ExpressionStatement, Function, IfStatement, LetDeclaration,
-    Name, Parameter, Program, ReturnStatement, Statement, Type, TypeReference, UnaryOperator,
-    WhileStatement,
+pub use check::{
+    type_check, type_check_modules, Analysis, Builtin, CallFacts, ClosureFacts, FunctionFacts,
+    LocalId, MatchArmFacts, MatchFacts, NameResolution, PayloadBindingFacts, PayloadFacts,
+    RecordFacts, RecordFieldFacts, ResolvedImport, TypeParameterFacts, TypedProgram, UnionFacts,
+    VariantConstructionFacts, VariantFacts,
 };
-pub use lower::{lower, LoweringError};
+pub use hir::{
+    ArrowBody, AssignmentStatement, BinaryOperator, Block, BreakStatement, ClosureId,
+    ConstDeclaration, ContinueStatement, DefId, Expression, ExpressionStatement, FieldId,
+    ForOfStatement, Function, FunctionId, IfStatement, ImportDeclaration, LetDeclaration, MatchArm,
+    MatchPattern, ModuleId, Name, Parameter, PayloadId, Program, RecordDeclaration,
+    RecordFieldDeclaration, RecordFieldInitializer, RecordId, ReturnStatement, Statement, Type,
+    TypeParameter, TypeParameterId, TypeParameterOwner, TypeReference, TypeReferenceKind,
+    UnaryOperator, UnionDeclaration, UnionId, UnionVariantDeclaration, VariantId,
+    VariantPayloadDeclaration, Visibility, WhileStatement,
+};
+pub use lower::{lower, lower_module, LoweringError};

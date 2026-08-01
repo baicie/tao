@@ -1,0 +1,24 @@
+[package]
+name = "nexa-fuzz"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.80"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+nexa_parser = { path = "../crates/nexa_parser" }
+nexa_span = { path = "../crates/nexa_span" }
+
+[[bin]]
+name = "parser"
+path = "fuzz_targets/parser.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

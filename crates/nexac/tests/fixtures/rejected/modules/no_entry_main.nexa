@@ -1,0 +1,2 @@
+import { main } from "./dependency_main.nexa";
+function start(): Bool { return main(1); }

@@ -1,11 +1,77 @@
-# Release
+# Nexa Language 1.0 Release Validation
 
-Release automation is intentionally deferred while `nexac parse` and `nexac check` are still stabilizing.
+Language Core v0.9 and the Nexa Language 1.0 integration release are delivered.
+The complete gate passed on 2026-08-01. This records the reproducible
+validation boundary; it does not claim that the Rust crates have stable 1.0
+APIs or have been published to a package registry.
 
-Before restoring release workflows:
+The local compatibility gate is:
 
-1. Decide which crates are publishable.
-2. Confirm package metadata and crate descriptions.
-3. Add dry-run publishing in dependency order.
-4. Add binary packaging for `nexac`.
-5. Require normal CI checks before publishing artifacts.
+```bash
+cargo xtask release-check
+```
+
+The command requires the current stable Rust toolchain, an installed Rust
+1.80.0 toolchain, Node.js 22, and pnpm 9. Install the documentation dependencies
+once with `pnpm --dir docs install --frozen-lockfile`. The local gate compiles
+the fuzz target but does not require `cargo-fuzz`; the separate nightly CI job
+owns bounded coverage-guided execution.
+
+That command validates the candidate without publishing anything. It runs:
+
+1. the locked Rust formatting, lint, test, and rustdoc quality gate;
+2. a Rust 1.80 compatibility check;
+3. the versioned `conformance/1.0` corpus;
+4. stable parser seed replay and a Rust 1.80 fuzz-target compile check;
+5. the release-mode performance workload;
+6. a release `nexac` build, version smoke, and canonical `check`/`run` smoke;
+7. `pnpm --dir docs build`.
+
+The individual repository entry points are:
+
+```bash
+cargo xtask check
+cargo xtask conformance
+cargo xtask fuzz-smoke
+cargo xtask perf
+cargo xtask release-check
+```
+
+The nightly CI fuzz job is intentionally separate: it runs exactly 256
+`cargo-fuzz` iterations and uploads crash artifacts. The stable seed replay and
+fuzz-target compile check remain part of `release-check`, so local validation
+does not require a nightly toolchain.
+
+## Delivery Performance Baseline
+
+The final Language 1.0 baseline was recorded on 2026-08-01 from implementation
+commit `4a38329` on
+Windows `x86_64-pc-windows-msvc` with Rust 1.80.0 and release-mode binaries.
+The generated source was 14985 bytes with 257 functions. Each workload used
+three samples.
+
+| Workload | Samples (microseconds) | Median |
+|---|---|---|
+| Frontend | 5615, 5621, 6014 | 5621 us |
+| Full pipeline | 6078, 6899, 7712 | 6899 us |
+
+Run `cargo xtask perf` to reproduce the workload. This baseline has no timing
+threshold, and results from different machines are not directly comparable.
+The samples are an engineering baseline only; the conformance gate validates
+results, not elapsed time.
+
+## Publication Boundary
+
+`release-check` does not publish crates, create a Git tag, push a branch,
+deploy documentation, or package a public binary distribution. Those remain
+separate, explicitly authorized operations. The completed integration process,
+not the command by itself, declares Nexa Language 1.0 Reference Core delivered.
+
+Security checks remain separately callable with `cargo xtask security`. That
+command treats missing security tools as optional, so a release owner must
+install and verify the intended audit tools before treating its result as a
+security review.
+
+See the [v0.9 specification](spec/language-core-v0.9.md),
+[v0.9 roadmap](project/roadmap/language-core-v0.9.md), and
+[Compatibility Policy](compatibility.md).

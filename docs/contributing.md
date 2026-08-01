@@ -4,7 +4,11 @@
 
 ```bash
 cargo xtask check
+cargo xtask conformance
 ```
+
+Before changing the Language 1.0 compatibility baseline, also run
+`cargo xtask release-check`. The command validates but does not publish.
 
 Optional tools:
 

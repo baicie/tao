@@ -10,6 +10,9 @@ publish = false
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+nexa_compiler.workspace = true
+nexa_diagnostics.workspace = true
+nexa_source.workspace = true
 
 [lints]
 workspace = true

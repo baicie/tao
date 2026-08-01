@@ -1,0 +1,2 @@
+// Unicode remains lossless even when identifiers reject it.
+function main(): Unit { const text = "Nexa 🙂"; print(text); }

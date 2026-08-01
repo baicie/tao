@@ -1,0 +1,2 @@
+import { fail } from "./runtime_library.nexa";
+function main(): Unit { print(7); fail(); }

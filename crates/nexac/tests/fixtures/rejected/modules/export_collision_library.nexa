@@ -1,0 +1,2 @@
+export type Item = { value: Int; };
+export function Item(): Int { return 42; }

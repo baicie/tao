@@ -1,0 +1,3 @@
+import { absent } from "./library.nexa";
+
+function main(): Unit {}

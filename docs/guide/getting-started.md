@@ -28,14 +28,27 @@ cargo test --workspace
 ## Try the CLI
 
 ```bash
-cargo run -p nexac -- check examples/stateful_control_flow.nexa
-cargo run -p nexac -- run examples/stateful_control_flow.nexa
-cargo run -p nexac -- parse examples/stateful_control_flow.nexa
+cargo run -p nexac -- check examples/practical-core/main.nexa
+cargo run -p nexac -- run examples/practical-core/main.nexa -- 20
+cargo run -p nexac -- parse examples/practical-core/main.nexa
 ```
 
 `check` parses, resolves, and type-checks the program. `run` executes the
-checked program's `main` function through the MIR interpreter and prints `12`
-for the bundled example.
+checked module graph's entry-local `main` function through the MIR interpreter.
+The bundled practical-core two-module example prints:
+
+```text
+42
+5
+```
+
+Language Core v0.8 adds exact function values, typed arrow functions,
+immutable closure captures, array `for...of`, immutable `append`/`concat`,
+Unicode-scalar string length, and explicit integer/string conversion. It
+retains bounded generics, deterministic relative imports, private-by-default
+exports, cross-file diagnostics, immutable UTF-8 `String`, and homogeneous
+`T[]` values. A program may use either `main(): Unit` with no program arguments or
+`main(args: String[]): Unit` to receive arguments after a second `--`.
 
 Nexa adopts familiar TypeScript-shaped syntax, but it is not a TypeScript or
 JavaScript compatibility layer. It deliberately has no JavaScript runtime
@@ -45,6 +58,10 @@ not in the core parser or IRs.
 
 ## Next Steps
 
+- Read the [Language Guide](/guide/language).
+- Read the [CLI Guide](/guide/cli).
 - Read [Project Structure](/guide/project-structure).
 - Read [Development](/guide/development).
+- Review the [Compatibility Policy](/compatibility).
+- Look up compiler failures in the [Diagnostic Reference](/reference/diagnostics).
 - Track language behavior in [Spec](/spec/).

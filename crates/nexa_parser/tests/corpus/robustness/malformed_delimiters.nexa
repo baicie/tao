@@ -1,0 +1,8 @@
+function broken(: Int, value Int): Unit {
+  const data = [1,, 2;
+  if (true { print(data.length); }
+}
+
+function later(): Unit {
+  print(1);
+}

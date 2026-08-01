@@ -1,0 +1,7 @@
+export type Shared = {
+  value: Int;
+};
+
+export function make(value: Int): Shared {
+  return { value: value };
+}
