@@ -6,7 +6,7 @@ use nexa_mir::{
 use nexa_nir::{
     BlockId, BuilderError, FunctionId, InstructionId, IntrinsicId, ModuleBuilder, NirSpan, NirType,
     Operation, Terminator, TypeId, TypedValue, ValueId, VerificationError, VerifiedModule,
-    Verifier,
+    Verifier, MAX_NIR_IDENTIFIER_BYTES,
 };
 use nexa_span::SourceSpan;
 use thiserror::Error;
@@ -116,7 +116,7 @@ pub(crate) fn lower(program: &MirProgram) -> Result<NirLoweringOutcome, NirLower
             .collect::<Result<Vec<_>, NirLoweringError>>()?;
         builder.define_function(
             id,
-            format!("m{}::{}", function.id().module().index(), function.name()),
+            lower_function_name(function),
             parameters,
             lower_type(function.return_type()).ok_or(NirLoweringError::UnitValue)?,
             BlockId::new(0),
@@ -465,6 +465,19 @@ fn lower_type(ty: &Type) -> Option<TypeId> {
         | Type::Parameter(_)
         | Type::Record { .. }
         | Type::Union { .. } => None,
+    }
+}
+
+fn lower_function_name(function: &MirFunction) -> String {
+    let qualified = format!("m{}::{}", function.id().module().index(), function.name());
+    if qualified.len() <= MAX_NIR_IDENTIFIER_BYTES {
+        qualified
+    } else {
+        format!(
+            "m{}::{}",
+            function.id().module().index(),
+            function.id().index()
+        )
     }
 }
 

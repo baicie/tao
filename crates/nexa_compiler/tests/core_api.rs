@@ -138,6 +138,30 @@ fn unsupported_post_n1_mir_is_deferred_without_fabricating_nir(
 }
 
 #[test]
+fn n1_lowering_accepts_source_function_names_longer_than_nir_identifiers(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let function_name = "a".repeat(300);
+    let source = format!(
+        "function {function_name}(): Int {{ return 42; }}\n\
+         function main(): Unit {{ print({function_name}()); }}"
+    );
+    let output = compile(&CompilerInput::new(
+        "main.ft",
+        [CompilerSource::new("main.ft", source)],
+    ))?;
+
+    assert_eq!(
+        output.dumps().artifact(CanonicalPhase::Nir).status(),
+        CanonicalArtifactStatus::Available
+    );
+    assert_eq!(
+        phase_value(&output, CanonicalPhase::Nir)?["module"]["functions"][0]["name"],
+        "m0::0"
+    );
+    Ok(())
+}
+
+#[test]
 fn canonical_token_schema_has_a_small_exact_golden() -> Result<(), Box<dyn std::error::Error>> {
     let value = phase_value(&accepted_output()?, CanonicalPhase::Tokens)?;
     let tokens = value[0]["tokens"]
