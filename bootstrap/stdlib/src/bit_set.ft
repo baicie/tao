@@ -1,0 +1,35 @@
+export type BitSet = {
+  values: Int[];
+};
+
+function containsBit(values: Int[], value: Int, index: Int): Bool {
+  if (index >= values.length) {
+    return false;
+  }
+  if (values[index] === value) {
+    return true;
+  }
+  return containsBit(values, value, index + 1);
+}
+
+export function bitSet(): BitSet {
+  return { values: [] };
+}
+
+export function bitSetInsert(set: BitSet, value: Int): BitSet {
+  if (value < 0 || containsBit(set.values, value, 0)) {
+    return set;
+  }
+  return { values: set.values.append(value) };
+}
+
+export function bitSetContains(set: BitSet, value: Int): Bool {
+  if (value < 0) {
+    return false;
+  }
+  return containsBit(set.values, value, 0);
+}
+
+export function bitSetValues(set: BitSet): Int[] {
+  return set.values;
+}

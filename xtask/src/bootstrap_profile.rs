@@ -502,7 +502,9 @@ fn compile_stdlib(
         sources,
         CompilerOptions::bootstrap_v1(),
     ))
-    .map_err(|error| anyhow::anyhow!("bootstrap stdlib compiler-core invocation failed: {error:?}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!("bootstrap stdlib compiler-core invocation failed: {error:?}")
+    })?;
     if !output.is_ok() {
         let summary = output
             .diagnostics()
@@ -621,6 +623,19 @@ mod tests {
         assert_eq!(
             run_stdlib_fixture(&root, &manifest, "tests/array-string.ft")?,
             ["10", "1", "2", "3", "1", "futao"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn collection_apis_preserve_stable_insertion_order_and_updates(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let manifest = parse_stdlib_manifest(STDLIB)?;
+
+        assert_eq!(
+            run_stdlib_fixture(&root, &manifest, "tests/collections.ft")?,
+            ["3", "2", "b", "a", "1", "20", "10", "true", "true", "true"]
         );
         Ok(())
     }

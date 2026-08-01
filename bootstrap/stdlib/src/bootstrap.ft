@@ -1,8 +1,29 @@
 import { binarySearch, filter, fold, map, sortBy } from "./array.ft";
+import { BitSet, bitSet, bitSetContains, bitSetInsert, bitSetValues } from "./bit_set.ft";
 import { Ordering, SourceId, Span } from "./core.ft";
 import { Diagnostic, Severity } from "./diagnostics.ft";
+import { IntMap, intMapContains, intMapGet, intMapInsert, intMapKeys } from "./int_map.ft";
 import { Option } from "./option.ft";
 import { Result } from "./result.ft";
+import {
+  IntSet,
+  StringSet,
+  intSet,
+  intSetContains,
+  intSetInsert,
+  intSetValues,
+  stringSet,
+  stringSetContains,
+  stringSetInsert,
+  stringSetValues
+} from "./sets.ft";
 import { SourceText, StringBuilder, finish, push, stringBuilder } from "./string.ft";
+import {
+  StringMap,
+  stringMapContains,
+  stringMapGet,
+  stringMapInsert,
+  stringMapKeys
+} from "./string_map.ft";
 
 function main(): Unit {}

@@ -1,0 +1,78 @@
+import { Option } from "./option.ft";
+
+export type StringMap<V> =
+  | Empty()
+  | Entries(keys: String[], values: V[]);
+
+function findStringKey(keys: String[], key: String, index: Int): Int {
+  if (index >= keys.length) {
+    return -1;
+  }
+  if (keys[index] === key) {
+    return index;
+  }
+  return findStringKey(keys, key, index + 1);
+}
+
+function replaceValue<V>(values: V[], target: Int, index: Int, value: V): V[] {
+  if (index >= values.length) {
+    return [];
+  }
+  if (index === target) {
+    return [value].concat(replaceValue(values, target, index + 1, value));
+  }
+  return [values[index]].concat(replaceValue(values, target, index + 1, value));
+}
+
+function insertEntry<V>(
+  keys: String[],
+  values: V[],
+  key: String,
+  value: V
+): StringMap<V> {
+  const index = findStringKey(keys, key, 0);
+  if (index < 0) {
+    return StringMap.Entries(keys.append(key), values.append(value));
+  }
+  return StringMap.Entries(keys, replaceValue(values, index, 0, value));
+}
+
+function getEntry<V>(keys: String[], values: V[], key: String): Option<V> {
+  const index = findStringKey(keys, key, 0);
+  if (index < 0) {
+    return Option.None();
+  }
+  return Option.Some(values[index]);
+}
+
+export function stringMapInsert<V>(
+  map: StringMap<V>,
+  key: String,
+  value: V
+): StringMap<V> {
+  return match (map) {
+    case StringMap.Empty() => StringMap.Entries([key], [value]);
+    case StringMap.Entries(keys, values) => insertEntry(keys, values, key, value);
+  };
+}
+
+export function stringMapGet<V>(map: StringMap<V>, key: String): Option<V> {
+  return match (map) {
+    case StringMap.Empty() => Option.None();
+    case StringMap.Entries(keys, values) => getEntry(keys, values, key);
+  };
+}
+
+export function stringMapContains<V>(map: StringMap<V>, key: String): Bool {
+  return match (map) {
+    case StringMap.Empty() => false;
+    case StringMap.Entries(keys, values) => findStringKey(keys, key, 0) >= 0;
+  };
+}
+
+export function stringMapKeys<V>(map: StringMap<V>): String[] {
+  return match (map) {
+    case StringMap.Empty() => [];
+    case StringMap.Entries(keys, values) => keys;
+  };
+}

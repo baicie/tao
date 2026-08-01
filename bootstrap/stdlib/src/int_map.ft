@@ -1,0 +1,69 @@
+import { Option } from "./option.ft";
+
+export type IntMap<V> =
+  | Empty()
+  | Entries(keys: Int[], values: V[]);
+
+function findIntKey(keys: Int[], key: Int, index: Int): Int {
+  if (index >= keys.length) {
+    return -1;
+  }
+  if (keys[index] === key) {
+    return index;
+  }
+  return findIntKey(keys, key, index + 1);
+}
+
+function replaceValue<V>(values: V[], target: Int, index: Int, value: V): V[] {
+  if (index >= values.length) {
+    return [];
+  }
+  if (index === target) {
+    return [value].concat(replaceValue(values, target, index + 1, value));
+  }
+  return [values[index]].concat(replaceValue(values, target, index + 1, value));
+}
+
+function insertEntry<V>(keys: Int[], values: V[], key: Int, value: V): IntMap<V> {
+  const index = findIntKey(keys, key, 0);
+  if (index < 0) {
+    return IntMap.Entries(keys.append(key), values.append(value));
+  }
+  return IntMap.Entries(keys, replaceValue(values, index, 0, value));
+}
+
+function getEntry<V>(keys: Int[], values: V[], key: Int): Option<V> {
+  const index = findIntKey(keys, key, 0);
+  if (index < 0) {
+    return Option.None();
+  }
+  return Option.Some(values[index]);
+}
+
+export function intMapInsert<V>(map: IntMap<V>, key: Int, value: V): IntMap<V> {
+  return match (map) {
+    case IntMap.Empty() => IntMap.Entries([key], [value]);
+    case IntMap.Entries(keys, values) => insertEntry(keys, values, key, value);
+  };
+}
+
+export function intMapGet<V>(map: IntMap<V>, key: Int): Option<V> {
+  return match (map) {
+    case IntMap.Empty() => Option.None();
+    case IntMap.Entries(keys, values) => getEntry(keys, values, key);
+  };
+}
+
+export function intMapContains<V>(map: IntMap<V>, key: Int): Bool {
+  return match (map) {
+    case IntMap.Empty() => false;
+    case IntMap.Entries(keys, values) => findIntKey(keys, key, 0) >= 0;
+  };
+}
+
+export function intMapKeys<V>(map: IntMap<V>): Int[] {
+  return match (map) {
+    case IntMap.Empty() => [];
+    case IntMap.Entries(keys, values) => keys;
+  };
+}

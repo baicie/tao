@@ -6,17 +6,21 @@
   "entry": "src/bootstrap.ft",
   "sourceFiles": [
     "src/array.ft",
+    "src/bit_set.ft",
     "src/bootstrap.ft",
     "src/core.ft",
     "src/diagnostics.ft",
+    "src/int_map.ft",
     "src/option.ft",
     "src/result.ft",
-    "src/string.ft"
+    "src/sets.ft",
+    "src/string.ft",
+    "src/string_map.ft"
   ],
   "requiredCapabilities": [],
   "iterationPolicy": "source-order",
   "treeHashAlgorithm": "sha256",
-  "treeDigest": "sha256:0cda6537468440f412969093d48f26d3091bc54655419f410b12b812cf25902f",
+  "treeDigest": "sha256:edf77950132b659881e01f85bbee921db66e48be6b3a07834020faaa68f35297",
   "canonicalDumpSchemaVersion": 1,
-  "buildDigest": "sha256:268b88b2784c14973666392db41d61313f2d45c0287ec8715080f4683a6eac9a"
+  "buildDigest": "sha256:39f4998967d700675e6f8655e6427c493118256360dd494cd5b252bf12e39807"
 }

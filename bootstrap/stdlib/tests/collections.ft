@@ -1,0 +1,55 @@
+import { BitSet, bitSet, bitSetContains, bitSetInsert } from "../src/bit_set.ft";
+import { IntMap, intMapGet, intMapInsert, intMapKeys } from "../src/int_map.ft";
+import { Option } from "../src/option.ft";
+import {
+  IntSet,
+  StringSet,
+  intSet,
+  intSetContains,
+  intSetInsert,
+  stringSet,
+  stringSetContains,
+  stringSetInsert
+} from "../src/sets.ft";
+import {
+  StringMap,
+  stringMapGet,
+  stringMapInsert,
+  stringMapKeys
+} from "../src/string_map.ft";
+
+function intValue(value: Option<Int>): Int {
+  return match (value) {
+    case Option.Some(found) => found;
+    case Option.None() => -1;
+  };
+}
+
+function main(): Unit {
+  const strings: StringMap<Int> = stringMapInsert(
+    stringMapInsert(stringMapInsert(StringMap.Empty(), "b", 2), "a", 1),
+    "b",
+    3
+  );
+  const integers: IntMap<Int> = intMapInsert(
+    intMapInsert(IntMap.Empty(), 20, 2),
+    10,
+    1
+  );
+  const stringKeys = stringMapKeys(strings);
+  const intKeys = intMapKeys(integers);
+  const stringsSet: StringSet = stringSetInsert(stringSetInsert(stringSet(), "ft"), "ft");
+  const intsSet: IntSet = intSetInsert(intSetInsert(intSet(), 42), 42);
+  const bits: BitSet = bitSetInsert(bitSetInsert(bitSet(), 7), 3);
+
+  print(intValue(stringMapGet(strings, "b")));
+  print(stringKeys.length);
+  print(stringKeys[0]);
+  print(stringKeys[1]);
+  print(intValue(intMapGet(integers, 10)));
+  print(intKeys[0]);
+  print(intKeys[1]);
+  print(stringSetContains(stringsSet, "ft"));
+  print(intSetContains(intsSet, 42));
+  print(bitSetContains(bits, 3));
+}
