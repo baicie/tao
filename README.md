@@ -1,8 +1,15 @@
-# Nexa
+# Futao
 
-Nexa is a Rust bootstrap compiler workspace for the delivered
+> **Futao is a systems and application programming language created in memory of Fu Tao.**
+
+See the bilingual [dedication](DEDICATION.md) and
+[ADR-010](docs/adr/010-futao-language-name.md) for the naming decision.
+
+This repository is the Rust bootstrap compiler workspace for the delivered
 [Nexa Language 1.0 Reference Core](docs/spec/language-1.0.md): a
 TypeScript-shaped language with independently specified native semantics.
+The existing `nexac 0.0.1`, Cargo crate names, and `.nexa` corpus retain their
+historical identifiers until the separately verified Futao toolchain rename.
 
 Language 1.0 is a statically checked, deterministic, multi-file command-line
 language executed by the CFG MIR reference interpreter. Its versioned
