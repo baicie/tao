@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 //! Compiler-driver entry points for the Nexa language front end.
 
+mod bootstrap_profile;
 mod canonical;
 mod core;
 mod differential;
@@ -22,7 +23,7 @@ pub use core::{
     compile, compile_session, CanonicalArtifact, CanonicalArtifactState, CanonicalArtifactStatus,
     CanonicalDiagnostic, CanonicalDumps, CanonicalLabel, CanonicalLabelStyle, CanonicalPhase,
     CanonicalSeverity, CompileError, CompilerInput, CompilerOptions, CompilerOutput,
-    CompilerSource, LanguageVersion, CANONICAL_DUMP_SCHEMA_VERSION,
+    CompilerProfile, CompilerSource, LanguageVersion, CANONICAL_DUMP_SCHEMA_VERSION,
 };
 pub use differential::{
     CompilerAdapter, CompilerAdapterState, CompilerImplementation, DifferenceClassification,

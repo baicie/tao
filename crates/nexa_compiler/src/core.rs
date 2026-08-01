@@ -15,7 +15,9 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::nir_lower::{lower as lower_nir, NirDeferred, NirLoweringError, NirLoweringOutcome};
-use crate::{canonical, check_session, CheckResult, CompilerSession, SessionBuildError};
+use crate::{
+    bootstrap_profile, canonical, check_session, CheckResult, CompilerSession, SessionBuildError,
+};
 
 /// Schema version for every canonical compiler phase dump emitted by this toolchain.
 pub const CANONICAL_DUMP_SCHEMA_VERSION: u32 = 1;
@@ -26,6 +28,27 @@ pub enum LanguageVersion {
     /// The frozen Nexa Language 1.0 compatibility baseline used during bootstrap.
     #[default]
     Nexa1_0,
+}
+
+/// Capability surface selected for one compiler-core invocation.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum CompilerProfile {
+    /// The complete frozen Language 1.0 application surface.
+    #[default]
+    Application,
+    /// The deterministic pure subset used by the self-hosted compiler.
+    BootstrapV1,
+}
+
+impl CompilerProfile {
+    /// Returns the canonical profile identifier.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Application => "application",
+            Self::BootstrapV1 => "futao-bootstrap-v1",
+        }
+    }
 }
 
 impl LanguageVersion {
@@ -42,6 +65,7 @@ impl LanguageVersion {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct CompilerOptions {
     language_version: LanguageVersion,
+    profile: CompilerProfile,
 }
 
 impl CompilerOptions {
@@ -50,6 +74,16 @@ impl CompilerOptions {
     pub const fn language_1_0() -> Self {
         Self {
             language_version: LanguageVersion::Nexa1_0,
+            profile: CompilerProfile::Application,
+        }
+    }
+
+    /// Creates options for Futao Bootstrap Profile v1.
+    #[must_use]
+    pub const fn bootstrap_v1() -> Self {
+        Self {
+            language_version: LanguageVersion::Nexa1_0,
+            profile: CompilerProfile::BootstrapV1,
         }
     }
 
@@ -57,6 +91,12 @@ impl CompilerOptions {
     #[must_use]
     pub const fn language_version(self) -> LanguageVersion {
         self.language_version
+    }
+
+    /// Returns the selected capability surface.
+    #[must_use]
+    pub const fn profile(self) -> CompilerProfile {
+        self.profile
     }
 }
 
@@ -167,6 +207,12 @@ pub enum CompileError {
     MissingEntry {
         /// The missing entry identity.
         entry: String,
+    },
+    /// Bootstrap Profile v1 only accepts Futao `.ft` source identities.
+    #[error("source identity `{identity}` is invalid: bootstrap profile requires `.ft` sources")]
+    InvalidBootstrapSourceIdentity {
+        /// The rejected source identity.
+        identity: String,
     },
     /// Session construction failed before a source-spanned result existed.
     #[error(transparent)]
@@ -542,7 +588,7 @@ pub fn compile(input: &CompilerInput) -> Result<CompilerOutput, CompileError> {
         let _ = provider.insert(source.identity(), source.content().as_bytes());
     }
     let session = CompilerSession::build(provider, Path::new(input.entry()))?;
-    compile_session(&session)
+    compile_session_with_options(&session, input.options())
 }
 
 /// Produces the same structured output for a Host-loaded compiler session.
@@ -554,7 +600,25 @@ pub fn compile(input: &CompilerInput) -> Result<CompilerOutput, CompileError> {
 ///
 /// Returns [`CompileError`] for a MIR invariant or canonical serialization failure.
 pub fn compile_session<P>(session: &CompilerSession<P>) -> Result<CompilerOutput, CompileError> {
-    let checked = check_session(session);
+    compile_session_with_options(session, CompilerOptions::default())
+}
+
+fn compile_session_with_options<P>(
+    session: &CompilerSession<P>,
+    options: CompilerOptions,
+) -> Result<CompilerOutput, CompileError> {
+    let mut checked = check_session(session);
+    if options.profile() == CompilerProfile::BootstrapV1 {
+        let profile_diagnostics = checked
+            .typed()
+            .map(bootstrap_profile::lint)
+            .unwrap_or_default();
+        if !profile_diagnostics.is_empty() {
+            checked.diagnostics.extend(profile_diagnostics);
+            checked.diagnostics.sort_by_key(crate::diagnostic_position);
+            checked.typed = None;
+        }
+    }
     let mir = checked.typed().map(lower_mir).transpose()?;
     let nir_outcome =
         mir.as_ref()
@@ -613,6 +677,13 @@ fn validated_sources(input: &CompilerInput) -> Result<Vec<&CompilerSource>, Comp
     let mut identities = BTreeSet::new();
     for source in &sources {
         validate_identity(source.identity())?;
+        if input.options().profile() == CompilerProfile::BootstrapV1
+            && !source.identity().ends_with(".ft")
+        {
+            return Err(CompileError::InvalidBootstrapSourceIdentity {
+                identity: source.identity().to_owned(),
+            });
+        }
         if !identities.insert(source.identity()) {
             return Err(CompileError::DuplicateSource {
                 identity: source.identity().to_owned(),
