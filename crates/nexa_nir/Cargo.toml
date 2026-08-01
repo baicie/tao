@@ -1,6 +1,6 @@
 [package]
-name = "nexa_compiler"
-description = "Compiler driver for the Nexa language front end."
+name = "nexa_nir"
+description = "Typed, verifiable target-neutral IR for the Futao bootstrap toolchain."
 version.workspace = true
 publish.workspace = true
 edition.workspace = true
@@ -11,15 +11,6 @@ homepage.workspace = true
 authors.workspace = true
 
 [dependencies]
-nexa_diagnostics.workspace = true
-nexa_hir.workspace = true
-nexa_mir.workspace = true
-nexa_nir.workspace = true
-nexa_parser.workspace = true
-nexa_source.workspace = true
-nexa_span.workspace = true
-nexa_syntax.workspace = true
-rowan.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

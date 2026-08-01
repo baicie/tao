@@ -19,7 +19,7 @@ and the completed integration evidence is retained in the
 
 The language compatibility version and compiler package version are separate.
 The complete Language 1.0 reference core currently ships as the self-use
-`nexac 0.0.4`; Rust crate APIs and distribution remain intentionally unstable.
+`nexac 0.0.5`; Rust crate APIs and distribution remain intentionally unstable.
 
 ## Layout
 
@@ -32,6 +32,7 @@ crates/
   nexa_parser/       # Parser entry points and recovery diagnostics
   nexa_hir/          # HIR lowering, name resolution, and type checking
   nexa_mir/          # MIR lowering and interpreter
+  nexa_nir/          # Typed NIR, verifier, target layout, private artifacts
   nexa_storage/      # Bootstrap ownership and bounded storage kernel
   nexa_compiler/     # Compiler driver
   nexac/              # CLI entry point
@@ -52,7 +53,8 @@ nexac -> nexa_source -> nexa_span
                      |                \-> nexa_diagnostics -> nexa_span
                      +-> nexa_hir -> nexa_syntax
                      |             \-> nexa_diagnostics -> nexa_span
-                     \-> nexa_mir -> nexa_hir
+                     +-> nexa_mir -> nexa_hir
+                     \-> nexa_nir
 
 nexa_storage -> safe Host-backed bootstrap ownership/storage contracts
 ```
@@ -63,6 +65,7 @@ nexa_storage -> safe Host-backed bootstrap ownership/storage contracts
 cargo xtask check
 cargo xtask bootstrap-contract
 cargo xtask storage-kernel
+cargo xtask nir-artifact
 cargo run -p nexac -- check examples/practical-core/main.nexa
 cargo run -p nexac -- run examples/practical-core/main.nexa -- 20
 cargo run -p nexac -- parse examples/practical-core/main.nexa
@@ -75,6 +78,9 @@ documented in
 The `0.0.4` ownership/storage subset and its deliberate ADR-004 exclusions are
 documented in
 [docs/implementation/storage-kernel-0.0.4.md](docs/implementation/storage-kernel-0.0.4.md).
+The `0.0.5` typed NIR, verifier, layout, and private artifact boundary is
+documented in
+[docs/implementation/nir-artifact-0.0.5.md](docs/implementation/nir-artifact-0.0.5.md).
 
 Install the self-use CLI from a local checkout with:
 
@@ -87,11 +93,11 @@ Version tags publish checked Linux, macOS, and Windows archives with SHA-256
 files through [GitHub Releases](https://github.com/baicie/nexa/releases). The
 compiler remains a prerelease and is not published to crates.io.
 
-After `v0.0.4` is published, the same version can be installed reproducibly
+After `v0.0.5` is published, the same version can be installed reproducibly
 from its tag:
 
 ```bash
-cargo install --locked --git https://github.com/baicie/nexa --tag v0.0.4 nexac
+cargo install --locked --git https://github.com/baicie/nexa --tag v0.0.5 nexac
 ```
 
 Nexa intentionally borrows familiar TypeScript surface syntax without

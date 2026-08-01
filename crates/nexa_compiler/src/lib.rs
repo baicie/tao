@@ -4,6 +4,7 @@
 mod canonical;
 mod core;
 mod differential;
+mod nir_lower;
 mod session;
 
 use std::collections::{HashMap, HashSet};

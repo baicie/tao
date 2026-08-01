@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "toolchainVersion": "0.0.4",
+  "toolchainVersion": "0.0.5",
   "languageVersion": "1.0",
   "stage0": {
     "implementation": "rust",
@@ -29,6 +29,14 @@
     "stability": "public",
     "consumer": "rust-verifier-backend",
     "comparison": "normalized-c2-c3",
+    "artifactMagic": "FUTAO-NIR",
+    "nirSchemaVersion": 1,
+    "verifierCrate": "nexa_nir",
+    "verifierVersion": "0.0.5",
+    "targetProfile": "target-neutral-v1",
+    "featureFlags": ["n1-scalar-cfg-v1"],
+    "canonicalEncoding": "strict-json",
+    "contentHashAlgorithm": "sha256",
     "publicExtension": ".nca",
     "signatureEnvelopeIncluded": true
   },

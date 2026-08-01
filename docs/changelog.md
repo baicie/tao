@@ -1,5 +1,15 @@
 # Changelog
 
+## Compiler Package 0.0.5 (Typed NIR and Bootstrap Artifact)
+
+- Added target-neutral typed NIR construction and an independent verifier for
+  type, CFG, SSA, static-call, intrinsic, and owned-value invariants.
+- Added explicit checked 32/64-bit target layout and deterministic scalar
+  MIR-to-NIR lowering with honest `Deferred` results for later phases.
+- Added the strict private `FUTAO-NIR` schema, exact compiler compatibility,
+  SHA-256 integrity, canonical bytes, rejected fixtures, and bootstrap/release
+  gates without making NIR public or changing the `.nexc` lifecycle.
+
 ## Compiler Package 0.0.4 (Ownership and Storage Kernel)
 
 - Added `nexa_storage`, a safe Rust reference kernel for validated Host layouts,

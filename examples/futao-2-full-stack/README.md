@@ -15,7 +15,7 @@ component build plan without embedding a payload or signature.
 | `futao.toml` / `futao.lock` | Accepted target design | Package fixture review |
 | Wasm/UI/release metadata | Accepted target design | Loader-policy fixture review |
 
-The delivered bootstrap compiler is still `nexac 0.0.4` and implements the
+The delivered bootstrap compiler is still `nexac 0.0.5` and implements the
 pre-rename Language 1.0 baseline only. It must reject or fail to parse many
 files under `target-2.0`; that is expected.
 Those files are examples of the accepted 2.0 contracts, not claims that the
