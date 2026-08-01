@@ -4332,7 +4332,7 @@ impl FunctionChecker<'_> {
             .return_type
             .as_ref()
             .map(|return_type| substitute_type(return_type, &substitutions))
-            .filter(|return_type| !type_contains_parameter(return_type))
+            .filter(|return_type| !formal_contains_any_parameter(return_type, &parameter_ids))
     }
 
     fn check_variant_constructor(
