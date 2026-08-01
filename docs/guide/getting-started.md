@@ -38,9 +38,9 @@ cargo test --workspace
 ## Try the CLI
 
 ```bash
-cargo run -p nexac -- check examples/practical-core/main.nexa
-cargo run -p nexac -- run examples/practical-core/main.nexa -- 20
-cargo run -p nexac -- parse examples/practical-core/main.nexa
+nexac check examples/practical-core/main.nexa
+nexac run examples/practical-core/main.nexa -- 20
+nexac parse examples/practical-core/main.nexa
 ```
 
 `check` parses, resolves, and type-checks the program. `run` executes the
