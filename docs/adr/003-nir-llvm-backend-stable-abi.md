@@ -2860,11 +2860,11 @@ Generated Binding
 
 ## 68. 后续 ADR
 
-本 ADR 完成后，应继续编写：
+本 ADR 的边界已由以下决策按依赖顺序细化：
 
-1. **ADR-004：Allocator、Arena、Vec、String 与运行时内存布局**
-2. **ADR-005：Host ABI、Capability 与资源 Handle**
-3. **ADR-006：Result、Panic、defer 与跨 ABI 错误模型**
-4. **ADR-007：Async 状态机、Structured Concurrency 与并发安全**
-5. **ADR-008：Wasm、JavaScript FFI 与跨平台 UI Host**
-6. **ADR-009：包格式、Lockfile、稳定组件产物与签名**
+1. [ADR-004：Allocator、Arena、集合与运行时内存布局](004-runtime-memory-layout.md)
+2. [ADR-005：Host ABI、Capability 与资源 Handle](005-host-abi-capabilities-handles.md)
+3. [ADR-006：Result、Panic、defer 与跨 ABI 错误模型](006-errors-panic-defer-abi.md)
+4. [ADR-007：Async 状态机、Structured Concurrency 与并发安全](007-async-structured-concurrency.md)
+5. [ADR-008：WebAssembly、JavaScript FFI 与跨平台 UI Host](008-wasm-js-ffi-ui-host.md)
+6. [ADR-009：包、Lockfile、组件产物与签名](009-package-lockfile-artifacts-signing.md)

@@ -11,7 +11,7 @@
 > 本 ADR 仍是 Proposed。ADR-001 和 ADR-003 已接受 LLVM Native AOT、内部 NIR
 > 与“初期不建设独立公共字节码”的方向，因此本文中的 VM、自举产物与稳定
 > `.nca` 格式仍是待验证方案。接受本 ADR 前，必须明确自举产物是同工具链内部
-> 格式还是稳定组件格式，并与 ADR-003、后续 ADR-009 的边界保持一致。
+> 格式还是稳定组件格式，并与 ADR-003、ADR-009 的边界保持一致。
 
 ---
 
@@ -1354,6 +1354,8 @@ ADR-006 错误与跨 ABI 失败
 ADR-007 Async 与并发
     ↓
 ADR-008 Wasm、JavaScript FFI 与 UI Host
+    ↓
+ADR-009 包、Lockfile、组件产物与签名
 ```
 
 UI 原型可以在自举中后期探索，但不能反向改变 Bootstrap Profile。
