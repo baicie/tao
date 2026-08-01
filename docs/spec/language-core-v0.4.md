@@ -2,10 +2,9 @@
 
 ## Status
 
-Language Core v0.4 is delivered and remains a normative predecessor. Its
-implementation satisfies the exit criteria in the
-[v0.4 roadmap](../project/roadmap/language-core-v0.4.md). The current executable
-language is [Language Core v0.8](language-core-v0.8.md).
+Language Core v0.4 is delivered and remains a normative predecessor of the
+[Language 1.0 contract](language-1.0.md). Its acceptance behavior remains
+covered by the compiler tests and versioned conformance corpus.
 
 ## Product Contract
 

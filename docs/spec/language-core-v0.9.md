@@ -3,8 +3,9 @@
 ## Status
 
 Language Core v0.9 is delivered. It is the stabilization contract layered over
-[Language Core v0.8](language-core-v0.8.md), and every gate in the
-[v0.9 roadmap](../project/roadmap/language-core-v0.9.md) passed on 2026-08-01.
+[Language Core v0.8](language-core-v0.8.md). Its complete release gate passed
+on 2026-08-01 and is retained in the
+[Language 1.0 delivery archive](../project/archive/language-1.0-delivery.md).
 
 v0.9 adds no source syntax, value type, static rule, MIR operation, builtin, or
 runtime behavior. Its purpose is to freeze, exercise, document, and measure the

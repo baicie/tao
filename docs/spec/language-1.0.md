@@ -6,8 +6,8 @@ Nexa Language 1.0 Reference Core is delivered. This document is its normative
 integration contract and compatibility baseline. The delivered
 [Language Core v0.9](language-core-v0.9.md) stabilization milestone adds no
 language syntax; it freezes and validates the behavior established through
-v0.8. Every 1.0 integration gate in the
-[roadmap](../project/roadmap/language-1.0.md) passed on 2026-08-01.
+v0.8. Every 1.0 integration gate passed on 2026-08-01; the evidence is retained
+in the [delivery archive](../project/archive/language-1.0-delivery.md).
 
 ## Product Contract
 

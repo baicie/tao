@@ -98,6 +98,6 @@ command treats missing security tools as optional, so a release owner must
 install and verify the intended audit tools before treating its result as a
 security review.
 
-See the [v0.9 specification](spec/language-core-v0.9.md),
-[v0.9 roadmap](project/roadmap/language-core-v0.9.md), and
+See the [Language 1.0 specification](spec/language-1.0.md),
+[delivery archive](project/archive/language-1.0-delivery.md), and
 [Compatibility Policy](compatibility.md).

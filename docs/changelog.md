@@ -19,7 +19,7 @@
 
 ## Language Core v0.9 (Delivered)
 
-- Added the v0.9 stabilization contract and delivery roadmap without changing
+- Added the v0.9 stabilization contract and validation gates without changing
   the v0.8 language surface.
 - Added the versioned 1.0 conformance runner, parser fuzz and recovery,
   deterministic stress, performance-baseline, and release-validation gates.
