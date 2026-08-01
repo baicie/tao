@@ -4,7 +4,44 @@
 descriptor HostError {
   category: U32;
   stable_code: U32;
-  safe_message: Optional<OwnedUtf8>;
+  safe_message: Optional<Handle<Utf8Buffer>>;
+}
+
+host module owned-buffer@1 {
+  schema_defaults since 1.0, non_reentrant, accounting owned-host-bytes;
+
+  @id(0x0d0001)
+  function byte_length(
+    buffer: borrow Handle<ByteBuffer>
+  ) -> Result<U64, HostError>;
+
+  @id(0x0d0002)
+  function copy_bytes(
+    buffer: borrow Handle<ByteBuffer>,
+    offset: copy U64,
+    output: mut_borrow ByteSlice
+  ) -> Result<U64, HostError>;
+
+  @id(0x0d0003)
+  function close_bytes(
+    buffer: take Handle<ByteBuffer>
+  ) -> Result<Unit, HostError>;
+
+  @id(0x0d0004)
+  function utf8_byte_length(
+    buffer: borrow Handle<Utf8Buffer>
+  ) -> Result<U64, HostError>;
+
+  @id(0x0d0005)
+  function copy_utf8(
+    buffer: borrow Handle<Utf8Buffer>,
+    output: mut_borrow ByteSlice
+  ) -> Result<U64, HostError>;
+
+  @id(0x0d0006)
+  function close_utf8(
+    buffer: take Handle<Utf8Buffer>
+  ) -> Result<Unit, HostError>;
 }
 
 descriptor AsyncPoll<T> {
@@ -19,7 +56,7 @@ host module filesystem@1 {
   @id(0x010001)
   function read(
     path: borrow Utf8View
-  ) -> Result<return_owned OwnedBytes, HostError>;
+  ) -> Result<return_owned Handle<ByteBuffer>, HostError>;
 
   @id(0x010002)
   function create(
@@ -50,7 +87,7 @@ host module network@1 {
   @id(0x020002)
   async function poll_response(
     operation: mut_borrow Handle<HttpOperation>
-  ) -> Result<AsyncPoll<return_owned OwnedBytes>, HostError>;
+  ) -> Result<AsyncPoll<return_owned Handle<ByteBuffer>>, HostError>;
 
   @id(0x020003)
   function cancel(
@@ -61,6 +98,11 @@ host module network@1 {
   function close(
     operation: take Handle<HttpOperation>
   ) -> Result<Unit, HostError>;
+
+  @id(0x020005)
+  function parse_url(
+    text: borrow Utf8View
+  ) -> Result<return_owned UrlDescriptor, HostError>;
 }
 
 host module time@1 {
@@ -93,7 +135,7 @@ host module environment@1 {
   @id(0x050001)
   function read(
     name: borrow Utf8View
-  ) -> Result<return_owned Optional<OwnedUtf8>, HostError>;
+  ) -> Result<return_owned Optional<Handle<Utf8Buffer>>, HostError>;
 }
 
 host module process@1 {
@@ -191,7 +233,7 @@ host module camera@1 {
   @id(0x090002)
   async function poll_capture(
     capture: mut_borrow Handle<CameraCapture>
-  ) -> Result<AsyncPoll<return_owned OwnedBytes>, HostError>;
+  ) -> Result<AsyncPoll<return_owned Handle<ByteBuffer>>, HostError>;
 
   @id(0x090003)
   function cancel(
@@ -211,7 +253,7 @@ host module microphone@1 {
   @id(0x0a0002)
   async function poll_recording(
     capture: mut_borrow Handle<MicrophoneCapture>
-  ) -> Result<AsyncPoll<return_owned OwnedBytes>, HostError>;
+  ) -> Result<AsyncPoll<return_owned Handle<ByteBuffer>>, HostError>;
 
   @id(0x0a0003)
   function cancel(
@@ -231,7 +273,7 @@ host module gpu@1 {
   @id(0x0b0002)
   function ui_resource(
     buffer: borrow Handle<GpuBuffer>
-  ) -> Result<UiResourceRef, HostError>;
+  ) -> Result<return_owned Handle<UiResourceRef>, HostError>;
 
   @id(0x0b0003)
   function close(

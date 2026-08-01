@@ -76,8 +76,10 @@ export function countPlainRecords(incidents: Array<Incident>): U64 {
   let arena = PlainArena.new();
   let counters = arena.array<U64>(incidents.length);
 
-  for (let index: U64 = 0; index < incidents.length; index = index + 1) {
+  let index: U64 = 0;
+  while (index < incidents.length) {
     counters[index] = incidents[index].evidence.length;
+    index = index + 1;
   }
 
   return counters.sum();

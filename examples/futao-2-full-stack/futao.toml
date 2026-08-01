@@ -12,6 +12,21 @@ publish = false
 kind = "component"
 root = "target-2.0/src/main.ft"
 component_type = "field-console@1"
+profile = "application"
+
+[targets.memory-contract]
+kind = "test"
+root = "target-2.0/tests/accepted/ownership-memory.ft"
+profile = "freestanding-contract"
+
+[profiles.application]
+default_allocator = true
+oom = "abort"
+
+[profiles.freestanding-contract]
+default_allocator = false
+allocator = "explicit"
+oom = "result"
 
 [features]
 default = ["wasm-ui"]
@@ -54,7 +69,7 @@ scopes = ["timeline-buffer"]
 scopes = ["field-cache"]
 
 [build]
-profiles = ["application"]
+profiles = ["application", "freestanding-contract"]
 panic = "abort"
 oom = "abort"
 async_runtime_abi = 1

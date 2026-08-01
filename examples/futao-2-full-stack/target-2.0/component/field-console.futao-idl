@@ -3,7 +3,7 @@
 descriptor ComponentError {
   category: U32;
   stable_code: U32;
-  safe_message: Optional<OwnedUtf8>;
+  safe_message: Optional<Handle<Utf8Buffer>>;
 }
 
 descriptor AsyncPoll<T> {
@@ -19,6 +19,7 @@ component field-console@1 {
   threading_model single-thread-with-owned-workers;
 
   imports {
+    host owned-buffer@1;
     host filesystem@1;
     host network@1;
     host time@1;

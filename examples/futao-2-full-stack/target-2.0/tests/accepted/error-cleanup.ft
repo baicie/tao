@@ -1,5 +1,5 @@
 import { AppError, fromHost } from "../../src/errors.ft";
-import { FileHandle, FilesystemHost } from "../../src/platform.ft";
+import { FilesystemHost } from "../../src/platform.ft";
 
 function writeReport(
   filesystem: FilesystemHost,
@@ -9,10 +9,10 @@ function writeReport(
     case Ok(handle) => handle;
     case Err(error) => return Err(AppError.Host(error));
   };
-  defer file.closeIgnoringError();
 
   try {
     fromHost(file.writeAll(bytes.asSlice()))?;
+    defer file.closeIgnoringError();
     return Ok(Unit);
   } catch {
     case error => return Err(error);

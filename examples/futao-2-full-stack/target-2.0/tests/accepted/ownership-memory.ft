@@ -2,6 +2,24 @@ import { Incident } from "../../src/model.ft";
 
 function consume(take incident: Incident): Unit {}
 
+class ZstDrop {
+  function drop(mut self): Unit {
+    DropTrace.record("zst-drop");
+  }
+}
+
+function collections(): U64 {
+  const utf8 = "Futao".clone();
+  let markers = Vec<ZstDrop>();
+  markers.push(ZstDrop());
+  markers.push(ZstDrop());
+  markers.reserve(32);
+  const removed = markers.pop();
+  drop(removed);
+  const frozen = markers.freeze();
+  return utf8.byteLength + frozen.length;
+}
+
 function ownershipAndMemory(take incident: Incident): U64 {
   const copy = incident.clone();
   let queue = Vec<Incident>();

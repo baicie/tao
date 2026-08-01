@@ -77,9 +77,12 @@ export async function synchronize(
   deadline: Deadline,
 ): Result<SyncReport, AppError> {
   const uploadedIncidents = batch.incidents.length;
+  const serviceUrl = fromHost(network.parseUrl(
+    "https://incidents.example.invalid/v1/sync",
+  ))?;
   const request: HttpRequest = {
     method: "POST",
-    url: "https://incidents.example.invalid/v1/sync",
+    url: serviceUrl,
     headers: ["content-type: application/octet-stream"],
     body: encodeBatch(batch),
   };
@@ -89,12 +92,12 @@ export async function synchronize(
     case DeadlineOutcome.Expired => return Err(AppError.DeadlineExceeded);
   };
   let database = fromHost(databaseHost.open("field-cache"))?;
-  defer database.closeIgnoringError();
 
   fromHost(database.execute(
     "sync.commit.v1",
     [batch.correlationId.clone(), toString(uploadedIncidents)],
   ))?;
+  defer database.closeIgnoringError();
 
   return Ok({
     correlationId: batch.correlationId,

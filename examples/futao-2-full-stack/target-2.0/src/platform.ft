@@ -8,10 +8,14 @@ export type Deadline = {
 
 export type HttpRequest = {
   method: String;
-  url: String;
+  url: Url;
   headers: Array<String>;
   body: Array<U8>;
 };
+
+export class Url {
+  private canonicalUtf8: String;
+}
 
 export type ProcessRequest = {
   executableId: String;
@@ -48,14 +52,10 @@ export enum UiProperty {
   GpuResource,
 }
 
-export class UiResourceRef {
-  private typedHandle: U64;
-}
-
 export enum UiPropertyValue {
   Text(String),
   Integer(I64),
-  Resource(UiResourceRef),
+  ResourceIndex(U32),
 }
 
 export enum UiEventType {
@@ -148,12 +148,15 @@ export resource GpuBufferHandle {
   function close(take self): Result<Unit, HostError>;
 }
 
+export resource UiResourceRef {}
+
 export interface FilesystemHost {
   function read(path: String): Result<Array<U8>, HostError>;
   function create(path: String): Result<FileHandle, HostError>;
 }
 
 export interface NetworkHost {
+  function parseUrl(text: String): Result<Url, HostError>;
   function start(take request: HttpRequest): Result<HttpOperation, HostError>;
 }
 

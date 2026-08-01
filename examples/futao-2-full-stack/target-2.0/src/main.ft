@@ -34,7 +34,6 @@ function seedBatch(take id: String): IncidentBatch {
   };
 }
 
-@componentExport("field-console/run@1")
 export async function run(
   take platform: Platform,
 ): Result<Unit, AppError> {
