@@ -63,9 +63,35 @@ results, not elapsed time.
 ## Publication Boundary
 
 `release-check` does not publish crates, create a Git tag, push a branch,
-deploy documentation, or package a public binary distribution. Those remain
-separate, explicitly authorized operations. The completed integration process,
+deploy documentation, or publish a binary distribution. Publishing remains a
+separate, explicitly authorized operation. The completed integration process,
 not the command by itself, declares Nexa Language 1.0 Reference Core delivered.
+
+The self-use compiler is versioned independently as `nexac 0.0.1`. After a
+release commit is merged to `main`, create and push the matching annotated tag:
+
+```bash
+git switch main
+git pull --ff-only
+git tag -a v0.0.1 -m "nexac 0.0.1"
+git push origin v0.0.1
+```
+
+The [release workflow](https://github.com/baicie/nexa/actions/workflows/release.yml)
+rejects a tag that does not exactly match the Cargo package version or does not
+point to `main`. It then runs the complete release and security gates, builds
+and smoke-tests Rust 1.80 binaries on Linux, macOS, and Windows, verifies the
+archives after extraction, attaches `.tar.gz` archives and SHA-256 files, and
+publishes the result as a GitHub prerelease. It does not publish any crate to
+crates.io; every workspace package explicitly disables registry publication.
+
+All validation and platform builds finish before GitHub Release creation, so
+failures in those jobs can be retried without moving the tag. If publication
+is interrupted and leaves a draft, delete that draft with
+`gh release delete v0.0.1 --yes` before rerunning the workflow. If the tagged
+source itself needs correction, increment the package version and create a new
+tag rather than rewriting the existing tag. Reinstall any earlier tag to roll
+back, or remove the CLI with `cargo uninstall nexac`.
 
 Security checks remain separately callable with `cargo xtask security`. That
 command treats missing security tools as optional, so a release owner must

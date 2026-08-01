@@ -28,6 +28,12 @@ nexac --version
 
 The installed compiler reports version `0.0.1`. This pre-stable tool version
 implements the separately versioned Nexa Language 1.0 compatibility baseline.
+After the corresponding tag is published, install the same source revision
+without keeping a checkout:
+
+```bash
+cargo install --locked --git https://github.com/baicie/nexa --tag v0.0.1 nexac
+```
 
 ## Test
 

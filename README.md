@@ -68,6 +68,17 @@ cargo install --locked --path crates/nexac
 nexac --version
 ```
 
+Version tags publish checked Linux, macOS, and Windows archives with SHA-256
+files through [GitHub Releases](https://github.com/baicie/nexa/releases). The
+compiler remains a prerelease and is not published to crates.io.
+
+After `v0.0.1` is published, the same version can be installed reproducibly
+from its tag:
+
+```bash
+cargo install --locked --git https://github.com/baicie/nexa --tag v0.0.1 nexac
+```
+
 [Language Core v0.8](docs/spec/language-core-v0.8.md) builds on immutable UTF-8
 strings, homogeneous arrays, nominal records, tagged unions, exhaustive
 matching, deterministic multi-file modules, and bounded generics. Function
