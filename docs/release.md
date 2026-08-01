@@ -73,14 +73,14 @@ deploy documentation, or publish a binary distribution. Publishing remains a
 separate, explicitly authorized operation. The completed integration process,
 not the command by itself, declares Nexa Language 1.0 Reference Core delivered.
 
-The self-use compiler is versioned independently as `nexac 0.0.3`. After a
+The self-use compiler is versioned independently as `nexac 0.0.4`. After a
 release commit is squash-merged to `mvp`, create and push the matching annotated tag:
 
 ```bash
 git switch mvp
 git pull --ff-only
-git tag -a v0.0.3 -m "nexac 0.0.3"
-git push origin v0.0.3
+git tag -a v0.0.4 -m "nexac 0.0.4"
+git push origin v0.0.4
 ```
 
 The [release workflow](https://github.com/baicie/nexa/actions/workflows/release.yml)
@@ -94,7 +94,7 @@ crates.io; every workspace package explicitly disables registry publication.
 All validation and platform builds finish before GitHub Release creation, so
 failures in those jobs can be retried without moving the tag. If publication
 is interrupted and leaves a draft, delete that draft with
-`gh release delete v0.0.3 --yes` before rerunning the workflow. If the tagged
+`gh release delete v0.0.4 --yes` before rerunning the workflow. If the tagged
 source itself needs correction, increment the package version and create a new
 tag rather than rewriting the existing tag. Reinstall any earlier tag to roll
 back, or remove the CLI with `cargo uninstall nexac`.

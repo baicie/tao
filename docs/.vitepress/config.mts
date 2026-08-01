@@ -82,6 +82,7 @@ export default defineConfig({
             { text: "ADR-010 Futao Name", link: "/adr/010-futao-language-name" },
             { text: "ADR-011 Self-host Gate", link: "/adr/011-toolchain-versioning-and-self-hosting-gate" },
             { text: "0.1.0 Implementation Plan", link: "/implementation/self-hosting-0.1.0" },
+            { text: "0.0.4 Storage Kernel", link: "/implementation/storage-kernel-0.0.4" },
           ],
         },
         {

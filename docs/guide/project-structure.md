@@ -9,6 +9,7 @@
 | `crates/nexa_parser` | parser entry points |
 | `crates/nexa_hir` | CST lowering, name resolution, and type checking |
 | `crates/nexa_mir` | middle IR lowering and interpreter |
+| `crates/nexa_storage` | bootstrap ownership and bounded storage contracts |
 | `crates/nexa_compiler` | compiler-driver entry points |
 | `crates/nexac` | compiler CLI and diagnostic rendering |
 | `xtask` | development automation |
@@ -25,11 +26,15 @@ nexac -> nexa_source -> nexa_span
                      +-> nexa_hir -> nexa_syntax
                      |             \-> nexa_diagnostics -> nexa_span
                      \-> nexa_mir -> nexa_hir
+
+nexa_storage -> safe Host-backed bootstrap ownership/storage contracts
 ```
 
 `nexa_compiler` owns phase orchestration; `nexa_parser` only builds CST and
 parser diagnostics, while semantic checks live in `nexa_hir` and execution
-receives only MIR. Keep the graph acyclic. Avoid catch-all crates.
+receives only MIR. `nexa_storage` is an independent reference kernel until the
+Futao compiler starts consuming its frozen contract. Keep the graph acyclic.
+Avoid catch-all crates.
 
 Nexa's surface syntax is TypeScript-shaped, not TypeScript-compatible. A
 future OXC or SWC integration must live in a dedicated adapter crate and lower

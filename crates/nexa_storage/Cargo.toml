@@ -1,0 +1,17 @@
+[package]
+name = "nexa_storage"
+description = "Ownership and deterministic storage kernel for the Futao bootstrap toolchain."
+version.workspace = true
+publish.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true

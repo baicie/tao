@@ -1,5 +1,16 @@
 # Changelog
 
+## Compiler Package 0.0.4 (Ownership and Storage Kernel)
+
+- Added `nexa_storage`, a safe Rust reference kernel for validated Host layouts,
+  logical allocator provenance, bounded `StorageVec`/`StorageArray`, UTF-8
+  construction, deterministic collections, interned symbols, and arenas.
+- Added a pure Place state machine for Copy, Move, reinitialization, conservative
+  joins, and reverse successful-initialization cleanup.
+- Added accepted, rejected, compile-fail, ZST, failed-growth, stale-handle, MSRV,
+  release workload, and Miri gates without claiming the deferred full ADR-004
+  target-layout, Box/Shared, ABI, or cross-backend work.
+
 ## Compiler Package 0.0.3 (Differential Foundation)
 
 - Added `.ft` entry and import support without removing historical `.nexa`
