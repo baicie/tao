@@ -127,3 +127,31 @@ function main(): Unit {
     assert!(output.is_ok(), "{:?}", output.diagnostics());
     Ok(())
 }
+
+#[test]
+fn canonical_dump_binds_the_selected_compilation_profile() -> Result<(), Box<dyn std::error::Error>>
+{
+    let source = "function main(): Unit {}";
+    let application = compile(&CompilerInput::new(
+        "main.ft",
+        [CompilerSource::new("main.ft", source)],
+    ))?;
+    let bootstrap = compile(&CompilerInput::with_options(
+        "main.ft",
+        [CompilerSource::new("main.ft", source)],
+        CompilerOptions::bootstrap_v1(),
+    ))?;
+    let application_dump: serde_json::Value =
+        serde_json::from_str(&application.dumps().to_json()?)?;
+    let bootstrap_dump: serde_json::Value = serde_json::from_str(&bootstrap.dumps().to_json()?)?;
+
+    assert_eq!(application.dumps().compilation_profile(), "application");
+    assert_eq!(
+        bootstrap.dumps().compilation_profile(),
+        "futao-bootstrap-v1"
+    );
+    assert_eq!(application_dump["compilationProfile"], "application");
+    assert_eq!(bootstrap_dump["compilationProfile"], "futao-bootstrap-v1");
+    assert_ne!(application.dumps(), bootstrap.dumps());
+    Ok(())
+}

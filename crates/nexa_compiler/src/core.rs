@@ -465,6 +465,7 @@ impl CanonicalDiagnostic {
 pub struct CanonicalDumps {
     schema_version: u32,
     language_version: String,
+    compilation_profile: String,
     artifacts: Vec<CanonicalArtifact>,
 }
 
@@ -479,6 +480,12 @@ impl CanonicalDumps {
     #[must_use]
     pub fn language_version(&self) -> &str {
         &self.language_version
+    }
+
+    /// Returns the capability profile used to produce these artifacts.
+    #[must_use]
+    pub fn compilation_profile(&self) -> &str {
+        &self.compilation_profile
     }
 
     /// Returns all phase artifacts in the fixed canonical order.
@@ -651,6 +658,7 @@ fn compile_session_with_options<P>(
     diagnostics.sort_by(canonical_diagnostic_order);
     let dumps = canonical_dumps(
         session,
+        options,
         &checked,
         mir.as_ref(),
         nir_artifact.as_deref(),
@@ -800,6 +808,7 @@ struct CanonicalLabelShape {
 
 fn canonical_dumps<P>(
     session: &CompilerSession<P>,
+    options: CompilerOptions,
     checked: &CheckResult,
     mir: Option<&MirProgram>,
     nir_artifact: Option<&[u8]>,
@@ -945,7 +954,8 @@ fn canonical_dumps<P>(
 
     Ok(CanonicalDumps {
         schema_version: CANONICAL_DUMP_SCHEMA_VERSION,
-        language_version: LanguageVersion::Nexa1_0.as_str().to_owned(),
+        language_version: options.language_version().as_str().to_owned(),
+        compilation_profile: options.profile().as_str().to_owned(),
         artifacts,
     })
 }

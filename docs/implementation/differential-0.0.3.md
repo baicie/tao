@@ -72,6 +72,7 @@ The root document printed by `nexac dump` has this logical shape:
 {
   "schemaVersion": 1,
   "languageVersion": "1.0",
+  "compilationProfile": "application",
   "artifacts": [
     { "phase": "tokens", "artifact": { "state": "produced", "content": "..." } },
     { "phase": "cst", "artifact": { "state": "produced", "content": "..." } },
@@ -83,7 +84,9 @@ The root document printed by `nexac dump` has this logical shape:
 }
 ```
 
-The `content` field is itself a compact JSON envelope with `schemaVersion`,
+`compilationProfile` is `application` or `futao-bootstrap-v1`; otherwise identical
+source graphs compiled under different capability surfaces remain distinct canonical
+builds. The `content` field is itself a compact JSON envelope with `schemaVersion`,
 `phase`, and `value`. Object fields, arrays, and phase entries have fixed order.
 Strings use JSON escaping; byte offsets, source ordinals, module ordinals, local
 slots, and block IDs are checked unsigned integers.
