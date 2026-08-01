@@ -1,4 +1,16 @@
 import { binarySearch, filter, fold, map, sortBy } from "./array.ft";
+import {
+  Arena,
+  ArenaAccessError,
+  ArenaId,
+  ArenaInsert,
+  arenaGeneration,
+  arenaGet,
+  arenaIdGeneration,
+  arenaIdIndex,
+  arenaInsert,
+  arenaReset
+} from "./arena.ft";
 import { BitSet, bitSet, bitSetContains, bitSetInsert, bitSetValues } from "./bit_set.ft";
 import { Ordering, SourceId, Span } from "./core.ft";
 import { Diagnostic, Severity } from "./diagnostics.ft";

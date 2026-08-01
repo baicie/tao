@@ -639,4 +639,27 @@ mod tests {
         );
         Ok(())
     }
+
+    #[test]
+    fn arena_ids_reject_foreign_stale_and_invalid_access() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let manifest = parse_stdlib_manifest(STDLIB)?;
+
+        assert_eq!(
+            run_stdlib_fixture(&root, &manifest, "tests/arena.ft")?,
+            [
+                "0",
+                "1",
+                "0",
+                "first",
+                "first",
+                "1",
+                "stale-generation",
+                "wrong-arena",
+                "invalid-index"
+            ]
+        );
+        Ok(())
+    }
 }
