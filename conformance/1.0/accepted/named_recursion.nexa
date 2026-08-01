@@ -1,0 +1,11 @@
+function factorial(value: Int): Int {
+  if (value <= 1) {
+    return 1;
+  }
+
+  return value * factorial(value - 1);
+}
+
+function main(): Unit {
+  print(factorial(5));
+}

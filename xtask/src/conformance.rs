@@ -947,7 +947,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(report.is_ok(), "report: {report:?}");
-        assert_eq!(names.len(), 27);
+        assert_eq!(names.len(), 31);
         assert_eq!(names.first(), Some(&"accepted-check"));
         assert_eq!(names.last(), Some(&"runtime-prior-output"));
 

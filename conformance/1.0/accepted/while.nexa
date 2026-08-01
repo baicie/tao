@@ -1,0 +1,11 @@
+function main(): Unit {
+  let value = 0;
+  let total = 0;
+
+  while (value < 5) {
+    value = value + 1;
+    total = total + value;
+  }
+
+  print(total - 5);
+}

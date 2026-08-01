@@ -59,6 +59,41 @@ fn cross_file_diagnostic_order_is_stable_across_provider_insertion_order(
     Ok(())
 }
 
+#[test]
+fn generic_closure_loop_and_runtime_failure_are_stable_across_provider_insertion_order(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let forward = combined_failure_session(false)?;
+    let reverse = combined_failure_session(true)?;
+
+    assert_eq!(forward.modules(), reverse.modules());
+    assert_eq!(forward.edges(), reverse.edges());
+
+    let forward_checked = check_session(&forward);
+    let reverse_checked = check_session(&reverse);
+    assert_eq!(forward_checked, reverse_checked);
+
+    let forward_typed = forward_checked
+        .typed()
+        .ok_or_else(|| std::io::Error::other("forward combined program did not type-check"))?;
+    let reverse_typed = reverse_checked
+        .typed()
+        .ok_or_else(|| std::io::Error::other("reverse combined program did not type-check"))?;
+    let forward_mir = lower_mir(forward_typed)?;
+    let reverse_mir = lower_mir(reverse_typed)?;
+    assert_eq!(forward_mir, reverse_mir);
+
+    let forward_run = run_session(&forward);
+    let reverse_run = run_session(&reverse);
+    assert_eq!(forward_run, reverse_run);
+    assert_eq!(forward_run.output(), ["0", "2", "4"]);
+    assert_eq!(
+        forward_run.runtime_error().map(|error| error.message()),
+        Some("division by zero")
+    );
+
+    Ok(())
+}
+
 fn chain_session(
     reverse: bool,
     with_errors: bool,
@@ -76,6 +111,50 @@ fn chain_session(
     Ok(CompilerSession::build(
         provider,
         Path::new("chain/module0.nexa"),
+    )?)
+}
+
+fn combined_failure_session(
+    reverse: bool,
+) -> Result<CompilerSession<MemorySourceProvider>, Box<dyn std::error::Error>> {
+    let mut sources = vec![
+        (
+            "combined/main.nexa",
+            r#"import { identity } from "./support.nexa";
+
+function main(): Unit {
+  const factor = identity(2);
+  const scale: (value: Int) => Int =
+    (value: Int): Int => value * factor;
+  let index = 0;
+
+  while (index < 3) {
+    print(scale(index));
+    index = index + 1;
+  }
+
+  print(1 / 0);
+}"#,
+        ),
+        (
+            "combined/support.nexa",
+            r#"export function identity<T>(value: T): T {
+  return value;
+}"#,
+        ),
+    ];
+    if reverse {
+        sources.reverse();
+    }
+
+    let mut provider = MemorySourceProvider::default();
+    for (path, source) in sources {
+        let _ = provider.insert(path, source.as_bytes());
+    }
+
+    Ok(CompilerSession::build(
+        provider,
+        Path::new("combined/main.nexa"),
     )?)
 }
 

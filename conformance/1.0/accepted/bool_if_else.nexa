@@ -1,0 +1,12 @@
+function choose(value: Bool): Int {
+  if (value) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+function main(): Unit {
+  print(choose(true));
+  print(choose(false));
+}
