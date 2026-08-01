@@ -4310,29 +4310,29 @@ impl FunctionChecker<'_> {
             .filter_map(|parameter| substitutions.get(&parameter.id).cloned())
             .collect::<Vec<_>>()
             .into_boxed_slice();
-        if type_arguments.len() == signature.type_parameters.len() {
-            self.facts.record_call(
-                span,
-                CallFacts {
-                    function,
-                    type_arguments: type_arguments.clone(),
-                },
-            );
-            self.facts.generic_calls.push(GenericCallEdge {
-                caller: self.function_id,
-                callee: function,
-                arguments: type_arguments.clone(),
-                span,
-            });
-            self.facts
-                .record_instance(DefId::Function(function), &type_arguments, span);
+        if type_arguments.len() != signature.type_parameters.len() {
+            return None;
         }
+        self.facts.record_call(
+            span,
+            CallFacts {
+                function,
+                type_arguments: type_arguments.clone(),
+            },
+        );
+        self.facts.generic_calls.push(GenericCallEdge {
+            caller: self.function_id,
+            callee: function,
+            arguments: type_arguments.clone(),
+            span,
+        });
+        self.facts
+            .record_instance(DefId::Function(function), &type_arguments, span);
 
         signature
             .return_type
             .as_ref()
             .map(|return_type| substitute_type(return_type, &substitutions))
-            .filter(|return_type| !formal_contains_any_parameter(return_type, &parameter_ids))
     }
 
     fn check_variant_constructor(

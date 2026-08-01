@@ -49,6 +49,20 @@ function main(): Unit { forward(42); }"#,
 }
 
 #[test]
+fn lowering_accepts_a_regular_recursive_generic_return() -> Result<(), Box<dyn std::error::Error>> {
+    let program = lower_source(
+        r#"function repeat<T>(value: T): T { return repeat(value); }
+function main(): Unit { repeat(42); }"#,
+    )?;
+    let typed = type_checked(&program)?;
+
+    let mir = lower_mir(&typed)?;
+
+    assert_eq!(mir.functions().len(), 2);
+    Ok(())
+}
+
+#[test]
 fn lowering_rejects_call_facts_that_do_not_instantiate_the_actual_argument(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut program = lower_source(
