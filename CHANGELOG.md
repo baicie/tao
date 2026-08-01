@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.0.5 - 2026-08-02
+
+- Add typed target-neutral NIR construction with explicit functions, basic
+  blocks, SSA values, source spans, operations, terminators, and intrinsics.
+- Add an independent verifier for type, CFG, SSA, call, intrinsic, and owned
+  value invariants plus checked 32/64-bit target layout calculation.
+- Add compiler lowering for the scalar static-call N1 subset, with explicit
+  `Deferred` results for later MIR features instead of fabricated NIR.
+- Add a strict private `FUTAO-NIR` schema with exact compiler compatibility,
+  canonical JSON bytes, SHA-256 integrity, accepted/rejected fixtures, and
+  bootstrap/release gates while keeping `.nexc` separate.
+
 ## 0.0.4 - 2026-08-02
 
 - Add the safe `nexa_storage` reference kernel for checked layout arithmetic,

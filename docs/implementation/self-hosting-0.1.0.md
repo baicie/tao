@@ -11,7 +11,7 @@ Accepted 状态解释为对应实现已经存在。
 
 ## 当前基线
 
-* 工具链版本：`0.0.4`。
+* 工具链版本：`0.0.5`。
 * Stage 0：固定为 `nexac 0.0.1` Rust 实现，覆盖 Lexer、Parser、Resolver、Type Checker、HIR、CFG MIR、
   reference interpreter、诊断、conformance 与 release gate。
 * 语言名称：新设计和源码使用 Futao / `.ft`；现有 Nexa / `.nexa` 输入在迁移策略
@@ -21,7 +21,8 @@ Accepted 状态解释为对应实现已经存在。
 * `0.0.2` 已收敛产物边界：自举输出是内部 NIR，公共 stable component 仍由 ADR-009 定义为 `.nexc`。
 * `0.0.3` 已建立 Futao 源码入口、纯 compiler core 与 differential 基础设施。
 * `0.0.4` 已建立自举 ownership/storage reference kernel 与独立验收门槛。
-* 下一里程碑：`0.0.5` target-neutral NIR、独立 verifier 与内部自举产物。
+* `0.0.5` 已建立 target-neutral typed NIR、独立 verifier、显式 target layout 与私有自举产物。
+* 下一里程碑：`0.0.6` Bootstrap Profile 与 Bootstrap Stdlib。
 
 ## 关键依赖
 
@@ -129,6 +130,16 @@ Box/Shared、跨后端或 ABI 验收完成。详细边界见
 
 验收：mutation/rejected fixtures 被 verifier 拒绝；round trip 保持 canonical form；固定
 输入跨平台产生相同目标无关 NIR。
+
+交付状态：已实现。`nexa_nir` 交付 N0/N1 typed module、builder、独立 verifier、32/64-bit
+显式 target layout 和 schema 1 private canonical artifact；compiler core 将 `Bool`、`Int`、
+`Unit`、single-block return、single-assignment local、static call 与 typed print intrinsic
+降低为真实 NIR。字符串、聚合、闭包、可变 local、多 block 和后续 operation 明确输出
+`Deferred`，不伪造部分产物。bootstrap manifest 固定 magic、schema、verifier/version、
+target profile、feature flags、canonical encoding 与 content hash；accepted fixture 和内容
+篡改、未知字段、未知 schema rejected fixtures 由 `cargo xtask nir-artifact` 精确验证。
+该里程碑不包含 LLVM、Host ABI、公共 NIR 或 `.nexc` 扩展。详细边界见
+[`nir-artifact-0.0.5.md`](nir-artifact-0.0.5.md)。
 
 ### `0.0.6`：冻结 Bootstrap Profile
 
