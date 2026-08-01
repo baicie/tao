@@ -1,0 +1,29 @@
+version	1.0
+name	mode	entry	arguments	expectation	expected
+accepted-check	check	accepted/check.nexa	-	stdout	ok\n
+accepted-run	run	accepted/run/main.nexa	20	stdout	42\n5\n
+rejected-parser	check	rejected/invalid_string_escape.nexa	-	diagnostics	E1001,E1001
+rejected-name	check	rejected/undefined_name.nexa	-	diagnostics	E2001
+rejected-duplicate	check	rejected/duplicate_binding.nexa	-	diagnostics	E2002
+rejected-arity	check	rejected/call_arity.nexa	-	diagnostics	E2003
+rejected-immutable	check	rejected/immutable_assignment.nexa	-	diagnostics	E2004
+rejected-member	check	rejected/unknown_member.nexa	-	diagnostics	E2005
+rejected-missing-field	check	rejected/missing_record_field.nexa	-	diagnostics	E2006
+rejected-type	check	rejected/type_mismatch.nexa	-	diagnostics	E3001
+rejected-condition	check	rejected/non_boolean_condition.nexa	-	diagnostics	E3002
+rejected-return	check	rejected/invalid_return.nexa	-	diagnostics	E3003
+rejected-loop-control	check	rejected/break_outside_loop.nexa	-	diagnostics	E3004
+rejected-recursive-record	check	rejected/recursive_record.nexa	-	diagnostics	E3005
+rejected-exhaustiveness	check	rejected/non_exhaustive_match.nexa	-	diagnostics	E3006
+rejected-unreachable-arm	check	rejected/unreachable_match_arm.nexa	-	diagnostics	E3007
+rejected-generic	check	rejected/unconstrained_type_parameter.nexa	-	diagnostics	E3008
+rejected-generic-inference	check	rejected/unresolved_generic_inference.nexa	-	diagnostics	E3009
+rejected-generic-recursion	check	rejected/expanding_generic_recursion.nexa	-	diagnostics	E3010
+rejected-closure	check	rejected/mutable_capture.nexa	-	diagnostics	E3011
+rejected-generic-value	check	rejected/generic_function_value.nexa	-	diagnostics	E3012
+rejected-import-source	check	rejected/missing_import/main.nexa	-	diagnostics	E4001
+rejected-cycle	check	rejected/cycle/main.nexa	-	diagnostics	E4002
+rejected-import-name	check	rejected/unknown_import/main.nexa	-	diagnostics	E4003
+rejected-visibility	check	rejected/visibility/main.nexa	-	diagnostics	E4004
+rejected-export-collision	check	rejected/export_collision/main.nexa	-	diagnostics	E4005
+runtime-prior-output	run	rejected/runtime_failure.nexa	-	runtime	division by zero\t7\n

@@ -4,6 +4,22 @@ use std::path::PathBuf;
 use std::process::Command;
 
 #[test]
+fn nexac_reports_its_compiler_package_version() -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
+        .arg("--version")
+        .output()?;
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        format!("nexac {}\n", env!("CARGO_PKG_VERSION"))
+    );
+    assert!(output.stderr.is_empty());
+
+    Ok(())
+}
+
+#[test]
 fn nexac_check_accepts_a_language_core_program() -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::new(env!("CARGO_BIN_EXE_nexac"))
         .arg("check")

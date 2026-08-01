@@ -23,6 +23,17 @@ implementation milestone is v0.9 stabilization, which freezes and hardens the
 delivered language without adding syntax under the broader
 [Nexa Language 1.0 roadmap](../project/roadmap/language-1.0.md).
 
+The active [Language Core v0.9 contract](language-core-v0.9.md) defines the
+keyword, precedence, evaluation, diagnostic, conformance, fuzz, determinism,
+performance, documentation, and release-candidate gates. Its implementation is
+tracked by the [v0.9 roadmap](../project/roadmap/language-core-v0.9.md). v0.9 is
+not yet delivered, and the Language 1.0 integration release remains pending.
+
+Cross-version guarantees are summarized in the
+[Compatibility Policy](../compatibility.md). The
+[Diagnostic Reference](../reference/diagnostics.md) collects the complete
+required code set and normative runtime failures.
+
 OXC and SWC are not part of the core language implementation. If TypeScript
 interop is added later, it must be isolated in an adapter crate that lowers
 into Nexa HIR and does not make JavaScript runtime semantics or third-party

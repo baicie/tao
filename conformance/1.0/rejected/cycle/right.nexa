@@ -1,0 +1,5 @@
+import { left } from "./main.nexa";
+
+export function right(): Int {
+  return left();
+}

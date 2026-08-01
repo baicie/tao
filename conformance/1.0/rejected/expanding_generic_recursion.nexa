@@ -1,0 +1,5 @@
+type Grow<T> =
+  | End()
+  | Next(value: Grow<T[]>);
+
+function main(): Unit {}

@@ -74,7 +74,7 @@ milestone and adds no language syntax.
 - Add explicit `toString` and `parseInt` conversions.
 - Deliver a realistic multi-file CLI example using every earlier milestone.
 
-### v0.9: Stabilization
+### v0.9: Stabilization (Active)
 
 - Freeze the keyword set, grammar, evaluation order, and required diagnostic
   codes without adding new language syntax.
@@ -82,8 +82,10 @@ milestone and adds no language syntax.
 - Add parser fuzzing, larger programs, recovery stress tests, and performance
   baselines.
 - Complete the language guide and compatibility policy.
+- Satisfy the complete [v0.9 specification](../../spec/language-core-v0.9.md)
+  and [delivery roadmap](language-core-v0.9.md).
 
-### 1.0: Integration Release
+### 1.0: Integration Release (Pending)
 
 - Run one multi-file program through parse, check, typed HIR, CFG MIR, and the
   reference interpreter.
@@ -95,10 +97,11 @@ milestone and adds no language syntax.
 
 ## Slice Rules
 
-Each implementation milestone is a vertical slice through syntax, parser
+Each feature milestone through v0.8 is a vertical slice through syntax, parser
 recovery, HIR lowering, semantic checking, MIR, interpreter, compiler driver,
 CLI fixtures, documentation, and examples. A feature is not delivered when it
-only parses.
+only parses. v0.9 is deliberately cross-cutting: it must exercise every phase
+without adding behavior to any language phase.
 
 Every new accepted behavior needs an executable test. Every new rejection path
 needs a stable diagnostic-code and source-span test. MIR must consume resolved
@@ -106,7 +109,9 @@ typed HIR facts; it may not perform source-level lookup. New crates are added
 only when a phase boundary has real behavior.
 
 Each milestone is committed independently on the 1.0 integration branch after
-`cargo xtask check` and its milestone-specific manual examples pass.
+`cargo xtask check` and its milestone-specific manual examples pass. v0.9 also
+requires its versioned conformance, parser robustness, determinism,
+performance-baseline, documentation, and release-validation gates.
 
 ## Dependency Route
 

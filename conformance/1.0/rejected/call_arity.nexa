@@ -1,0 +1,7 @@
+function printOne(value: Int): Unit {
+  print(value);
+}
+
+function main(): Unit {
+  printOne();
+}

@@ -22,7 +22,10 @@ export default defineConfig({
       {
         text: "More",
         items: [
-          { text: "Active Roadmap", link: "/project/roadmap/language-1.0" },
+          { text: "Active v0.9 Spec", link: "/spec/language-core-v0.9" },
+          { text: "Active Roadmap", link: "/project/roadmap/language-core-v0.9" },
+          { text: "Compatibility", link: "/compatibility" },
+          { text: "Diagnostics", link: "/reference/diagnostics" },
           { text: "Language 1.0 Roadmap", link: "/project/roadmap/language-1.0" },
           { text: "Changelog", link: "/changelog" },
           { text: "Contributing", link: "/contributing" },
@@ -37,6 +40,8 @@ export default defineConfig({
           collapsed: false,
           items: [
             { text: "Getting Started", link: "/guide/getting-started" },
+            { text: "Language Guide", link: "/guide/language" },
+            { text: "CLI Guide", link: "/guide/cli" },
             { text: "Project Structure", link: "/guide/project-structure" },
             { text: "Development", link: "/guide/development" },
           ],
@@ -52,6 +57,8 @@ export default defineConfig({
           collapsed: false,
           items: [
             { text: "Getting Started", link: "/guide/getting-started" },
+            { text: "Language Guide", link: "/guide/language" },
+            { text: "CLI Guide", link: "/guide/cli" },
             { text: "Project Structure", link: "/guide/project-structure" },
             { text: "Development", link: "/guide/development" },
           ],
@@ -64,12 +71,22 @@ export default defineConfig({
           ],
         },
         {
+          text: "Reference",
+          collapsed: false,
+          items: [
+            { text: "Compatibility", link: "/compatibility" },
+            { text: "Diagnostics", link: "/reference/diagnostics" },
+            { text: "Release Validation", link: "/release" },
+          ],
+        },
+        {
           text: "Language Design",
           collapsed: false,
           items: [
+            { text: "Language Core v0.9 (Active)", link: "/spec/language-core-v0.9" },
+            { text: "v0.9 Roadmap (Active)", link: "/project/roadmap/language-core-v0.9" },
             { text: "Language Core v0.8 (Delivered)", link: "/spec/language-core-v0.8" },
             { text: "v0.8 Roadmap (Delivered)", link: "/project/roadmap/language-core-v0.8" },
-            { text: "v0.9 Stabilization (Active)", link: "/project/roadmap/language-1.0" },
             { text: "Language Core v0.7 (Delivered)", link: "/spec/language-core-v0.7" },
             { text: "v0.7 Roadmap (Delivered)", link: "/project/roadmap/language-core-v0.7" },
             { text: "Language Core v0.6 (Delivered)", link: "/spec/language-core-v0.6" },

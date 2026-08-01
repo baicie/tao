@@ -23,7 +23,7 @@ features:
   - title: Immutable Data
     details: UTF-8 strings, homogeneous arrays, generic nominal data, closures, ordinary error values, and command-line arguments have explicit native semantics.
   - title: Current Milestone
-    details: Language Core v0.8 delivers function values and the practical core; v0.9 freezes and hardens the 1.0 surface without new syntax.
+    details: Language Core v0.8 is delivered; active v0.9 work freezes and hardens the 1.0 surface without new syntax.
   - title: Native Semantics
     details: Familiar TypeScript-shaped syntax does not imply JavaScript runtime compatibility.
   - title: Rust Tooling

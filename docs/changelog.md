@@ -1,5 +1,18 @@
 # Changelog
 
+## Language Core v0.9 (Active)
+
+- Added the v0.9 stabilization contract and delivery roadmap without changing
+  the v0.8 language surface.
+- Defined the planned versioned 1.0 conformance, parser fuzz and recovery,
+  deterministic stress, performance-baseline, and release-validation gates.
+- Published the compatibility policy, complete diagnostic catalog, language
+  guide, CLI guide, and release-candidate documentation boundary.
+
+The milestone remains active. These documentation contracts do not claim that
+the conformance runner, fuzz smoke, performance baseline, release check, or
+Nexa Language 1.0 integration release has completed.
+
 ## Language Core v0.8 (Delivered)
 
 - Added exact function types, module-aware named function values, indirect

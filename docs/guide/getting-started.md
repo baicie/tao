@@ -58,6 +58,10 @@ not in the core parser or IRs.
 
 ## Next Steps
 
+- Read the [Language Guide](/guide/language).
+- Read the [CLI Guide](/guide/cli).
 - Read [Project Structure](/guide/project-structure).
 - Read [Development](/guide/development).
+- Review the [Compatibility Policy](/compatibility).
+- Look up compiler failures in the [Diagnostic Reference](/reference/diagnostics).
 - Track language behavior in [Spec](/spec/).

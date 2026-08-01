@@ -1,0 +1,7 @@
+function first(for: Int, export: Bool): Unit {
+  print(1);
+}
+
+function later(): Unit {
+  print(2);
+}

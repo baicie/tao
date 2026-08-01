@@ -1,0 +1,7 @@
+function value(): Int {
+  if (true) {
+    return 1;
+  }
+}
+
+function main(): Unit {}

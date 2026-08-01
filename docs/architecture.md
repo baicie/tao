@@ -9,6 +9,12 @@ delivered architecture: the compiler driver owns a source session and module
 graph, the semantic phase owns bounded generic instances and closure capture
 facts, and each parser remains a pure one-file consumer.
 
+Language Core v0.9 is a stabilization milestone and does not add an
+architectural layer. Its conformance, fuzzing, determinism, stress,
+performance, documentation, and release tooling must call the same public
+phase boundaries rather than duplicating parsing, resolution, MIR lowering, or
+runtime dispatch.
+
 Language Core v0.8 adds owner-scoped `ClosureId` identities and exact function
 signatures to the existing module-owned function, record, union, field,
 variant, payload, and generic identities. Typed HIR resolves imports,
@@ -77,7 +83,8 @@ source files -> lossless CST -> module HIR -> typed HIR -> CFG MIR -> interprete
 CLI/provider -> SourceMap -> module graph -> resolved definitions
 ```
 
-Definition, type, field, and variant identities are established before MIR.
+Definition, type, field, variant, function, and closure identities are
+established before MIR.
 The CLI or a future source provider reads files; the compiler session owns
 registered sources and module ordering; parsers remain pure consumers of one
 source text. This makes cross-file diagnostics possible without coupling syntax

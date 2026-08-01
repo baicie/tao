@@ -1,0 +1,4 @@
+function main(): Unit {
+  const answer: Int = "forty-two";
+  print(answer);
+}

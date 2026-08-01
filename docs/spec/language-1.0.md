@@ -3,9 +3,11 @@
 ## Status
 
 This document defines the target contract for Nexa Language 1.0. The current
-delivered implementation is [Language Core v0.8](language-core-v0.8.md); the
-features below become language guarantees only when their milestone is marked
-delivered in the [1.0 roadmap](../project/roadmap/language-1.0.md).
+delivered implementation is [Language Core v0.8](language-core-v0.8.md).
+[Language Core v0.9](language-core-v0.9.md) is the active stabilization
+contract and adds no language syntax. Nexa Language 1.0 has not been released;
+this target becomes the compatibility baseline only after the separate 1.0
+integration gates in the [roadmap](../project/roadmap/language-1.0.md) pass.
 
 ## Product Contract
 
@@ -80,8 +82,15 @@ specification must list its newly reserved words and retain regression tests
 for all other v0.3 behavior.
 
 Before 1.0, syntax and diagnostics may change only through a versioned
-milestone specification. At 1.0, the grammar, evaluation rules, required
-diagnostic codes, and conformance fixtures become the compatibility baseline.
+milestone specification. v0.9 freezes the existing keyword set, grammar,
+evaluation rules, diagnostic surface, and runtime limits without introducing a
+compatibility exception. At 1.0, those rules and the versioned conformance
+fixtures become the compatibility baseline.
+
+The detailed source, diagnostic, CLI, and implementation boundary is the
+[Compatibility Policy](../compatibility.md). Required codes and normative
+runtime failures are collected in the
+[Diagnostic Reference](../reference/diagnostics.md).
 
 ## 1.0 Acceptance Program
 
@@ -96,6 +105,10 @@ failures.
 The workspace must pass formatting, Clippy with warnings denied, all-target
 tests on Rust 1.80, rustdoc, documentation-site build, parser fuzz smoke tests,
 and the versioned conformance suite.
+
+Completing v0.9 makes this acceptance program a release candidate. It does not
+mark this 1.0 target delivered until the integration release repeats and
+publishes every required artifact and validation result.
 
 ## Non-Goals
 

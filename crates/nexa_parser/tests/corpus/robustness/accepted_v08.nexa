@@ -1,0 +1,13 @@
+type Result<T, E> = | Ok(value: T) | Err(error: E);
+
+function apply(transform: (value: Int) => Int, value: Int): Int {
+  return transform(value);
+}
+
+function main(values: Int[]): Unit {
+  const factor = 2;
+  const scale: (value: Int) => Int = (value: Int): Int => value * factor;
+  for (const value of values) {
+    print(apply(scale, value));
+  }
+}

@@ -4,7 +4,11 @@
 
 ```bash
 cargo xtask check
+cargo xtask conformance
 ```
+
+Before proposing a v0.9 release candidate, also run
+`cargo xtask release-check`. The command validates but does not publish.
 
 Optional tools:
 

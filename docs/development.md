@@ -7,8 +7,16 @@ cargo xtask check
 cargo xtask fmt
 cargo xtask lint
 cargo xtask test
+cargo xtask conformance
+cargo xtask fuzz-smoke
+cargo xtask perf
+cargo xtask release-check
 cargo xtask security
 ```
+
+`cargo xtask release-check` validates a release candidate without publishing,
+tagging, pushing, or deploying. See [Release-Candidate Validation](release.md)
+for the complete gate and toolchain boundary.
 
 ## Adding a Crate
 

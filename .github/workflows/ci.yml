@@ -26,6 +26,38 @@ jobs:
       - name: Check MSRV
         run: cargo check --workspace --all-targets --all-features --locked
 
+      - name: Check parser fuzz target
+        run: cargo check --locked --manifest-path fuzz/Cargo.toml
+
+  parser-fuzz:
+    name: Parser fuzz smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nightly Rust
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz -> target
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Run bounded parser fuzz smoke
+        run: cargo fuzz run parser -- -runs=256
+
+      - name: Upload parser crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parser-fuzz-artifacts
+          path: fuzz/artifacts/parser
+          if-no-files-found: ignore
+
   ci:
     name: CI / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -49,13 +81,16 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Check
-        run: cargo check --workspace --all-targets --all-features
+        run: cargo check --locked --workspace --all-targets --all-features
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       - name: Test
-        run: cargo test --workspace --all-features
+        run: cargo test --locked --workspace --all-targets --all-features
+
+      - name: Conformance
+        run: cargo run --locked --package xtask -- conformance
 
       - name: Docs
-        run: cargo doc --workspace --all-features --no-deps
+        run: cargo doc --locked --workspace --all-features --no-deps

@@ -8,10 +8,19 @@ cargo xtask fmt
 cargo xtask lint
 cargo xtask test
 cargo xtask doc
+cargo xtask conformance
+cargo xtask fuzz-smoke
+cargo xtask perf
+cargo xtask release-check
 cargo xtask security
 ```
 
 `cargo xtask check` runs formatting, clippy, tests, and docs.
+`conformance` runs the versioned language corpus. `fuzz-smoke` replays stable
+parser seeds and checks the fuzz target on Rust 1.80. `perf` runs release-mode
+reference workloads without a machine-independent threshold. `release-check`
+combines the required local release-candidate gates and has no publishing side
+effects.
 
 ## Manual Checks
 
