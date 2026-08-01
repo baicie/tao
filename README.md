@@ -1,20 +1,21 @@
 # Nexa
 
-Nexa is a Rust bootstrap compiler workspace for Language Core v0.8: a
+Nexa is a Rust bootstrap compiler workspace for the delivered
+[Nexa Language 1.0 Reference Core](docs/spec/language-1.0.md): a
 TypeScript-shaped language with independently specified native semantics.
 
-Language Core v0.8 is delivered. Development continues toward the
-[Nexa Language 1.0 Reference Core](docs/spec/language-1.0.md): a statically
-checked, multi-file command-line language executed by the CFG MIR reference
-interpreter. The [1.0 roadmap](docs/project/roadmap/language-1.0.md) divides
-that work into independently testable language milestones.
+Language 1.0 is a statically checked, deterministic, multi-file command-line
+language executed by the CFG MIR reference interpreter. Its versioned
+milestones and final integration gates are recorded in the
+[1.0 roadmap](docs/project/roadmap/language-1.0.md) and
+[delivery archive](docs/project/archive/language-1.0-delivery.md).
 
-The current delivered specification is
-[Language Core v0.8](docs/spec/language-core-v0.8.md), which adds exact
-function types, named function values, lexical closures, array `for...of`,
-immutable `append`/`concat`, Unicode-scalar string length, and explicit integer
-and string conversion. The active v0.9 milestone freezes and hardens this
-surface without adding syntax.
+[Language Core v0.8](docs/spec/language-core-v0.8.md) completed the practical
+language surface with exact function types, named function values, lexical
+closures, array `for...of`, immutable `append`/`concat`, Unicode-scalar string
+length, and explicit integer and string conversion. The delivered
+[v0.9 stabilization contract](docs/spec/language-core-v0.9.md) freezes and
+hardens that surface without adding syntax.
 
 ## Layout
 
@@ -67,7 +68,7 @@ interop layer, if needed, belongs in an isolated adapter crate and must lower
 into Nexa HIR without leaking a third-party AST or JavaScript runtime semantics
 into the core compiler.
 
-The 1.0 target deliberately excludes native AOT, UI, package management,
+Language 1.0 deliberately excludes native AOT, UI, package management,
 exceptions, and full TypeScript compatibility. v0.9 adds conformance,
 determinism, recovery, fuzz-smoke, stress, and release-baseline coverage without
 expanding the delivered language syntax.

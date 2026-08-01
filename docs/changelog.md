@@ -1,17 +1,27 @@
 # Changelog
 
-## Language Core v0.9 (Active)
+## Nexa Language 1.0 Reference Core (Delivered 2026-08-01)
+
+- Integrated the delivered v0.1 through v0.9 contracts as the Language 1.0
+  source, semantic, diagnostic, CLI, runtime, and conformance baseline.
+- Passed the complete Rust 1.80 and stable quality gates, 31-case versioned
+  conformance suite, parser robustness/fuzz smoke, deterministic compiler
+  stress tests, release-mode performance workload, canonical CLI smoke, and
+  documentation build.
+- Archived the exact scope, validation evidence, and deferred non-goals in the
+  [delivery record](project/archive/language-1.0-delivery.md).
+
+## Language Core v0.9 (Delivered)
 
 - Added the v0.9 stabilization contract and delivery roadmap without changing
   the v0.8 language surface.
-- Defined the planned versioned 1.0 conformance, parser fuzz and recovery,
+- Added the versioned 1.0 conformance runner, parser fuzz and recovery,
   deterministic stress, performance-baseline, and release-validation gates.
 - Published the compatibility policy, complete diagnostic catalog, language
   guide, CLI guide, and release-candidate documentation boundary.
 
-The milestone remains active. These documentation contracts do not claim that
-the conformance runner, fuzz smoke, performance baseline, release check, or
-Nexa Language 1.0 integration release has completed.
+Every v0.9 delivery gate passed. The milestone adds no source syntax or runtime
+behavior beyond v0.8.
 
 ## Language Core v0.8 (Delivered)
 
@@ -27,9 +37,8 @@ Nexa Language 1.0 integration release has completed.
 - Added stable `E3011` and `E3012` diagnostics plus parser, semantic, MIR,
   interpreter, and multi-file CLI coverage.
 
-The active implementation milestone is v0.9 stabilization. It freezes the 1.0
-surface and adds versioned conformance, recovery/fuzz smoke, determinism,
-stress, and release-baseline coverage without new syntax.
+The subsequent v0.9 stabilization and Language 1.0 integration milestones are
+delivered.
 
 ## Language Core v0.7 (Delivered)
 

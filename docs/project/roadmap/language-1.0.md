@@ -6,13 +6,12 @@ Deliver the [Nexa Language 1.0 Reference Core](../../spec/language-1.0.md): a
 statically checked, multi-file command-line language executed by the CFG MIR
 reference interpreter.
 
-Language Core v0.8 is fully delivered. It establishes exact function types,
-named function values, immutable lexical closures, deterministic array
-iteration, practical immutable-data intrinsics, and explicit conversion. Its
-normative contract and completed delivery record are the
-[v0.8 specification](../../spec/language-core-v0.8.md) and
-[v0.8 roadmap](language-core-v0.8.md). v0.9 stabilization is the active
-milestone and adds no language syntax.
+Nexa Language 1.0 is fully delivered. Language Core v0.8 established exact
+function types, named function values, immutable lexical closures,
+deterministic array iteration, practical immutable-data intrinsics, and
+explicit conversion. Language Core v0.9 then froze and validated that surface
+without adding syntax. The final delivery record is the
+[Language 1.0 archive](../archive/language-1.0-delivery.md).
 
 ## Delivery Milestones
 
@@ -74,7 +73,7 @@ milestone and adds no language syntax.
 - Add explicit `toString` and `parseInt` conversions.
 - Deliver a realistic multi-file CLI example using every earlier milestone.
 
-### v0.9: Stabilization (Active)
+### v0.9: Stabilization (Delivered)
 
 - Freeze the keyword set, grammar, evaluation order, and required diagnostic
   codes without adding new language syntax.
@@ -85,7 +84,7 @@ milestone and adds no language syntax.
 - Satisfy the complete [v0.9 specification](../../spec/language-core-v0.9.md)
   and [delivery roadmap](language-core-v0.9.md).
 
-### 1.0: Integration Release (Pending)
+### 1.0: Integration Release (Delivered)
 
 - Run one multi-file program through parse, check, typed HIR, CFG MIR, and the
   reference interpreter.

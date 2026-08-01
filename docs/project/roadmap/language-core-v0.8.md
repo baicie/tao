@@ -5,7 +5,7 @@
 Language Core v0.8 is delivered. Its normative behavior is frozen by the
 [v0.8 specification](../../spec/language-core-v0.8.md), and the compiler
 satisfies every exit criterion and verification gate below. v0.9 stabilization
-is now the active milestone in the [1.0 roadmap](language-1.0.md).
+and the [Language 1.0 integration](language-1.0.md) have since been delivered.
 
 ## Goal
 

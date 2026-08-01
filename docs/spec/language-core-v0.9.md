@@ -2,10 +2,9 @@
 
 ## Status
 
-Language Core v0.9 is the active stabilization contract. The currently
-delivered language is [Language Core v0.8](language-core-v0.8.md). v0.9 becomes
-delivered only after every gate in the
-[v0.9 roadmap](../project/roadmap/language-core-v0.9.md) passes.
+Language Core v0.9 is delivered. It is the stabilization contract layered over
+[Language Core v0.8](language-core-v0.8.md), and every gate in the
+[v0.9 roadmap](../project/roadmap/language-core-v0.9.md) passed on 2026-08-01.
 
 v0.9 adds no source syntax, value type, static rule, MIR operation, builtin, or
 runtime behavior. Its purpose is to freeze, exercise, document, and measure the
@@ -201,10 +200,12 @@ tests use semantic counts and equality, not wall-clock assertions.
 
 ## Performance Baseline Contract
 
-Performance measurements use fixed, generated workloads for parsing, module
-checking, bounded generic analysis, MIR lowering, and interpreted execution.
-The baseline record identifies the source revision, Rust version, build mode,
-host platform, workload size, and reported statistic.
+Performance measurements use one fixed, generated workload for the aggregate
+frontend check path and for the complete compile, MIR-lowering, and interpreted
+execution path. Broader module, generic-limit, and phase-boundary behavior is
+validated by deterministic semantic-count tests rather than represented as a
+timing threshold. The baseline record identifies the source revision, Rust
+version, build mode, host platform, workload size, and reported statistic.
 
 Performance numbers are engineering evidence, not language semantics. Shared
 CI compiles the workloads and verifies their results but does not fail on an
@@ -227,8 +228,9 @@ v0.9 is delivered only when:
 - a final dependency-direction audit confirms that parser, HIR, MIR,
   interpreter, compiler session, and CLI responsibilities remain separated.
 
-Passing this milestone makes the delivered v0.8 behavior a release candidate.
-It does not by itself declare Nexa Language 1.0 delivered.
+These gates passed on 2026-08-01. The subsequent integration gate also passed,
+so the stabilized behavior is published as the delivered
+[Nexa Language 1.0 Reference Core](language-1.0.md).
 
 ## Non-Goals
 

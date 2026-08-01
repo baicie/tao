@@ -22,8 +22,8 @@ export default defineConfig({
       {
         text: "More",
         items: [
-          { text: "Active v0.9 Spec", link: "/spec/language-core-v0.9" },
-          { text: "Active Roadmap", link: "/project/roadmap/language-core-v0.9" },
+          { text: "Language 1.0 Spec", link: "/spec/language-1.0" },
+          { text: "Delivery Archive", link: "/project/archive/language-1.0-delivery" },
           { text: "Compatibility", link: "/compatibility" },
           { text: "Diagnostics", link: "/reference/diagnostics" },
           { text: "Language 1.0 Roadmap", link: "/project/roadmap/language-1.0" },
@@ -83,8 +83,8 @@ export default defineConfig({
           text: "Language Design",
           collapsed: false,
           items: [
-            { text: "Language Core v0.9 (Active)", link: "/spec/language-core-v0.9" },
-            { text: "v0.9 Roadmap (Active)", link: "/project/roadmap/language-core-v0.9" },
+            { text: "Language Core v0.9 (Delivered)", link: "/spec/language-core-v0.9" },
+            { text: "v0.9 Roadmap (Delivered)", link: "/project/roadmap/language-core-v0.9" },
             { text: "Language Core v0.8 (Delivered)", link: "/spec/language-core-v0.8" },
             { text: "v0.8 Roadmap (Delivered)", link: "/project/roadmap/language-core-v0.8" },
             { text: "Language Core v0.7 (Delivered)", link: "/spec/language-core-v0.7" },
@@ -95,8 +95,9 @@ export default defineConfig({
             { text: "v0.5 Roadmap (Delivered)", link: "/project/roadmap/language-core-v0.5" },
             { text: "Language Core v0.4 (Delivered)", link: "/spec/language-core-v0.4" },
             { text: "v0.4 Roadmap (Delivered)", link: "/project/roadmap/language-core-v0.4" },
-            { text: "Language 1.0 Target", link: "/spec/language-1.0" },
-            { text: "1.0 Roadmap", link: "/project/roadmap/language-1.0" },
+            { text: "Language 1.0 (Delivered)", link: "/spec/language-1.0" },
+            { text: "1.0 Roadmap (Delivered)", link: "/project/roadmap/language-1.0" },
+            { text: "1.0 Delivery Archive", link: "/project/archive/language-1.0-delivery" },
             { text: "Language Core v0.3 (Delivered)", link: "/spec/language-core-v0.3" },
             { text: "Language Core v0.2", link: "/spec/language-core-v0.2" },
           ],

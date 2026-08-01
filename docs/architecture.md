@@ -1,15 +1,15 @@
 # Architecture
 
-Nexa is a small compiler workspace for Language Core v0.8. The workspace keeps
+Nexa is a small compiler workspace for Nexa Language 1.0. The workspace keeps
 each crate aligned to a compiler responsibility rather than a generic
 application layer.
 
-The active 1.0 target preserves these phase boundaries. v0.8 is the current
-delivered architecture: the compiler driver owns a source session and module
+The delivered 1.0 architecture preserves these phase boundaries. The compiler
+driver owns a source session and module
 graph, the semantic phase owns bounded generic instances and closure capture
 facts, and each parser remains a pure one-file consumer.
 
-Language Core v0.9 is a stabilization milestone and does not add an
+Language Core v0.9 is a delivered stabilization milestone and does not add an
 architectural layer. Its conformance, fuzzing, determinism, stress,
 performance, documentation, and release tooling must call the same public
 phase boundaries rather than duplicating parsing, resolution, MIR lowering, or
@@ -76,7 +76,7 @@ Rules:
   crate that lowers into Nexa HIR; their AST types must not enter core crates.
 - Placeholder crates are avoided until a phase boundary has real behavior.
 
-## 1.0 Architecture Target
+## Language 1.0 Architecture
 
 ```text
 source files -> lossless CST -> module HIR -> typed HIR -> CFG MIR -> interpreter

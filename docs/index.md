@@ -3,7 +3,7 @@ layout: home
 
 hero:
   name: "Nexa"
-  text: "Language Core v0.8 Delivered"
+  text: "Nexa Language 1.0 Delivered"
   tagline: "A TS-shaped language with independent static semantics and a MIR interpreter."
   actions:
     - theme: brand
@@ -22,8 +22,8 @@ features:
     details: nexac loads a reachable module graph, type-checks it, lowers it to CFG MIR, and runs the resolved entry.
   - title: Immutable Data
     details: UTF-8 strings, homogeneous arrays, generic nominal data, closures, ordinary error values, and command-line arguments have explicit native semantics.
-  - title: Current Milestone
-    details: Language Core v0.8 is delivered; active v0.9 work freezes and hardens the 1.0 surface without new syntax.
+  - title: Compatibility Baseline
+    details: Nexa Language 1.0 is delivered; v0.9 froze and validated the complete reference-core surface without adding syntax.
   - title: Native Semantics
     details: Familiar TypeScript-shaped syntax does not imply JavaScript runtime compatibility.
   - title: Rust Tooling

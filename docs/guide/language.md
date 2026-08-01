@@ -1,9 +1,9 @@
 # Language Guide
 
-Nexa Language Core is a TypeScript-shaped, statically typed language with its
-own deterministic semantics. The delivered v0.8 implementation checks
-multi-file command-line programs and executes resolved CFG MIR with a reference
-interpreter.
+Nexa Language 1.0 Reference Core is a TypeScript-shaped, statically typed
+language with its own deterministic semantics. The delivered implementation
+checks multi-file command-line programs and executes resolved CFG MIR with a
+reference interpreter.
 
 This guide introduces the programming model. The versioned files under
 [Language Spec](../spec/index.md) remain normative when a concise example here
@@ -243,4 +243,4 @@ native code generation, UI, FFI, package management, LSP, and a complete
 standard library.
 
 See the [Compatibility Policy](../compatibility.md) and
-[Nexa Language 1.0 target](../spec/language-1.0.md) for the exact boundary.
+[Nexa Language 1.0 specification](../spec/language-1.0.md) for the exact boundary.

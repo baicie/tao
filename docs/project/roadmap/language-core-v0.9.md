@@ -2,9 +2,9 @@
 
 ## Status
 
-Language Core v0.9 is active. Its delivery contract is the
-[v0.9 specification](../../spec/language-core-v0.9.md). Language Core v0.8 is
-delivered; Nexa Language 1.0 is not yet delivered.
+Language Core v0.9 is delivered. Its delivery contract is the
+[v0.9 specification](../../spec/language-core-v0.9.md). Its complete gate and
+the subsequent Nexa Language 1.0 integration gate passed on 2026-08-01.
 
 This milestone freezes and hardens existing behavior. No slice may add a token,
 reserved word, grammar production, type, builtin, semantic rule, MIR operation,
@@ -64,18 +64,20 @@ Suggested branch: `codex/v0.9-conformance`.
 - Give every case structured metadata for command, entry, arguments,
   expectation kind, ordered diagnostic codes, standard output, or runtime
   failure plus prior output.
-- Use the in-memory source provider and compiler session for structured
-  multi-file checks; retain crate and CLI regressions for exact labels, spans,
-  rendered paths, exit status, standard output, and standard error.
+- Use a root-bounded source provider and compiler session for self-contained
+  corpus cases; retain in-memory crate and CLI regressions for exact labels,
+  spans, rendered paths, exit status, standard output, and standard error.
 - Compare every manifest field and keep case order deterministic.
-- Migrate existing CLI fixtures or otherwise establish one authoritative copy;
-  do not maintain two drifting fixture trees.
+- Keep corpus cases self-contained. A minimal source may also appear in a
+  structured crate or CLI regression only when that test owns additional span,
+  label, rendering, or process-boundary assertions.
 
 Exit criteria:
 
 - Every required diagnostic code is in the corpus, and structured crate/CLI
   regressions cover its required label roles and exact source spans.
-- Every delivered feature has an accepted checked or executable case.
+- Every delivered feature is represented by the canonical program, a targeted
+  accepted corpus case, or the structured compatibility regression matrix.
 - Cross-file primary/secondary labels and runtime locations are covered.
 - The canonical 1.0 program checks and runs with its specified arguments and
   output.
@@ -130,8 +132,9 @@ Suggested branch: `codex/v0.9-performance`.
 
 - Replace the inert workspace-root benchmark placeholder with benchmarks owned
   by the compiler phase they measure.
-- Measure fixed release-mode workloads for parsing, multi-module checking,
-  maximum accepted generic instances, MIR lowering, and interpreted execution.
+- Measure one fixed release-mode generated program through the aggregate
+  frontend check path and the complete compile, MIR-lowering, and interpreted
+  execution path.
 - Generate workload source outside measured regions and validate results in
   ordinary tests.
 - Record the revision, toolchain, host, workload, and statistics used for the
@@ -199,9 +202,9 @@ Suggested branch: `codex/v0.9-integration`.
 
 Exit criteria:
 
-- v0.9 is marked delivered and the 1.0 integration release becomes active.
-- Nexa Language 1.0 remains unreleased until its separate integration gates
-  pass.
+- v0.9 is marked delivered.
+- The separate Nexa Language 1.0 integration gates pass and publish the
+  reference-core compatibility baseline.
 
 ## Required Test Matrix
 

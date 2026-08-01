@@ -2,10 +2,10 @@
 
 ## Status
 
-Language Core v0.8 is the current delivered language. Language Core v0.9 is
-the active stabilization contract, and Nexa Language 1.0 has not been released.
-This page defines the compatibility boundary that v0.9 must make executable
-before 1.0.
+Nexa Language 1.0 Reference Core is the current delivered language and
+compatibility baseline. Language Core v0.9 is its completed stabilization
+contract. This page defines the executable compatibility boundary established
+by that release.
 
 Before 1.0, a versioned milestone specification may make an intentional
 breaking change only when it names the change, records any newly reserved word,
@@ -13,7 +13,7 @@ and adds regression coverage. v0.9 adds no such change.
 
 ## The 1.0 Compatibility Baseline
 
-At the 1.0 release, the following become the source compatibility baseline:
+The following are the Language 1.0 source compatibility baseline:
 
 - the reserved and contextual word sets;
 - lexical rules, grammar, precedence, and associativity;
@@ -31,7 +31,7 @@ At the 1.0 release, the following become the source compatibility baseline:
 The normative language is the ordered composition of the Language Core
 milestone specifications. The
 [v0.9 stabilization contract](spec/language-core-v0.9.md) records the frozen
-surface, and the [Language 1.0 target](spec/language-1.0.md) records the release
+surface, and the [Language 1.0 specification](spec/language-1.0.md) records the release
 acceptance boundary.
 
 ## Reserved Words

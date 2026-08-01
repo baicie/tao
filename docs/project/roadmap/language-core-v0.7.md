@@ -5,8 +5,8 @@
 Language Core v0.7 is delivered. Its normative executable behavior is defined
 by the [v0.7 specification](../../spec/language-core-v0.7.md), and the compiler
 satisfies every exit criterion and verification gate below. v0.8 function
-values and the practical core have since been delivered; v0.9 stabilization is
-active in the [1.0 roadmap](language-1.0.md).
+values, the practical core, v0.9 stabilization, and the
+[Language 1.0 integration](language-1.0.md) have since been delivered.
 
 ## Goal
 

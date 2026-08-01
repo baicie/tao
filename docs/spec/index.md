@@ -2,32 +2,25 @@
 
 This directory records accepted language behavior and rejected alternatives.
 
-The current delivered core is
-[Language Core v0.8](language-core-v0.8.md). It extends
-[Language Core v0.7](language-core-v0.7.md) with exact function types, named
-function values, immutable lexical closures, deterministic array iteration,
-practical immutable-data intrinsics, and explicit conversion. Nexa remains a
-TypeScript-shaped language with its own native semantics, not a TypeScript
-implementation or compatibility layer.
+The current delivered specification is the
+[Nexa Language 1.0 Reference Core](language-1.0.md). It composes the delivered
+Language Core milestones into a TypeScript-shaped language with independent
+native semantics, not a TypeScript implementation or compatibility layer.
 
-The active target is the
-[Nexa Language 1.0 Reference Core](language-1.0.md). It adds nominal records,
-tagged unions with exhaustive matching, explicit multi-file modules, bounded
-generics, error values, and a practical immutable-data core through versioned
-milestones. The target document does not describe already-delivered behavior;
-each feature becomes normative only when its milestone is delivered.
+Language 1.0 includes nominal records, tagged unions with exhaustive matching,
+explicit multi-file modules, bounded generics, ordinary error values, exact
+function types, lexical closures, deterministic iteration, and practical
+immutable-data operations. Each feature remains normatively defined by its
+versioned milestone specification.
 
-Language Core v0.8 is normative and delivered; its completed gates remain in
-the [v0.8 roadmap](../project/roadmap/language-core-v0.8.md). The active
-implementation milestone is v0.9 stabilization, which freezes and hardens the
-delivered language without adding syntax under the broader
-[Nexa Language 1.0 roadmap](../project/roadmap/language-1.0.md).
-
-The active [Language Core v0.9 contract](language-core-v0.9.md) defines the
-keyword, precedence, evaluation, diagnostic, conformance, fuzz, determinism,
-performance, documentation, and release-candidate gates. Its implementation is
-tracked by the [v0.9 roadmap](../project/roadmap/language-core-v0.9.md). v0.9 is
-not yet delivered, and the Language 1.0 integration release remains pending.
+[Language Core v0.8](language-core-v0.8.md) completed the language surface.
+The delivered [Language Core v0.9 contract](language-core-v0.9.md) then froze
+the keyword, precedence, evaluation, diagnostic, conformance, fuzz,
+determinism, performance, documentation, and release-validation boundaries
+without adding syntax. The completed gates are recorded in the
+[v0.9 roadmap](../project/roadmap/language-core-v0.9.md), the
+[1.0 roadmap](../project/roadmap/language-1.0.md), and the
+[delivery archive](../project/archive/language-1.0-delivery.md).
 
 Cross-version guarantees are summarized in the
 [Compatibility Policy](../compatibility.md). The

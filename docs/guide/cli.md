@@ -114,9 +114,9 @@ another file.
 
 ## Current Example
 
-The delivered v0.8 example combines modules, records, unions, generics,
-function values, a closure, immutable arrays, `for...of`, conversion, and CLI
-arguments:
+The delivered Language 1.0 practical-core example combines modules, records,
+unions, generics, function values, a closure, immutable arrays, `for...of`,
+conversion, and CLI arguments:
 
 ```bash
 cargo run -p nexac -- check examples/practical-core/main.nexa
