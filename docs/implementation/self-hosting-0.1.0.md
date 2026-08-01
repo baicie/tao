@@ -1,0 +1,186 @@
+# Futao 0.1.0 自举实施计划
+
+## 目标
+
+从当前 `nexac 0.0.1` Rust reference/bootstrap compiler 出发，逐步交付由 Futao
+编写的编译器核心，建立自动化、可复现、可回滚的 `C0 -> C1 -> C2 -> C3` 构建链。
+工具链在自举期间保持 `0.0.x`；只有 ADR-011 的完整门槛通过后才发布 `0.1.0`。
+
+本计划是交付顺序，不改变 Language 1.0 已冻结的兼容性基线，也不把 ADR 的
+Accepted 状态解释为对应实现已经存在。
+
+## 当前基线
+
+* 工具链版本：`0.0.1`。
+* Stage 0：Rust 实现，覆盖 Lexer、Parser、Resolver、Type Checker、HIR、CFG MIR、
+  reference interpreter、诊断、conformance 与 release gate。
+* 语言名称：新设计和源码使用 Futao / `.ft`；现有 Nexa / `.nexa` 输入在迁移策略
+  明确前保留兼容。
+* 默认分支：`mvp`。
+* 已接受架构：ADR-001 至 ADR-011；ADR-000 仍为 Proposed。
+* 首要架构阻塞：ADR-000 的 VM/稳定 `.nca` 设想与 ADR-003 的内部 NIR 决策尚未统一。
+
+## 关键依赖
+
+```text
+ADR-000 边界收敛
+  -> deterministic core + differential harness
+  -> 自举所需 ownership/storage kernel
+  -> NIR builder/verifier + internal bootstrap artifact
+  -> Bootstrap Profile + Bootstrap Stdlib
+  -> Lexer -> Parser -> Resolver -> Type Checker
+  -> HIR/MIR/NIR lowering + compiler driver core
+  -> C1 -> C2 -> C3
+  -> cross-platform reproducibility + two release candidates
+  -> 0.1.0
+```
+
+每条箭头是验收依赖。后续阶段可以提前做不影响接口的研究，但不能在前置门槛失败时
+发布为已完成里程碑。
+
+## 版本路线
+
+| 版本 | 交付里程碑 | 发布门槛 |
+|---|---|---|
+| `0.0.1` | 当前 Rust reference/bootstrap baseline | Language 1.0 release gate 保持通过 |
+| `0.0.2` | 修订并接受 ADR-000 | 冻结 Stage 0、provenance、内部自举产物及 ADR-003/009 边界 |
+| `0.0.3` | Futao 编译器入口与 differential 基础设施 | `.ft` 输入、纯 compiler core 接口、canonical diagnostics/corpus 可双实现比较 |
+| `0.0.4` | 自举 ownership/storage kernel | Move/Drop 与受限 `Vec`、字符串构建、Arena 满足编译器 workload |
+| `0.0.5` | NIR 与自举产物 | target-neutral NIR builder、独立 verifier、确定性序列化与 schema/version gate |
+| `0.0.6` | Bootstrap Profile 与 Stdlib | 受限语法/语义集合冻结，stdlib 无隐式 Host I/O 且构建确定 |
+| `0.0.7` | Futao Lexer | token/span/diagnostic differential 与 fuzz corpus 无未解释差异 |
+| `0.0.8` | Futao Parser | lossless CST、recovery、accepted/rejected differential 与 fuzz 通过 |
+| `0.0.9` | Futao Resolver | module graph、scope、visibility、cycle diagnostics 与 Rust 一致 |
+| `0.0.10` | Futao Type Checker | inference、generics、match/ownership 检查与 Rust 一致 |
+| `0.0.11` | 完整 Futao compiler core | HIR/MIR/NIR lowering、diagnostics、driver core 能编译 corpus |
+| `0.0.12` | Stage 1 compiler | C0 产出 C1；C1 能编译自身、Bootstrap Stdlib 与真实示例 |
+| `0.0.13` | Release candidate 1 | C1/C2/C3 自动化；normalized C2/C3 与跨平台产物一致 |
+| `0.0.14` | Release candidate 2 | 第二个连续稳定 RC；性能、资源上限、fallback 与 provenance 通过 |
+| `0.1.0` | 默认自托管工具链 | ADR-011 全部门槛通过，release PR 执行唯一一次版本提升 |
+
+版本号是默认切片。若某阶段超出一个可审查 PR，可增加 `0.0.x` 版本，但必须保持依赖
+顺序和验收语义；不得合并多个未验证阶段后直接跳到 `0.1.0`。
+
+## 阶段实施
+
+### `0.0.2`：冻结自举合同
+
+* 修订 ADR-000，使 Futao compiler core 输出 ADR-003 定义的内部 NIR，而不是提前承诺
+  公共 VM bytecode 或稳定 `.nca`。
+* 定义 C0 的可获取来源、校验和、Rust/MSRV、schema 与 Bootstrap Stdlib pin。
+* 定义 canonical serialization、允许规范化的字段和禁止进入产物的非确定输入。
+* 增加 ADR 一致性审查和 bootstrap manifest schema 测试。
+
+验收：ADR-000 Accepted；artifact、runtime、backend、package component 的边界无冲突；
+从干净环境可重建固定 C0。
+
+### `0.0.3`：建立双实现比较面
+
+* 为新源码建立 `.ft` 入口，同时保留历史 `.nexa` compatibility fixtures。
+* 将文件系统、环境变量、时钟、随机数、路径规范化放在 Host shell，compiler core 只接收
+  显式输入并返回结构化输出。
+* 定义 token、CST、diagnostic、HIR、MIR、NIR 的 canonical dump。
+* differential harness 对同一 corpus 运行 Rust/Futao 实现，并分类所有已知差异。
+
+验收：同输入重复执行产出相同 dump；路径、locale、hash iteration 不改变结果；失败
+fixture 具有稳定 diagnostic code 与 span。
+
+### `0.0.4`：只交付自举需要的运行时子集
+
+* 实现并验证编译器 workload 所需的所有权、Move、Drop 和 cleanup。
+* 提供受限、确定性的 `Vec`、map/set、string builder、arena 与 intern table。
+* 明确 OOM、容量溢出、迭代顺序和 drop glue 行为。
+
+验收：accepted 与 compile-fail 测试同时存在；Miri/sanitizer 可覆盖的 Rust 底座通过；
+大型 corpus 不出现数量级内存或时间退化。
+
+### `0.0.5`：交付可验证的内部 NIR
+
+* 实现 typed NIR builder、target layout 描述、verifier 与 deterministic serializer。
+* compiler core 不依赖 LLVM 类型；backend 只消费已经完成语义决策的 NIR。
+* schema 版本不兼容时 fail closed；独立 Rust verifier 不信任 Futao 生成器。
+
+验收：mutation/rejected fixtures 被 verifier 拒绝；round trip 保持 canonical form；固定
+输入跨平台产生相同目标无关 NIR。
+
+### `0.0.6`：冻结 Bootstrap Profile
+
+* 明确自托管源码可使用的语法、类型、泛型、所有权和标准库 API。
+* 禁止 compiler core 直接使用文件系统、网络、进程、系统时钟或无序迭代。
+* Bootstrap Stdlib 与通用 stdlib 分层，版本和内容哈希进入 manifest。
+
+验收：profile lint 能拒绝越界能力；stdlib 可由 C0 确定性构建；版本升级有兼容和回滚
+fixture。
+
+### `0.0.7` 至 `0.0.11`：纵向迁移编译器核心
+
+每个阶段遵循同一 PR 模板：先冻结 Rust observable contract，再实现 Futao slice，补充
+accepted/rejected 与 fuzz seeds，运行 differential，记录并消除差异，最后才允许默认
+测试路径调用新实现。禁止把类型检查放入 Parser，也禁止 codegen 直接读取 token/CST。
+
+| 版本 | 必须比较的 observable contract |
+|---|---|
+| `0.0.7` | token kind、text range、trivia、lexical diagnostics |
+| `0.0.8` | lossless CST、recovery events、parse diagnostics |
+| `0.0.9` | module graph、symbol identity、scope/visibility diagnostics |
+| `0.0.10` | inferred types、generic substitution、ownership/match diagnostics |
+| `0.0.11` | HIR/MIR/NIR、diagnostics ordering、compiler driver result |
+
+### `0.0.12` 至 `0.0.14`：建立自举链
+
+`0.0.12` 交付 C1，且 C1 能编译自身、Bootstrap Stdlib 和至少一个覆盖模块、泛型、
+ownership、错误路径的真实项目。`0.0.13` 自动构建到 C3，并以
+`normalize(C2) == normalize(C3)` 为门槛。`0.0.14` 在相同 gate 下形成第二个连续 RC，
+验证性能预算、资源上限、Stage 0 重建和 Rust fallback。
+
+任何 Stage mismatch 都必须保存输入、C0/C1/C2/C3 manifest、canonical dump 和最小复现；
+不得通过扩充 normalization 忽略有语义影响的差异。
+
+### `0.1.0`：切换默认实现
+
+只创建版本提升与发布材料 PR，不在该 PR 混入新语言能力。PR 必须证明 ADR-011 的
+清单逐项满足。合入后从 `mvp` 创建 tag，发布自托管实现；Rust 实现继续参与 CI 和
+differential，直到后续 ADR 单独批准移除。
+
+当前 release workflow 会拒绝 `0.0.x` 范围外的工具链。`0.1.0` 发布 PR 必须把该临时
+限制替换为实际执行 C0/C1/C2/C3、differential、跨平台复现与连续 RC 证明的 gate；
+仅删除版本限制不构成验收。
+
+## PR 切片与验证
+
+* 每个 PR 从最新 `mvp` 创建独立分支，并以 `mvp` 为 base。
+* 一个 PR 只交付一个 observable contract；机械生成内容和行为变更分开。
+* 新语言行为必须同时包含 accepted 与 rejected/compile-fail 测试。
+* 自托管阶段必须附 Rust/Futao differential 摘要；不允许未分类差异。
+* 本地至少运行 `make check`；涉及文档时运行 `pnpm --dir docs build`。
+* 阶段门槛由 CI 证明，required checks 全部通过后 squash merge。
+
+## 风险与回滚
+
+| 风险 | 控制与回滚 |
+|---|---|
+| Rust 与 Futao 实现一起产生相同错误 | 保留独立 verifier、rejected corpus 和后续 diverse compilation 路径 |
+| 产物格式过早稳定 | `0.1.0` 前仅承诺同工具链内部 schema；公共 component 由 ADR-009 另行冻结 |
+| Bootstrap Profile 追逐完整 2.0 平台 | 仅纳入实现 compiler core 的最小子集，其他能力按 ADR-004 至 ADR-009 推进 |
+| Stage 构建不可复现 | fail closed，保留 artifacts，回退上一 `0.0.x` 与 Rust C0 |
+| 自托管编译器性能不足 | 在切换默认前维持 Rust 默认，使用固定 workload 设定时间和内存预算 |
+| 大 PR 难以审查 | 按编译阶段和 observable contract 切片，所有合并均 squash |
+
+## 非目标与后续顺序
+
+`0.1.0` 不要求用 Futao 重写 allocator、verifier、LLVM binding、Wasm backend、Host
+adapter、package downloader 或签名验证，也不承诺稳定 Native ABI 或公共 bytecode。
+
+完整平台能力继续遵循已确定顺序：
+
+```text
+ADR-004 内存布局
+  -> ADR-005 Host ABI
+  -> ADR-006 错误模型
+  -> ADR-007 Async
+  -> ADR-008 Wasm/UI Host
+  -> ADR-009 包与签名
+```
+
+这些 ADR 中被 Bootstrap Profile 实际依赖的最小子集可以进入相应 `0.0.x`，其完整
+实现则独立拆分 PR 和版本，不得借自举名义扩大 `0.1.0` 的范围。
