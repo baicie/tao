@@ -1,9 +1,7 @@
 //! Internal NIR artifact compatibility, integrity, and canonicalization coverage.
 
-#![expect(
-    clippy::expect_used,
-    reason = "test setup failures should stop at the violated fixture assumption"
-)]
+// Rust 1.80 predates stable `#[expect]`; invalid test setup should stop immediately.
+#![allow(clippy::expect_used)]
 
 use nexa_nir::{
     ArtifactCompatibility, ArtifactErrorCode, ArtifactMetadata, BlockId, CanonicalArtifact,

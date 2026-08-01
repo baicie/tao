@@ -1,9 +1,7 @@
 //! Accepted and rejected verifier contracts for target-neutral NIR.
 
-#![expect(
-    clippy::expect_used,
-    reason = "test setup failures should stop at the violated fixture assumption"
-)]
+// Rust 1.80 predates stable `#[expect]`; invalid test setup should stop immediately.
+#![allow(clippy::expect_used)]
 
 use nexa_nir::{
     BlockId, FunctionId, InstructionId, IntrinsicId, ModuleBuilder, NirSpan, NirType, Operation,
