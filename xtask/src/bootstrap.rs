@@ -13,6 +13,7 @@ struct BootstrapManifest {
     toolchain_version: String,
     language_version: String,
     stage0: Stage0,
+    bootstrap_stdlib: BootstrapStdlib,
     bootstrap_output: BootstrapOutput,
     stable_component: StableComponent,
 }
@@ -43,6 +44,14 @@ struct Stage0Build {
     rust_version: String,
     cargo_locked: bool,
     profile: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BootstrapStdlib {
+    status: String,
+    version: Option<String>,
+    digest: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -146,6 +155,19 @@ impl BootstrapManifest {
             &self.stage0.distribution,
             "source-only",
         )?;
+        expect(
+            "bootstrapStdlib.status",
+            &self.bootstrap_stdlib.status,
+            "not-defined",
+        )?;
+        ensure!(
+            self.bootstrap_stdlib.version.is_none(),
+            "bootstrapStdlib.version must be null while status is not-defined"
+        );
+        ensure!(
+            self.bootstrap_stdlib.digest.is_none(),
+            "bootstrapStdlib.digest must be null while status is not-defined"
+        );
 
         expect(
             "bootstrapOutput.kind",
@@ -405,6 +427,7 @@ mod tests {
 
         assert_eq!(manifest.schema_version, 1);
         assert_eq!(manifest.stage0.compiler_version, "0.0.1");
+        assert_eq!(manifest.bootstrap_stdlib.version, None);
         assert_eq!(manifest.bootstrap_output.kind, "internal-nir");
         assert_eq!(manifest.bootstrap_output.public_extension, None);
         assert!(!manifest.stable_component.includes_nir);
