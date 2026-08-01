@@ -1,4 +1,4 @@
-// Futao 2.0 contract fixture. This file is not executable by nexac 0.0.1.
+// Futao 2.0 contract fixture. This file is not executable by pre-self-hosting nexac.
 
 export enum Severity {
   Critical,

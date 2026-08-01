@@ -6,7 +6,9 @@ on:
       - ".github/workflows/release.yml"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "bootstrap/**"
       - "crates/**"
+      - "xtask/**"
   push:
     tags:
       - "v*"

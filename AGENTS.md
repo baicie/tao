@@ -32,6 +32,7 @@ Do not introduce circular dependencies. Add new crates only when a real phase bo
 | `cargo test --workspace` | Run all workspace tests |
 | `cargo doc --workspace --no-deps` | Build documentation |
 | `cargo xtask security` | Run optional dependency and security checks |
+| `cargo xtask bootstrap-contract` | Validate the pinned Stage 0 provenance and artifact boundary |
 
 Never commit code that fails `make check`.
 

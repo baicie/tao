@@ -1,5 +1,14 @@
 # Changelog
 
+## Compiler Package 0.0.2 (Bootstrap Contract)
+
+- Accepted ADR-000 after aligning self-hosting with the private NIR and stable
+  component boundaries in ADR-003 and ADR-009.
+- Added a machine-checked Stage 0 source manifest, SHA-256 provenance
+  verification, and a clean Rust 1.80 rebuild gate for `nexac 0.0.1`.
+- Reserved public distribution for `.nexc`; internal NIR remains private and
+  is compared through canonical C2/C3 outputs.
+
 ## Compiler Package 0.0.1 (Self-use)
 
 - Packaged the complete Language 1.0 Reference Core as `nexac 0.0.1`.

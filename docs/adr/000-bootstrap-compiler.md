@@ -1,17 +1,17 @@
-# ADR-000：Nexa 编译器自举路线
+# ADR-000：Futao 编译器自举路线
 
-* **状态**：Proposed
+* **状态**：Accepted
 * **日期**：2026-08-01
-* **决策范围**：Nexa 编译器、标准库最小子集、运行时、构建链与发布流程
+* **决策范围**：Futao 编译器、标准库最小子集、运行时、构建链与发布流程
 * **优先级**：最高
 * **前置关系**：本 ADR 优先于完整标准库、Host ABI、包管理器和 UI 路线
-* **目标**：使 Nexa 编译器能够使用 Nexa 编写、编译自身，并形成可复现、可回滚、可验证的自举链
+* **目标**：使 Futao 编译器能够使用 Futao 编写、编译自身，并形成可复现、可回滚、可验证的自举链
 
 > [!IMPORTANT]
-> 本 ADR 仍是 Proposed。ADR-001 和 ADR-003 已接受 LLVM Native AOT、内部 NIR
-> 与“初期不建设独立公共字节码”的方向，因此本文中的 VM、自举产物与稳定
-> `.nca` 格式仍是待验证方案。接受本 ADR 前，必须明确自举产物是同工具链内部
-> 格式还是稳定组件格式，并与 ADR-003、ADR-009 的边界保持一致。
+> 本 ADR 接受 ADR-003 与 ADR-009 的边界：自举 Stage 输出是同工具链内部、版本可变的
+> target-neutral NIR，不是公共 VM bytecode，也不承诺 `.nca`。可分发稳定组件仍使用
+> ADR-009 的 `.nexc`，不得包含供第三方解释的 MIR/NIR。历史正文中的 Nexa 名称按
+> ADR-010 视为 Futao 的旧标识。
 
 ---
 
@@ -51,8 +51,8 @@ Nexa Source
 * 编译器完全由 Rust 实现
 * 标准库不完整
 * 部分 Builtin 硬编码在 HIR、MIR 和解释器中
-* 缺少稳定的编译产物格式
-* 缺少持久 VM
+* 缺少可验证、可序列化的内部 NIR Stage 产物
+* 缺少把自托管 compiler core 接入 Rust verifier/backend 的稳定内部边界
 * 缺少包管理和锁文件
 * 缺少高效的 Map、Set、StringBuilder、Arena 等编译器基础数据结构
 * 当前测试主要证明 Rust 实现内部自洽，尚不能证明存在第二个独立实现
@@ -73,29 +73,29 @@ Nexa 采用**渐进式混合自举**，而不是一次性将整个工具链重�
 
 ```text
 ┌────────────────────────────────────────────┐
-│        Nexa Compiler written in Nexa       │
+│       Futao Compiler written in Futao      │
 │ Lexer / Parser / Resolver / Type Checker   │
 │ HIR / MIR Lowering / Diagnostics           │
 ├────────────────────────────────────────────┤
-│       Stable Compiler Artifact Format      │
+│       Internal Versioned NIR Artifact       │
 ├────────────────────────────────────────────┤
 │       Runtime and Backends in Rust         │
-│ VM / Memory / Verifier / Wasm / Native     │
+│ Memory / Verifier / LLVM / Wasm / Host     │
 └────────────────────────────────────────────┘
 ```
 
 核心决策：
 
 1. 使用现有 Rust 编译器作为 **Stage 0 编译器**。
-2. 使用 Nexa 重写编译器前端和中端。
-3. 自举编译器首先运行在 Rust 实现的 Nexa VM 上。
-4. Nexa 编译器输出版本化、确定性的编译产物，而不是直接生成机器码。
-5. Runtime、内存管理、产物校验器、Wasm/Native 后端初期继续使用 Rust。
-6. 自举不要求将整个运行时重写成 Nexa。
+2. 使用 Futao 重写编译器前端和中端。
+3. 自举 compiler core 输出 target-neutral 内部 NIR，由 Rust verifier/backend/runtime 形成可运行编译器。
+4. 内部 NIR 必须版本化、确定且可规范化比较，但不作为公共字节码或稳定分发格式。
+5. Runtime、内存管理、独立 NIR verifier、LLVM/Wasm 后端和 Host adapter 初期继续使用 Rust。
+6. 自举不要求将整个运行时重写成 Futao。
 7. 建立专用的 Bootstrap Profile 和 Bootstrap Stdlib。
 8. 编译器核心必须保持纯函数式接口，文件读写由外部 CLI Host 完成。
-9. Stage 1 与 Stage 2 编译产物必须能够进行规范化后一致性比较。
-10. Rust 编译器在 Nexa 自举稳定至少两个版本后，才允许降级为备用实现。
+9. Stage 2 与 Stage 3 的内部 NIR 必须能够进行规范化后一致性比较。
+10. Rust 编译器在 Futao 自举稳定至少两个版本后，才允许降级为备用实现。
 
 ---
 
@@ -138,20 +138,22 @@ Rust Stage 0
 
 ### Level 3：编译器自举
 
-使用 Stage 0 编译 Nexa 编译器得到 Stage 1，再使用 Stage 1 编译自身得到 Stage 2：
+使用 Stage 0 编译 Futao 编译器得到 Stage 1，再使用 Stage 1 编译自身得到 Stage 2：
 
 ```text
 C0 = Rust Compiler
 
-C1 = C0(Nexa Compiler Source)
+C1 = C0(Futao Compiler Source)
 
-C2 = C1(Nexa Compiler Source)
+C2 = C1(Futao Compiler Source)
+
+C3 = C2(Futao Compiler Source)
 ```
 
 满足：
 
 ```text
-normalize(C1 artifact) == normalize(C2 artifact)
+normalize(C2 artifact) == normalize(C3 artifact)
 ```
 
 即认为完成基本自举。
@@ -160,10 +162,10 @@ normalize(C1 artifact) == normalize(C2 artifact)
 
 满足：
 
-* Stage 1 与 Stage 2 产物确定性一致
+* Stage 2 与 Stage 3 目标无关产物确定性一致
 * Linux、macOS、Windows 生成的目标无关产物一致
 * 编译器版本、标准库版本和产物格式被锁定
-* 支持从已发布的最小可信 Stage 0 重新构建
+* 支持从固定来源与校验和的最小可信 Stage 0 重新构建
 * 支持独立实现或 Diverse Double Compilation 验证
 
 Level 4 才是 Nexa 正式替换默认 Rust 编译器的条件。
@@ -189,7 +191,7 @@ HIR Construction
 MIR Lowering
 Diagnostic Construction
 Compiler Driver Core
-Artifact Serialization
+NIR Construction and Canonical Serialization
 ```
 
 这些部分主要处理结构化数据和确定性算法，适合使用 Nexa 实现。
@@ -199,10 +201,8 @@ Artifact Serialization
 以下部分初期不进行自举：
 
 ```text
-VM
 Allocator and Memory Manager
-Artifact Verifier
-NIR and Artifact Verifier
+NIR Verifier
 Host ABI
 File System Adapter
 Process Management
@@ -230,7 +230,7 @@ Cryptographic Verification
 
 ## 5. 为什么不追求全栈自举
 
-将 VM、内存管理和后端全部改写为 Nexa，不是当前目标。
+将 Runtime、内存管理和后端全部改写为 Futao，不是当前目标。
 
 完全自举会形成以下依赖：
 
@@ -451,7 +451,7 @@ type CompilerInput = {
 
 type CompilerOutput = {
   diagnostics: Array<Diagnostic>;
-  artifact: Option<CompilerArtifact>;
+  nir: Option<InternalNirModule>;
 };
 
 function compile(input: CompilerInput): CompilerOutput;
@@ -465,7 +465,7 @@ function compile(input: CompilerInput): CompilerOutput;
 构建 SourceFile 数组
 调用 compile
 输出 diagnostics
-写入 artifact
+验证并写入内部 NIR
 ```
 
 这样可以获得：
@@ -480,77 +480,74 @@ function compile(input: CompilerInput): CompilerOutput;
 
 ---
 
-## 9. 稳定编译产物
+## 9. 内部自举产物边界
 
-自举依赖一个稳定的编译产物格式。
-
-暂定名称：
+自举依赖可验证、可规范化的内部 NIR Stage 产物，但不依赖稳定公共字节码。
 
 ```text
-Nexa Compiler Artifact
-.nca
+Futao compiler core
+  -> internal NIR
+  -> independent Rust NIR verifier
+  -> Rust LLVM/Wasm backend
+  -> runnable compiler
 ```
 
-结构：
+内部 NIR schema 与 compiler release 一同版本化，可以在 `0.0.x` 之间不兼容演进。
+旧工具链遇到未知 schema 必须 fail closed。它可以有用于审查的 canonical text dump 和用于
+Stage 构建的 binary encoding，但二者都属于 private compiler artifact，不能作为 package、
+plugin 或第三方 loader 的稳定输入。
+
+### 9.1 Artifact 分类
 
 ```text
-Header
-String Table
-Type Table
-Constant Table
-Module Table
-Function Table
-HIR Metadata
-MIR Functions
-Source Map
-Diagnostics Metadata
-Build Metadata
+internal NIR Stage artifact
+  stability: toolchain-internal
+  consumer: pinned Rust verifier/backend
+  public extension: none
+
+stable component artifact
+  stability: public versioned contract
+  format: .nexc
+  consumer: component loader
+  contains MIR/NIR: false
 ```
 
-### 9.1 版本字段
+`.nca` 和“公共消费者解释 NIR/MIR”的方案不采纳。Source package、private compiler
+cache、runnable artifact 与 stable `.nexc` component 继续遵循 ADR-009 的四类产物边界。
 
-产物必须记录：
+### 9.2 版本与 provenance
+
+Stage manifest 至少绑定：
 
 ```text
-artifact_format_version
-language_version
-bootstrap_stdlib_version
-compiler_version
-minimum_runtime_version
-target
-feature_flags
+manifest schema version
+compiler and language versions
+Bootstrap Stdlib version and digest
+internal NIR schema version
+Stage 0 repository, full commit and source digest
+locked build inputs and Rust toolchain
+verifier/backend identity
+target-independent feature/profile inputs
+normalized Stage output digest
 ```
 
-### 9.2 确定性要求
+当前 `0.0.2` manifest 固定 `nexac 0.0.1` source commit、source archive SHA-256、
+`Cargo.lock` SHA-256、Rust 1.80 和 locked release recipe。由于 `v0.0.1` 尚无 tag 或
+GitHub Release，distribution 明确记录为 `source-only`，不得伪造 binary provenance。
 
-产物禁止包含：
+### 9.3 确定性与规范化
 
-* 当前时间
-* 随机 UUID
-* 绝对文件路径
-* 机器用户名
-* 操作系统临时目录
-* 非确定 HashMap 遍历结果
-* 进程 ID
-* 不稳定构建顺序
+内部产物和规范化输入禁止包含：
 
-所有表必须使用确定性顺序。
+* 当前时间、签名时间或 transparency receipt
+* 随机 UUID、进程 ID、用户名或主机名
+* workspace 绝对路径、临时目录或未 remap 的 source path
+* locale、timezone、未声明环境变量或网络结果
+* 非确定 HashMap 遍历、object/table 顺序或压缩 metadata
 
-### 9.3 初期编码形式
-
-自举早期可以同时提供：
-
-```text
-.nca.json
-.nca.bin
-```
-
-其中：
-
-* JSON 用于审查、快照和调试
-* Binary 用于正式执行和发布
-
-二者必须由同一逻辑模型生成。
+Stage 比较覆盖内部 NIR 的全部逻辑 section、schema、ABI hash、Bootstrap Stdlib hash 和
+feature/profile 输入。签名 envelope 与发布传输 metadata 位于逻辑 digest 外，不能通过
+扩大 normalization 忽略具有语义影响的差异。
 
 ---
 
@@ -559,20 +556,20 @@ feature_flags
 设：
 
 ```text
-S  = Nexa 编译器源码
+S  = Futao 编译器源码
 C0 = Rust Stage 0 编译器
-R0 = Rust Nexa Runtime
+B0 = Rust NIR verifier、backend 与 runtime/Host 底座
 ```
 
 ### 10.1 Stage 1
 
-使用 Rust 编译器编译 Nexa 编译器源码：
+使用 Rust 编译器编译 Futao 编译器源码：
 
 ```text
 C1 = C0(S)
 ```
 
-`C1` 是一个运行在 `R0` 上的 Nexa 编译器产物。
+`C1` 的 compiler core 输出内部 NIR，经 `B0` 验证和后端处理后形成可运行编译器。
 
 ### 10.2 Stage 2
 
@@ -593,13 +590,12 @@ C3 = C2(S)
 要求：
 
 ```text
-normalize(C1) == normalize(C2)
 normalize(C2) == normalize(C3)
 ```
 
 最低要求是 C2 与 C3 完全一致。
 
-C1 可能因 Stage 0 的实现细节，在早期存在可解释差异；但进入正式自举阶段后，也应追求三者一致。
+C1 可能因 Stage 0 的实现细节存在可解释差异；`0.1.0` 的硬门槛是 C2/C3 一致。
 
 ---
 
@@ -685,7 +681,7 @@ related spans
 
 ```text
 Rust Reference Compiler
-Nexa Self-hosted Compiler
+Futao Self-hosted Compiler
 ```
 
 所有测试都执行两遍：
@@ -693,7 +689,7 @@ Nexa Self-hosted Compiler
 ```text
 input
   ├── Rust Compiler
-  └── Nexa Compiler
+  └── Futao Compiler
 ```
 
 再比较：
@@ -702,7 +698,7 @@ input
 Diagnostics
 Canonical HIR
 Canonical MIR
-Artifact
+Canonical NIR
 Runtime Behaviour
 ```
 
@@ -724,7 +720,7 @@ Runtime Behaviour
 
 ```text
 Rust Compiler Bug
-Nexa Compiler Bug
+Futao Compiler Bug
 Specification Ambiguity
 Canonicalization Bug
 Allowed Diagnostic Text Difference
@@ -750,8 +746,8 @@ Allowed Diagnostic Text Difference
 * 建立 Canonical HIR/MIR
 * 增加 MIR Validator
 * 建立完整 Conformance Matrix
-* 为 Rust Stage 0 创建正式 Release
-* 固定 Stage 0 源码和二进制 Hash
+* 固定 Rust Stage 0 source commit、source archive 与 locked input hash
+* 在二进制实际发布后补充平台资产 digest；发布前保持 `source-only`
 
 #### 退出条件
 
@@ -776,8 +772,8 @@ Allowed Diagnostic Text Difference
 * 定义 `CompilerInput`
 * 定义 `CompilerOutput`
 * 定义 Canonical Diagnostics
-* 定义 `.nca` 产物格式
-* 定义 Artifact Verifier
+* 定义内部 NIR Stage schema 与 canonical dump
+* 定义独立 Rust NIR Verifier
 
 #### 退出条件
 
@@ -932,21 +928,21 @@ Rust 与 Nexa Type Checker 在完整 Corpus 上产生相同类型结果和错误
 
 #### 目标
 
-Nexa 编译器成功编译自身。
+Futao 编译器成功编译自身。
 
 流程：
 
 ```text
-C1 = Rust Stage 0 编译 Nexa Compiler
-C2 = C1 编译 Nexa Compiler
+C1 = Rust Stage 0 编译 Futao Compiler
+C2 = C1 编译 Futao Compiler
 ```
 
 #### 退出条件
 
-* C1 可以编译完整 Nexa 编译器源码
+* C1 可以编译完整 Futao 编译器源码
 * C2 可以运行全部编译器测试
-* C2 可以编译普通 Nexa 项目
-* C2 输出通过 Rust Artifact Verifier
+* C2 可以编译普通 Futao 项目
+* C2 输出通过独立 Rust NIR Verifier
 
 ---
 
@@ -983,15 +979,15 @@ normalize(C2) == normalize(C3)
 
 #### 目标
 
-将 Nexa 编译器设置为默认实现。
+将 Futao 编译器设置为默认实现。
 
 采用双实现模式：
 
 ```text
-nexa build
-  → Nexa Self-hosted Compiler
+futao build
+  → Futao Self-hosted Compiler
 
-nexa build --compiler=rust
+futao build --compiler=rust
   → Rust Reference Compiler
 ```
 
@@ -1016,7 +1012,7 @@ nexa build --compiler=rust
 
 * 时间不超过 Rust 编译器的 10 倍
 * 峰值内存不超过 Rust 编译器的 8 倍
-* 不触发默认 VM 步数上限
+* 不触发 compiler core 的默认资源上限
 * 不发生无限递归
 * 不产生不可控制的临时字符串
 
@@ -1055,12 +1051,14 @@ Wasm Backend
 
 ```text
 stage0 compiler version
-stage0 binary SHA-256
 stage0 source commit
+stage0 source archive SHA-256
+stage0 locked input SHA-256
 Rust toolchain version
 bootstrap stdlib hash
 language version
-artifact format version
+internal NIR schema version
+stage0 binary SHA-256（仅在实际发布后）
 ```
 
 ### 15.2 多平台重建
@@ -1073,15 +1071,15 @@ artifact format version
 
 分别进行 Stage 构建。
 
-生成的目标无关 `.nca` 产物应当一致。
+生成的 normalized target-neutral NIR 应当一致。
 
 ### 15.3 Diverse Double Compilation
 
 达到 Level 4 前，至少执行一种独立验证：
 
-* 使用 Rust 编译器和 Nexa 编译器分别构建
-* 使用 Native Runtime 和 Wasm Runtime 分别运行 Stage 1
-* 使用两个独立 Artifact Serializer 比较模型
+* 使用 Rust 编译器和 Futao 编译器分别构建
+* 使用 Native 与 Wasm backend 分别处理同一已验证 NIR
+* 使用两个独立 NIR serializer 比较逻辑模型
 * 使用独立的最小编译器实现编译 Bootstrap Profile
 
 不要求立即完成完整 DDC，但架构必须保留该能力。
@@ -1090,13 +1088,13 @@ artifact format version
 
 ## 16. 发布结构
 
-每个 Nexa 编译器 Release 包含：
+自托管编译器 Release 最终包含：
 
 ```text
-nexa-stage0-<platform>
-nexa-compiler.nca
-nexa-bootstrap-stdlib
-nexa-runtime-<platform>
+futao-stage0-source-provenance
+futao-compiler-<platform>
+futao-bootstrap-stdlib
+futao-runtime-<platform>
 bootstrap-manifest.json
 checksums.txt
 ```
@@ -1105,107 +1103,88 @@ checksums.txt
 
 ```json
 {
+  "schemaVersion": 1,
+  "toolchainVersion": "0.0.2",
   "languageVersion": "1.0",
-  "compilerVersion": "0.2.0",
-  "artifactVersion": "1",
-  "runtimeVersion": "0.2.0",
-  "bootstrapStdlibVersion": "0.1.0",
   "stage0": {
-    "version": "0.1.0",
-    "sourceCommit": "<commit>",
-    "sha256": "<sha256>"
+    "compilerVersion": "0.0.1",
+    "source": {
+      "repository": "https://github.com/baicie/nexa",
+      "commit": "9293a7b59ff3b6625ca09091f7ad50234638981f",
+      "archiveDigest": "sha256:<digest>",
+      "cargoLockDigest": "sha256:<digest>"
+    },
+    "distribution": "source-only"
   },
-  "stage1ArtifactSha256": "<sha256>",
-  "stage2ArtifactSha256": "<sha256>",
-  "stage3ArtifactSha256": "<sha256>",
-  "reproducible": true
+  "bootstrapStdlib": {
+    "status": "not-defined",
+    "version": null,
+    "digest": null
+  },
+  "bootstrapOutput": {
+    "kind": "internal-nir",
+    "stability": "toolchain-internal",
+    "publicExtension": null
+  }
 }
 ```
+
+`0.0.2` 的完整 checked-in schema 见
+[`bootstrap/stage0/bootstrap-manifest.json`](https://github.com/baicie/nexa/blob/mvp/bootstrap/stage0/bootstrap-manifest.json)。
+Stage 1/2/3 出现后，manifest 扩展各 Stage 的 normalized NIR digest、verifier/backend
+identity 和 reproducibility result；不会把签名时间混入 Stage 比较。
 
 ---
 
 ## 17. 仓库结构
 
-建议调整为：
+仓库只在真实 phase boundary 出现时增加目录或 crate，不创建空占位。当前与近期结构为：
 
 ```text
-nexa/
-  compiler/
-    rust/
-      lexer/
-      parser/
-      resolver/
-      typecheck/
-      hir/
-      mir/
-    nexa/
-      src/
-        lexer/
-        parser/
-        resolver/
-        typecheck/
-        hir/
-        mir/
-        compiler.nexa
-
-  runtime/
-    vm/
-    verifier/
-    value/
-    host/
-
-  artifact/
-    schema/
-    serializer/
-    verifier/
-
-  stdlib/
-    bootstrap/
-    core/
-    array/
-    string/
-
-  bootstrap/
-    stage0/
-    manifests/
-    scripts/
-
-  tests/
-    conformance/
-    differential/
-    bootstrap/
-    reproducibility/
-    fuzz/
+crates/                 Rust Stage 0 phases and CLI
+bootstrap/
+  stage0/               pinned source provenance and build contract
+  tests/rejected/       contract-fail fixtures
+conformance/            Language 1.0 observable behavior
+compiler/futao/         added only when the first .ft compiler slice exists
+stdlib/bootstrap/       added only with the accepted Bootstrap Profile
 ```
 
 在自举稳定前，不建议将自托管编译器拆到独立仓库。
 
-编译器、Bootstrap Stdlib、Runtime 和 Artifact Schema 必须在同一 CI 中验证。
+编译器、Bootstrap Stdlib、Runtime 和内部 NIR schema 必须在同一 CI 中验证。
 
 ---
 
 ## 18. CI 流程
 
-每个自举相关 PR 至少执行：
+`0.0.2` 起，每个自举相关 PR 至少执行当前已存在的门槛：
 
 ```text
 Rust unit tests
 Rust conformance
-Nexa compiler unit tests
+Rust compiler unit tests
+Bootstrap manifest accepted/rejected tests
+Stage 0 source/archive/lock digest verification
+Fuzz regression corpus
+Performance regression
+```
+
+后续能力落地后按阶段追加，不以空任务伪装已实现：
+
+```text
 Lexer differential
 Parser differential
 Type checker differential
 HIR differential
 MIR differential
-Artifact verification
+NIR verification
 Stage 1 build
 Stage 2 build
 Stage 3 build
 Stage 2/3 comparison
 Bootstrap compiler compiles stdlib
 Bootstrap compiler compiles examples
-Fuzz regression corpus
-Performance regression
 ```
 
 发布 CI 额外执行：
@@ -1330,9 +1309,9 @@ UI 不需要等待所有自举工作完全结束，但正式 UI Runtime 应等�
 * Nexa Parser 已经自托管
 * Type Checker 已经自托管
 * Canonical MIR 已稳定
-* Artifact Format 已稳定
+* internal NIR schema、Verifier 与 canonical comparison 已稳定
 * Stage 2 和 Stage 3 可一致
-* 持久 VM 设计已确定
+* Rust backend/runtime 与 Host 边界已确定
 
 推荐依赖关系：
 
@@ -1391,14 +1370,14 @@ Rust 编译器会长期保留，但定位将从默认实现变为参考和恢复
 
 必须按 Lexer、Parser、Resolver、Type Checker、HIR、MIR 分阶段替换。
 
-### 22.3 同时重写 VM 和编译器
+### 22.3 同时重写 Runtime、后端和编译器
 
 不采纳。
 
 原因：
 
 * 没有稳定执行基准
-* 编译器和 VM 错误相互掩盖
+* 编译器和 Runtime/backend 错误相互掩盖
 * 自举链失去可信底座
 * 调试成本过高
 
@@ -1406,9 +1385,8 @@ Rust 编译器会长期保留，但定位将从默认实现变为参考和恢复
 
 不采纳为自举前置条件。
 
-第一阶段让自托管编译器运行在 Rust VM 中已经足够完成自举。
-
-机器码后端属于后续性能和发布能力，不属于语言自举的必要条件。
+第一阶段让自托管 compiler core 生成内部 NIR，并复用 Rust verifier 与 LLVM/Wasm
+backend，已经足够完成混合自举；不要求用 Futao 重写机器码后端。
 
 ### 22.5 为编译器增加大量专用语法
 
@@ -1430,7 +1408,7 @@ Rust 编译器会长期保留，但定位将从默认实现变为参考和恢复
 * 避免大量不可变数组全量复制
 * 对热点 Intrinsic 做性能优化
 * 建立编译器 Profile
-* 后续引入 Bytecode 或 Wasm Backend
+* 优化内部 NIR、Native 或 Wasm Backend
 
 ### 23.2 两个编译器语义长期漂移
 
@@ -1477,14 +1455,14 @@ Rust 编译器会长期保留，但定位将从默认实现变为参考和恢复
 提供：
 
 ```bash
-nexa build --compiler=nexa
-nexa build --compiler=rust
+futao build --compiler=futao
+futao build --compiler=rust
 ```
 
 当出现以下情况时自动回退 Rust 编译器：
 
 * 自托管编译器崩溃
-* Artifact Verifier 拒绝产物
+* NIR Verifier 拒绝产物
 * Bootstrap Hash 不匹配
 * Stage 2/3 不一致
 * 编译器产生内部错误
@@ -1496,11 +1474,11 @@ nexa build --compiler=rust
 
 ## 25. 成功标准
 
-Nexa 自举完成必须同时满足：
+Futao 自举完成必须同时满足：
 
 ### 功能
 
-* Nexa 编译器由 Nexa 编写
+* Futao 编译器由 Futao 编写
 * 能编译自身
 * 能编译 Bootstrap Stdlib
 * 能编译通用标准库
@@ -1508,14 +1486,14 @@ Nexa 自举完成必须同时满足：
 
 ### 一致性
 
-* Rust 与 Nexa 编译器通过完整 Differential Test
+* Rust 与 Futao 编译器通过完整 Differential Test
 * C2 与 C3 产物规范化后一致
 * 不同平台生成的目标无关产物一致
 
 ### 可靠性
 
-* 非法源码不会导致 VM 崩溃
-* Artifact 必须经过独立 Rust Verifier
+* 非法源码不会导致 compiler core、Verifier 或 Runtime 崩溃
+* 内部 NIR 必须经过独立 Rust Verifier
 * 资源上限有效
 * 编译器错误可结构化诊断
 
@@ -1536,40 +1514,38 @@ Nexa 自举完成必须同时满足：
 
 ## 26. 最终决策
 
-Nexa 后续总路线调整为：
+Futao 后续总路线调整为：
 
 ```text
 1. 冻结 Language Core
 2. 定义 Bootstrap Profile
 3. 建设 Bootstrap Stdlib
-4. 稳定 Compiler Core 和 Artifact Format
-5. 用 Nexa 重写 Lexer
-6. 用 Nexa 重写 Parser
-7. 用 Nexa 重写 Resolver 和 Type Checker
-8. 用 Nexa 重写 HIR/MIR Lowering
+4. 稳定 Compiler Core 和内部 NIR schema
+5. 用 Futao 重写 Lexer
+6. 用 Futao 重写 Parser
+7. 用 Futao 重写 Resolver 和 Type Checker
+8. 用 Futao 重写 HIR/MIR/NIR Lowering
 9. 完成 Stage 1/2/3 自举
 10. 建立可复现构建
 11. 切换自托管编译器为默认
 12. 扩展通用标准库和 Host ABI
-13. 建设 Persistent VM
-14. 建设 UI Runtime
-15. 建设 UI 组件库
+13. 按 ADR-004 至 ADR-009 交付完整平台能力
 ```
 
 核心判断：
 
-> Nexa 的下一阶段不应首先追求更多语法、完整标准库或 UI，而应首先证明 Nexa 能够实现并编译自己的编译器。
+> Futao 的下一阶段不应首先追求更多语法、完整标准库或 UI，而应首先证明 Futao 能够实现并编译自己的编译器。
 
-自举不要求立刻用 Nexa 重写 VM、内存管理和机器码后端。
+自举不要求立刻用 Futao 重写 Runtime、内存管理和机器码后端。
 
 最合理的架构是：
 
 ```text
-Nexa 编写编译器
+Futao 编写 compiler core
 Rust 提供可信 Runtime 和后端
-稳定 Artifact Format 连接两者
+内部 NIR 与独立 Verifier 连接两者
 Differential Testing 保证语义一致
 Stage 1/2/3 保证自举可复现
 ```
 
-这是 Nexa 从“语言参考实现”进入“可独立演进语言平台”的关键分界线。
+这是 Futao 从“语言参考实现”进入“可独立演进语言平台”的关键分界线。

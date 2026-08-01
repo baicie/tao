@@ -16,6 +16,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Rust 1.80
         uses: dtolnay/rust-toolchain@1.80.0
@@ -28,6 +30,9 @@ jobs:
 
       - name: Check parser fuzz target
         run: cargo check --locked --manifest-path fuzz/Cargo.toml
+
+      - name: Validate Stage 0 bootstrap contract
+        run: cargo run --locked --package xtask -- bootstrap-contract
 
   parser-fuzz:
     name: Parser fuzz smoke
@@ -68,6 +73,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

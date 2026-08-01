@@ -3,7 +3,7 @@ resolver_version = "futao-resolver-1"
 workspace_manifest_digest = "sha256:e326e455ab2d852c8616e8b4b1c95563cea01085889a1bb2766b359c2854b4a4"
 generated_by_toolchain = "futao-2.0-contract-fixture"
 registry_snapshot_ids = []
-fixture_status = "design-only-not-generated-by-nexac-0.0.1"
+fixture_status = "design-only-not-generated-by-pre-self-hosting-nexac"
 
 [[package]]
 package_instance_id = "workspace::futao/incident-field-console@0.1.0"

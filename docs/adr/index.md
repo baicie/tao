@@ -8,7 +8,7 @@
 
 | ADR | Status | Scope |
 |-----|--------|-------|
-| [ADR-000](000-bootstrap-compiler.md) | Proposed | 渐进式混合自举、Bootstrap Profile 与可复现 Stage 产物 |
+| [ADR-000](000-bootstrap-compiler.md) | Accepted | 渐进式混合自举、内部 NIR 边界、Bootstrap Profile 与可复现 Stage 产物 |
 | [ADR-001](001-language-architecture-ownership-runtime.md) | Accepted | Nexa 2.0 语言定位、所有权模型、运行时与后端总边界 |
 | [ADR-002](002-ownership-borrowing-move-drop.md) | Accepted | Copy、Move、Borrow、`mut`、`take`、Drop、Shared 与 Weak 的精确定义 |
 | [ADR-003](003-nir-llvm-backend-stable-abi.md) | Accepted | MIR/NIR 分工、LLVM 隔离、Verifier 与稳定 ABI 边界 |
