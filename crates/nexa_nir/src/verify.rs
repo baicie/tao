@@ -85,6 +85,10 @@ impl VerifiedModule {
     pub fn module_id(&self) -> &str {
         &self.module.module_id
     }
+
+    pub(crate) const fn module(&self) -> &UnverifiedModule {
+        &self.module
+    }
 }
 
 /// Independent validator for untrusted NIR values.
@@ -565,7 +569,63 @@ fn ownership(
     types: &BTreeMap<TypeId, &NirType>,
     id: TypeId,
 ) -> Result<ValueOwnership, VerificationError> {
-    Ok(require_type(types, id, "value")?.ownership())
+    ownership_inner(types, id, &mut BTreeSet::new())
+}
+
+fn ownership_inner(
+    types: &BTreeMap<TypeId, &NirType>,
+    id: TypeId,
+    visiting: &mut BTreeSet<TypeId>,
+) -> Result<ValueOwnership, VerificationError> {
+    if !visiting.insert(id) {
+        return Ok(ValueOwnership::Copy);
+    }
+    let ownership = match require_type(types, id, "value")? {
+        NirType::OwnedPtr { .. } => ValueOwnership::Owned,
+        NirType::BorrowPtr { .. } => ValueOwnership::Borrowed,
+        NirType::MutBorrowPtr { .. } => ValueOwnership::MutBorrowed,
+        NirType::Handle { ownership, .. } => *ownership,
+        NirType::Struct { fields } => {
+            let mut aggregate = ValueOwnership::Copy;
+            for field in fields {
+                aggregate = combine_ownership(aggregate, ownership_inner(types, *field, visiting)?);
+            }
+            aggregate
+        }
+        NirType::FixedArray { element, length } if *length > 0 => {
+            ownership_inner(types, *element, visiting)?
+        }
+        NirType::I1
+        | NirType::I8
+        | NirType::I16
+        | NirType::I32
+        | NirType::I64
+        | NirType::U8
+        | NirType::U16
+        | NirType::U32
+        | NirType::U64
+        | NirType::F32
+        | NirType::F64
+        | NirType::Char32
+        | NirType::Unit
+        | NirType::Never
+        | NirType::RawPtr { .. }
+        | NirType::FixedArray { .. }
+        | NirType::FunctionRef => ValueOwnership::Copy,
+    };
+    visiting.remove(&id);
+    Ok(ownership)
+}
+
+const fn combine_ownership(left: ValueOwnership, right: ValueOwnership) -> ValueOwnership {
+    match (left, right) {
+        (ValueOwnership::Owned, _) | (_, ValueOwnership::Owned) => ValueOwnership::Owned,
+        (ValueOwnership::MutBorrowed, _) | (_, ValueOwnership::MutBorrowed) => {
+            ValueOwnership::MutBorrowed
+        }
+        (ValueOwnership::Borrowed, _) | (_, ValueOwnership::Borrowed) => ValueOwnership::Borrowed,
+        (ValueOwnership::Copy, ValueOwnership::Copy) => ValueOwnership::Copy,
+    }
 }
 
 fn require_type<'a>(

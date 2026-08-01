@@ -14,6 +14,7 @@ const I1: TypeId = TypeId::new(0);
 const I64: TypeId = TypeId::new(1);
 const UNIT: TypeId = TypeId::new(2);
 const OWNED_I64: TypeId = TypeId::new(3);
+const OWNED_STRUCT: TypeId = TypeId::new(4);
 const MAIN: FunctionId = FunctionId::new(0);
 const ENTRY: BlockId = BlockId::new(0);
 const SPAN: NirSpan = NirSpan::new(0, 0, 1);
@@ -31,6 +32,14 @@ fn minimal_module() -> ModuleBuilder {
         .expect("type id is unique");
     module
         .define_type(OWNED_I64, NirType::OwnedPtr { pointee: I64 })
+        .expect("type id is unique");
+    module
+        .define_type(
+            OWNED_STRUCT,
+            NirType::Struct {
+                fields: vec![OWNED_I64],
+            },
+        )
         .expect("type id is unique");
     module
 }
@@ -315,4 +324,28 @@ fn verifier_accepts_an_owned_value_dropped_once() {
         .expect("terminator is unique");
 
     Verifier::verify(module.finish()).expect("one drop consumes the owned value");
+}
+
+#[test]
+fn verifier_requires_cleanup_for_aggregates_with_owned_fields() {
+    let mut module = minimal_module();
+    module
+        .define_function(
+            MAIN,
+            "main",
+            [TypedValue::new(ValueId::new(0), OWNED_STRUCT)],
+            UNIT,
+            ENTRY,
+        )
+        .expect("function definition is valid");
+    module
+        .define_block(MAIN, ENTRY, [])
+        .expect("entry block is unique");
+    module
+        .set_terminator(MAIN, ENTRY, Terminator::Return { value: None }, SPAN)
+        .expect("terminator is unique");
+
+    let error = Verifier::verify(module.finish()).expect_err("owned fields require aggregate drop");
+
+    assert_eq!(error.code(), VerificationCode::OwnedValueNotConsumed);
 }

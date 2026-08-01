@@ -144,37 +144,18 @@ pub enum NirType {
         /// Field types in logical order.
         fields: Vec<TypeId>,
     },
+    /// A fixed-length homogeneous aggregate.
+    FixedArray {
+        /// Element type.
+        element: TypeId,
+        /// Number of elements.
+        length: u64,
+    },
     /// A resolved function reference.
     FunctionRef,
 }
 
 impl NirType {
-    pub(crate) const fn ownership(&self) -> ValueOwnership {
-        match self {
-            Self::OwnedPtr { .. } => ValueOwnership::Owned,
-            Self::BorrowPtr { .. } => ValueOwnership::Borrowed,
-            Self::MutBorrowPtr { .. } => ValueOwnership::MutBorrowed,
-            Self::Handle { ownership, .. } => *ownership,
-            Self::I1
-            | Self::I8
-            | Self::I16
-            | Self::I32
-            | Self::I64
-            | Self::U8
-            | Self::U16
-            | Self::U32
-            | Self::U64
-            | Self::F32
-            | Self::F64
-            | Self::Char32
-            | Self::Unit
-            | Self::Never
-            | Self::RawPtr { .. }
-            | Self::Struct { .. }
-            | Self::FunctionRef => ValueOwnership::Copy,
-        }
-    }
-
     pub(crate) fn referenced_types(&self) -> impl Iterator<Item = TypeId> + '_ {
         let mut references = Vec::new();
         match self {
@@ -183,6 +164,7 @@ impl NirType {
             | Self::BorrowPtr { pointee }
             | Self::MutBorrowPtr { pointee } => references.push(*pointee),
             Self::Struct { fields } => references.extend(fields.iter().copied()),
+            Self::FixedArray { element, .. } => references.push(*element),
             Self::I1
             | Self::I8
             | Self::I16

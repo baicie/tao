@@ -4,11 +4,18 @@
 //! Builders produce [`UnverifiedModule`] values. Consumers must pass those
 //! values through [`Verifier`] before code generation or serialization.
 
+mod artifact;
 mod builder;
+mod layout;
 mod model;
 mod verify;
 
+pub use artifact::{
+    ArtifactCompatibility, ArtifactError, ArtifactErrorCode, ArtifactMetadata, CanonicalArtifact,
+    NIR_ARTIFACT_MAGIC, NIR_SCHEMA_VERSION,
+};
 pub use builder::{BuilderError, ModuleBuilder};
+pub use layout::{Endianness, LayoutError, LayoutErrorCode, TargetLayout, ValueLayout};
 pub use model::{
     BlockId, FunctionId, InstructionId, NirSpan, NirType, Operation, Terminator, TypeId,
     TypedValue, UnverifiedModule, ValueId, ValueOwnership,
