@@ -35,6 +35,15 @@ Do not introduce circular dependencies. Add new crates only when a real phase bo
 
 Never commit code that fails `make check`.
 
+## Development Workflow
+
+- `mvp` is the default development and release branch.
+- Create a new branch from the latest `mvp` for every change; automated branches use the `codex/` prefix.
+- Do not push changes directly to `mvp`.
+- Every pull request targets `mvp`, contains one independently verifiable slice, and uses squash merge after required checks pass.
+- Delete the remote topic branch after merge.
+- Toolchain releases remain in `0.0.x` until the ADR-011 self-hosting gate passes. Only the release PR that proves that gate may set version `0.1.0`.
+
 ## Compiler Rules
 
 - Parser code must not perform type checking.

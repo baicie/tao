@@ -19,6 +19,14 @@ cargo xtask check
 cargo xtask security
 ```
 
+## Branch and merge workflow
+
+- Start each change from the latest `mvp` on a dedicated branch.
+- Open the pull request with `mvp` as its base; do not push directly to `mvp`.
+- Keep one independently verifiable delivery slice in each pull request.
+- Merge only after required checks pass, using squash merge, then delete the remote branch.
+- Keep toolchain releases below `0.1.0` until the ADR-011 self-hosting gate is fully satisfied.
+
 ## Commit style
 
 Conventional Commits are recommended:

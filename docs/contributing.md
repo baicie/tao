@@ -24,6 +24,18 @@ cargo install cargo-deny cargo-audit cargo-machete cargo-llvm-cov git-cliff
 - Diagnostics must use stable source spans.
 - Front-end crates should forbid unsafe code.
 
+## Branch and Release Policy
+
+Create every change on a dedicated branch from the latest `mvp`. Pull requests
+must target `mvp`, contain one independently verifiable slice, and pass all
+required checks before squash merge. Do not push directly to `mvp`; delete the
+remote topic branch after merge.
+
+Compiler toolchain versions remain in `0.0.x` until the
+[ADR-011 self-hosting gate](adr/011-toolchain-versioning-and-self-hosting-gate.md)
+passes. The [implementation plan](implementation/self-hosting-0.1.0.md) defines
+the only path to `0.1.0`.
+
 ## Commit Messages
 
 Use Conventional Commits:
