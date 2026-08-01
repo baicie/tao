@@ -53,6 +53,8 @@ enum Task {
         #[arg(long)]
         rebuild_stage0: bool,
     },
+    /// Validate accepted and rejected private NIR artifact fixtures.
+    NirArtifact,
 }
 
 fn main() -> Result<()> {
@@ -84,6 +86,7 @@ fn main() -> Result<()> {
             let manifest = manifest.unwrap_or_else(bootstrap::default_manifest_path);
             bootstrap::run(&manifest, rebuild_stage0)?;
         }
+        Task::NirArtifact => bootstrap::verify_nir_artifacts()?,
     }
 
     Ok(())

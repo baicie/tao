@@ -34,6 +34,9 @@ jobs:
       - name: Validate Stage 0 bootstrap contract
         run: cargo run --locked --package xtask -- bootstrap-contract
 
+      - name: Validate private NIR artifacts
+        run: cargo run --locked --package xtask -- nir-artifact
+
   parser-fuzz:
     name: Parser fuzz smoke
     runs-on: ubuntu-latest

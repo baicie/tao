@@ -3,6 +3,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{bail, ensure, Context, Result};
+use nexa_nir::{
+    ArtifactCompatibility, ArtifactErrorCode, CanonicalArtifact, NIR_ARTIFACT_MAGIC,
+    NIR_SCHEMA_VERSION,
+};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -61,6 +65,14 @@ struct BootstrapOutput {
     stability: String,
     consumer: String,
     comparison: String,
+    artifact_magic: String,
+    nir_schema_version: u32,
+    verifier_crate: String,
+    verifier_version: String,
+    target_profile: String,
+    feature_flags: Vec<String>,
+    canonical_encoding: String,
+    content_hash_algorithm: String,
     public_extension: Option<String>,
     signature_envelope_included: bool,
 }
@@ -85,6 +97,7 @@ pub(crate) fn run(manifest_path: &Path, rebuild: bool) -> Result<()> {
         .with_context(|| format!("failed to validate {}", manifest_path.display()))?;
     let root = workspace_root();
     verify_source(&manifest, &root)?;
+    verify_nir_artifacts_at(&root)?;
     if rebuild {
         rebuild_stage0(&manifest, &root)?;
     }
@@ -193,6 +206,44 @@ impl BootstrapManifest {
             &self.bootstrap_output.comparison,
             "normalized-c2-c3",
         )?;
+        expect(
+            "bootstrapOutput.artifactMagic",
+            &self.bootstrap_output.artifact_magic,
+            NIR_ARTIFACT_MAGIC,
+        )?;
+        ensure!(
+            self.bootstrap_output.nir_schema_version == NIR_SCHEMA_VERSION,
+            "bootstrapOutput.nirSchemaVersion must be {NIR_SCHEMA_VERSION}"
+        );
+        expect(
+            "bootstrapOutput.verifierCrate",
+            &self.bootstrap_output.verifier_crate,
+            "nexa_nir",
+        )?;
+        expect(
+            "bootstrapOutput.verifierVersion",
+            &self.bootstrap_output.verifier_version,
+            env!("CARGO_PKG_VERSION"),
+        )?;
+        expect(
+            "bootstrapOutput.targetProfile",
+            &self.bootstrap_output.target_profile,
+            "target-neutral-v1",
+        )?;
+        ensure!(
+            self.bootstrap_output.feature_flags == ["n1-scalar-cfg-v1"],
+            "bootstrapOutput.featureFlags must contain only n1-scalar-cfg-v1"
+        );
+        expect(
+            "bootstrapOutput.canonicalEncoding",
+            &self.bootstrap_output.canonical_encoding,
+            "strict-json",
+        )?;
+        expect(
+            "bootstrapOutput.contentHashAlgorithm",
+            &self.bootstrap_output.content_hash_algorithm,
+            "sha256",
+        )?;
         ensure!(
             self.bootstrap_output.public_extension.is_none(),
             "bootstrapOutput.publicExtension must be null"
@@ -223,6 +274,57 @@ impl BootstrapManifest {
 
         Ok(())
     }
+}
+
+pub(crate) fn verify_nir_artifacts() -> Result<()> {
+    verify_nir_artifacts_at(&workspace_root())?;
+    println!(
+        "private NIR artifact schema {}: accepted and rejected fixtures verified",
+        NIR_SCHEMA_VERSION
+    );
+    Ok(())
+}
+
+fn verify_nir_artifacts_at(root: &Path) -> Result<()> {
+    let compatibility = ArtifactCompatibility::exact(env!("CARGO_PKG_VERSION"));
+    let accepted = root.join("bootstrap/tests/accepted/minimal-nir.json");
+    let bytes = std::fs::read(&accepted)
+        .with_context(|| format!("failed to read {}", accepted.display()))?;
+    CanonicalArtifact::deserialize(canonical_fixture_bytes(&bytes), &compatibility)
+        .with_context(|| format!("accepted NIR fixture failed: {}", accepted.display()))?;
+
+    for (name, expected_code) in [
+        ("mutated-nir.json", ArtifactErrorCode::ContentHashMismatch),
+        ("unknown-nir-field.json", ArtifactErrorCode::InvalidJson),
+        (
+            "unsupported-nir-schema.json",
+            ArtifactErrorCode::UnsupportedSchema,
+        ),
+    ] {
+        let path = root.join("bootstrap/tests/rejected").join(name);
+        let bytes =
+            std::fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+        let result =
+            CanonicalArtifact::deserialize(canonical_fixture_bytes(&bytes), &compatibility);
+        let Err(error) = result else {
+            bail!(
+                "rejected NIR fixture unexpectedly verified: {}",
+                path.display()
+            );
+        };
+        ensure!(
+            error.code() == expected_code,
+            "rejected NIR fixture {} failed with {}, expected {}",
+            path.display(),
+            error.code().as_str(),
+            expected_code.as_str()
+        );
+    }
+    Ok(())
+}
+
+fn canonical_fixture_bytes(bytes: &[u8]) -> &[u8] {
+    bytes.strip_suffix(b"\n").unwrap_or(bytes)
 }
 
 fn expect(field: &str, actual: &str, expected: &str) -> Result<()> {
@@ -418,7 +520,10 @@ fn valid_lower_hex(value: &str, length: usize) -> bool {
 mod tests {
     use std::path::Path;
 
-    use super::{parse_manifest, stage0_target_dir, verify_digest, verify_source, workspace_root};
+    use super::{
+        canonical_fixture_bytes, parse_manifest, stage0_target_dir, verify_digest, verify_source,
+        workspace_root,
+    };
 
     const ACCEPTED: &str = include_str!("../../bootstrap/stage0/bootstrap-manifest.json");
     const PUBLIC_NIR: &str =
@@ -434,10 +539,32 @@ mod tests {
         assert_eq!(manifest.bootstrap_stdlib.version, None);
         assert_eq!(manifest.bootstrap_output.kind, "internal-nir");
         assert_eq!(manifest.bootstrap_output.consumer, "rust-verifier-backend");
+        assert_eq!(manifest.bootstrap_output.artifact_magic, "FUTAO-NIR");
+        assert_eq!(manifest.bootstrap_output.nir_schema_version, 1);
+        assert_eq!(manifest.bootstrap_output.verifier_crate, "nexa_nir");
+        assert_eq!(manifest.bootstrap_output.verifier_version, "0.0.5");
+        assert_eq!(
+            manifest.bootstrap_output.target_profile,
+            "target-neutral-v1"
+        );
+        assert_eq!(
+            manifest.bootstrap_output.feature_flags,
+            ["n1-scalar-cfg-v1"]
+        );
+        assert_eq!(manifest.bootstrap_output.canonical_encoding, "strict-json");
+        assert_eq!(manifest.bootstrap_output.content_hash_algorithm, "sha256");
         assert_eq!(manifest.bootstrap_output.public_extension, None);
+        assert!(!manifest.bootstrap_output.signature_envelope_included);
         assert!(!manifest.stable_component.includes_nir);
+        assert!(manifest.stable_component.separate_lifecycle);
 
         Ok(())
+    }
+
+    #[test]
+    fn fixture_reader_strips_exactly_one_final_line_feed() {
+        assert_eq!(canonical_fixture_bytes(b"artifact\n\n"), b"artifact\n");
+        assert_eq!(canonical_fixture_bytes(b"artifact"), b"artifact");
     }
 
     #[test]
