@@ -1,0 +1,304 @@
+// Futao Host IDL schema fixture. IDs are stable within this example schema.
+// Descriptors are validated before Host implementations receive control.
+
+descriptor HostError {
+  category: U32;
+  stable_code: U32;
+  safe_message: Optional<Handle<Utf8Buffer>>;
+}
+
+host module owned-buffer@1 {
+  schema_defaults since 1.0, non_reentrant, accounting owned-host-bytes;
+
+  @id(0x0d0001)
+  function byte_length(
+    buffer: borrow Handle<ByteBuffer>
+  ) -> Result<U64, HostError>;
+
+  @id(0x0d0002)
+  function copy_bytes(
+    buffer: borrow Handle<ByteBuffer>,
+    offset: copy U64,
+    output: mut_borrow ByteSlice
+  ) -> Result<U64, HostError>;
+
+  @id(0x0d0003)
+  function close_bytes(
+    buffer: take Handle<ByteBuffer>
+  ) -> Result<Unit, HostError>;
+
+  @id(0x0d0004)
+  function utf8_byte_length(
+    buffer: borrow Handle<Utf8Buffer>
+  ) -> Result<U64, HostError>;
+
+  @id(0x0d0005)
+  function copy_utf8(
+    buffer: borrow Handle<Utf8Buffer>,
+    output: mut_borrow ByteSlice
+  ) -> Result<U64, HostError>;
+
+  @id(0x0d0006)
+  function close_utf8(
+    buffer: take Handle<Utf8Buffer>
+  ) -> Result<Unit, HostError>;
+}
+
+descriptor AsyncPoll<T> {
+  state: Pending | Complete;
+  value: Optional<T>;
+}
+
+host module filesystem@1 {
+  capability filesystem;
+  schema_defaults since 1.0, non_reentrant, accounting filesystem-io;
+
+  @id(0x010001)
+  function read(
+    path: borrow Utf8View
+  ) -> Result<return_owned Handle<ByteBuffer>, HostError>;
+
+  @id(0x010002)
+  function create(
+    path: borrow Utf8View
+  ) -> Result<return_owned Handle<File>, HostError>;
+
+  @id(0x010003)
+  function write_all(
+    file: mut_borrow Handle<File>,
+    bytes: borrow ByteSlice
+  ) -> Result<Unit, HostError>;
+
+  @id(0x010004)
+  function close(
+    file: take Handle<File>
+  ) -> Result<Unit, HostError>;
+}
+
+host module network@1 {
+  capability network;
+  schema_defaults since 1.0, non_reentrant, accounting network-operation;
+
+  @id(0x020001)
+  function start(
+    request: take HttpRequestDescriptor
+  ) -> Result<return_owned Handle<HttpOperation>, HostError>;
+
+  @id(0x020002)
+  async function poll_response(
+    operation: mut_borrow Handle<HttpOperation>
+  ) -> Result<AsyncPoll<return_owned Handle<ByteBuffer>>, HostError>;
+
+  @id(0x020003)
+  function cancel(
+    operation: mut_borrow Handle<HttpOperation>
+  ) -> Result<Unit, HostError>;
+
+  @id(0x020004)
+  function close(
+    operation: take Handle<HttpOperation>
+  ) -> Result<Unit, HostError>;
+
+  @id(0x020005)
+  function parse_url(
+    text: borrow Utf8View
+  ) -> Result<return_owned UrlDescriptor, HostError>;
+}
+
+host module time@1 {
+  capability time;
+  schema_defaults since 1.0, non_reentrant, accounting timer;
+
+  @id(0x030001)
+  function monotonic_now() -> Result<U64, HostError>;
+
+  @id(0x030002)
+  function deadline_after(
+    duration_nanos: copy U64
+  ) -> Result<U64, HostError>;
+}
+
+host module random@1 {
+  capability random;
+  schema_defaults since 1.0, non_reentrant, accounting random-bytes;
+
+  @id(0x040001)
+  function fill(
+    output: mut_borrow ByteSlice
+  ) -> Result<Unit, HostError>;
+}
+
+host module environment@1 {
+  capability environment;
+  schema_defaults since 1.0, non_reentrant, accounting environment-read;
+
+  @id(0x050001)
+  function read(
+    name: borrow Utf8View
+  ) -> Result<return_owned Optional<Handle<Utf8Buffer>>, HostError>;
+}
+
+host module process@1 {
+  capability process;
+  schema_defaults since 1.0, non_reentrant, accounting child-process;
+
+  @id(0x060001)
+  function spawn(
+    request: take ProcessRequestDescriptor
+  ) -> Result<return_owned Handle<Process>, HostError>;
+
+  @id(0x060002)
+  async function poll_exit(
+    process: mut_borrow Handle<Process>
+  ) -> Result<AsyncPoll<I32>, HostError>;
+
+  @id(0x060003)
+  function terminate(
+    process: mut_borrow Handle<Process>
+  ) -> Result<Unit, HostError>;
+
+  @id(0x060004)
+  function close(
+    process: take Handle<Process>
+  ) -> Result<Unit, HostError>;
+}
+
+host module ui@1 {
+  capability ui;
+  thread_affinity main;
+  schema_defaults since 1.0, non_reentrant, accounting ui-tree;
+
+  @id(0x070001)
+  function open_window(
+    title: borrow Utf8View
+  ) -> Result<return_owned Handle<Window>, HostError>;
+
+  @id(0x070002)
+  function attach_root(
+    window: borrow Handle<Window>
+  ) -> Result<return_owned Handle<UiRoot>, HostError>;
+
+  @id(0x070003)
+  function apply_patch(
+    root: borrow Handle<UiRoot>,
+    batch: take UiPatchBatchDescriptor
+  ) -> Result<Unit, HostError>;
+
+  @id(0x070004)
+  function open_events(
+    root: borrow Handle<UiRoot>,
+    maximum_batch: copy U32
+  ) -> Result<return_owned Handle<UiEventStream>, HostError>;
+
+  @id(0x070005)
+  async function poll_events(
+    stream: mut_borrow Handle<UiEventStream>
+  ) -> Result<AsyncPoll<return_owned UiEventBatchDescriptor>, HostError>;
+
+  @id(0x070006)
+  function close_window(
+    window: take Handle<Window>
+  ) -> Result<Unit, HostError>;
+
+  @id(0x070007)
+  function close_root(
+    root: take Handle<UiRoot>
+  ) -> Result<Unit, HostError>;
+
+  @id(0x070008)
+  function close_event_stream(
+    stream: take Handle<UiEventStream>
+  ) -> Result<Unit, HostError>;
+}
+
+host module clipboard@1 {
+  capability clipboard;
+  schema_defaults since 1.0, non_reentrant, accounting clipboard-write;
+
+  @id(0x080001)
+  function write_text(
+    text: borrow Utf8View
+  ) -> Result<Unit, HostError>;
+}
+
+host module camera@1 {
+  capability camera;
+  schema_defaults since 1.0, non_reentrant, accounting camera-capture;
+
+  @id(0x090001)
+  function start_capture(
+    options: copy CaptureOptionsDescriptor
+  ) -> Result<return_owned Handle<CameraCapture>, HostError>;
+
+  @id(0x090002)
+  async function poll_capture(
+    capture: mut_borrow Handle<CameraCapture>
+  ) -> Result<AsyncPoll<return_owned Handle<ByteBuffer>>, HostError>;
+
+  @id(0x090003)
+  function cancel(
+    capture: mut_borrow Handle<CameraCapture>
+  ) -> Result<Unit, HostError>;
+}
+
+host module microphone@1 {
+  capability microphone;
+  schema_defaults since 1.0, non_reentrant, accounting microphone-capture;
+
+  @id(0x0a0001)
+  function start_recording(
+    options: copy CaptureOptionsDescriptor
+  ) -> Result<return_owned Handle<MicrophoneCapture>, HostError>;
+
+  @id(0x0a0002)
+  async function poll_recording(
+    capture: mut_borrow Handle<MicrophoneCapture>
+  ) -> Result<AsyncPoll<return_owned Handle<ByteBuffer>>, HostError>;
+
+  @id(0x0a0003)
+  function cancel(
+    capture: mut_borrow Handle<MicrophoneCapture>
+  ) -> Result<Unit, HostError>;
+}
+
+host module gpu@1 {
+  capability gpu;
+  schema_defaults since 1.0, non_reentrant, accounting gpu-bytes;
+
+  @id(0x0b0001)
+  function upload(
+    bytes: borrow ByteSlice
+  ) -> Result<return_owned Handle<GpuBuffer>, HostError>;
+
+  @id(0x0b0002)
+  function ui_resource(
+    buffer: borrow Handle<GpuBuffer>
+  ) -> Result<return_owned Handle<UiResourceRef>, HostError>;
+
+  @id(0x0b0003)
+  function close(
+    buffer: take Handle<GpuBuffer>
+  ) -> Result<Unit, HostError>;
+}
+
+host module database@1 {
+  capability database;
+  schema_defaults since 1.0, non_reentrant, accounting database-operation;
+
+  @id(0x0c0001)
+  function open(
+    logical_name: borrow Utf8View
+  ) -> Result<return_owned Handle<Database>, HostError>;
+
+  @id(0x0c0002)
+  function execute(
+    database: mut_borrow Handle<Database>,
+    statement_id: borrow Utf8View,
+    parameters: borrow Utf8ListView
+  ) -> Result<U64, HostError>;
+
+  @id(0x0c0003)
+  function close(
+    database: take Handle<Database>
+  ) -> Result<Unit, HostError>;
+}

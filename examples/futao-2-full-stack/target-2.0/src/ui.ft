@@ -1,0 +1,144 @@
+// UI is a main-thread Host capability expressed as validated patch batches.
+
+import { AppError, fromHost } from "./errors.ft";
+import { IncidentBatch } from "./model.ft";
+import {
+  ClipboardHost,
+  EventHandlerId,
+  GpuHost,
+  UiElement,
+  UiEventType,
+  UiHost,
+  UiNodeId,
+  UiPatchBatch,
+  UiPatchOperation,
+  UiProperty,
+  UiPropertyValue,
+  UiResourceRef,
+} from "./platform.ft";
+import { EvidenceMessage } from "./workflows.ft";
+
+const ROOT = UiNodeId({ value: 1 });
+const TITLE = UiNodeId({ value: 2 });
+const TIMELINE = UiNodeId({ value: 3 });
+const COPY_BUTTON = UiNodeId({ value: 4 });
+const COPY_HANDLER = EventHandlerId({ value: 100 });
+
+function initialPatch(
+  batch: IncidentBatch,
+  take gpuResource: UiResourceRef,
+): UiPatchBatch {
+  let operations = Vec<UiPatchOperation>();
+  operations.push(UiPatchOperation.Create(ROOT, UiElement.Column));
+  operations.push(UiPatchOperation.Create(TITLE, UiElement.Heading));
+  operations.push(UiPatchOperation.SetProperty(
+    TITLE,
+    UiProperty.TextContent,
+    UiPropertyValue.Text("Incident Field Console"),
+  ));
+  operations.push(UiPatchOperation.Insert(ROOT, TITLE, 0));
+  operations.push(UiPatchOperation.Create(TIMELINE, UiElement.Timeline));
+  operations.push(UiPatchOperation.SetProperty(
+    TIMELINE,
+    UiProperty.GpuResource,
+    UiPropertyValue.ResourceIndex(0),
+  ));
+  operations.push(UiPatchOperation.SetProperty(
+    TIMELINE,
+    UiProperty.AccessibilityLabel,
+    UiPropertyValue.Text(toString(batch.incidents.length) + " incidents"),
+  ));
+  operations.push(UiPatchOperation.Insert(ROOT, TIMELINE, 1));
+  operations.push(UiPatchOperation.Create(COPY_BUTTON, UiElement.Button));
+  operations.push(UiPatchOperation.SetProperty(
+    COPY_BUTTON,
+    UiProperty.TextContent,
+    UiPropertyValue.Text("Copy correlation ID"),
+  ));
+  operations.push(UiPatchOperation.BindEvent(
+    COPY_BUTTON,
+    UiEventType.Click,
+    COPY_HANDLER,
+  ));
+  operations.push(UiPatchOperation.Insert(ROOT, COPY_BUTTON, 2));
+
+  return {
+    sequence: 1,
+    schemaVersion: 1,
+    operations: operations.freeze(),
+    resourceRefs: [gpuResource],
+  };
+}
+
+function evidencePatch(
+  sequence: U64,
+  message: EvidenceMessage,
+): UiPatchBatch {
+  const text = match (message) {
+    case EvidenceMessage.Captured(summary) =>
+      "captured " + summary.contentType;
+    case EvidenceMessage.Failed(error) => "capture failed";
+  };
+
+  return {
+    sequence,
+    schemaVersion: 1,
+    operations: [UiPatchOperation.SetProperty(
+      TIMELINE,
+      UiProperty.TextContent,
+      UiPropertyValue.Text(text),
+    )],
+    resourceRefs: [],
+  };
+}
+
+export async function runUi(
+  take ui: UiHost,
+  take clipboard: ClipboardHost,
+  take gpu: GpuHost,
+  take batch: IncidentBatch,
+  take evidence: Receiver<EvidenceMessage>,
+): Result<Unit, AppError> {
+  let window = fromHost(ui.openWindow("Incident Field Console"))?;
+  let timelineBuffer = fromHost(gpu.upload([0, 1, 2, 3].asSlice()))?;
+  let root = fromHost(ui.attachRoot(window))?;
+  defer window.closeIgnoringError();
+  let events = fromHost(root.events(32))?;
+  const gpuResource = timelineBuffer.resourceRef();
+  defer timelineBuffer.closeIgnoringError();
+
+  fromHost(root.apply(initialPatch(
+    batch,
+    gpuResource,
+  )))?;
+
+  let sequence: U64 = 2;
+  let receiving = true;
+  while (receiving) {
+    match (await evidence.receive()) {
+      case Some(message) => {
+        fromHost(root.apply(evidencePatch(sequence, message)))?;
+        sequence = sequence + 1;
+      }
+      case None => {
+        receiving = false;
+      }
+    }
+  }
+  defer root.closeIgnoringError();
+
+  const eventBatch = fromHost(await events.next())?;
+  defer events.closeIgnoringError();
+  match (eventBatch) {
+    case Some(delivery) => {
+      for (const event of delivery.events) {
+        if (event.handlerId == COPY_HANDLER) {
+          fromHost(clipboard.writeText(batch.correlationId.clone()))?;
+        }
+      }
+    }
+    case None => {}
+  }
+
+  return Ok(Unit);
+}

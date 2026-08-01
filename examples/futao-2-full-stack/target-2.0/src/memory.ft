@@ -1,0 +1,95 @@
+// ADR-004 examples use public collection semantics, never private layouts.
+
+import { Incident } from "./model.ft";
+
+export type MemorySnapshot = {
+  incidentCount: U64;
+  evidenceCount: U64;
+  titleBytes: U64;
+};
+
+export class RenderCache {
+  private labels: Array<String>;
+
+  public function labels(self): Array<String> {
+    return self.labels.clone();
+  }
+}
+
+export function buildIncidentArray(
+  take allocator: Allocator,
+  take first: Incident,
+): Result<Array<Incident>, AllocationError> {
+  let incidents = Vec.withAllocator<Incident>(allocator);
+  incidents.tryPush(first)?;
+  return Ok(incidents.freeze());
+}
+
+export function mutableCopy(incidents: Array<Incident>): Vec<Incident> {
+  return incidents.toVec();
+}
+
+export function boxSnapshot(snapshot: MemorySnapshot): Box<MemorySnapshot> {
+  return Box.new(snapshot);
+}
+
+export function shareRenderCache(take cache: RenderCache): Shared<RenderCache> {
+  return Shared.new(cache);
+}
+
+export function observeRenderCache(
+  cache: Shared<RenderCache>,
+): Weak<RenderCache> {
+  return cache.weak();
+}
+
+export function readIfAlive(cache: Weak<RenderCache>): Array<String> {
+  return match (cache.upgrade()) {
+    case Some(owner) => owner.labels();
+    case None => [];
+  };
+}
+
+export function measureInArena(
+  incidents: Array<Incident>,
+): MemorySnapshot {
+  let arena = DropArena.new();
+  let scratch = arena.vec<String>();
+  let evidenceCount: U64 = 0;
+  let titleBytes: U64 = 0;
+
+  for (const incident of incidents) {
+    scratch.push(incident.title.clone());
+    titleBytes = titleBytes + incident.title.byteLength;
+    evidenceCount = evidenceCount + incident.evidence.length;
+  }
+
+  // Only owned scalar results leave the scope; arena values and borrows do not.
+  return {
+    incidentCount: incidents.length,
+    evidenceCount,
+    titleBytes,
+  };
+}
+
+export function countPlainRecords(incidents: Array<Incident>): U64 {
+  let arena = PlainArena.new();
+  let counters = arena.array<U64>(incidents.length);
+
+  let index: U64 = 0;
+  while (index < incidents.length) {
+    counters[index] = incidents[index].evidence.length;
+    index = index + 1;
+  }
+
+  return counters.sum();
+}
+
+export function allocatorFailureIsRecoverable(
+  mut allocator: FailingAllocator,
+  bytes: U64,
+): Result<Unit, AllocationError> {
+  const allocation = allocator.allocate(Layout.bytes(bytes))?;
+  allocator.deallocate(allocation, Layout.bytes(bytes));
+  return Ok(Unit);
+}

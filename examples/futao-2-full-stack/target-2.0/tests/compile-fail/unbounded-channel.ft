@@ -1,0 +1,4 @@
+// expected-error: E5950
+function rejected(): UnboundedChannel<String> {
+  return Channel.unbounded<String>();
+}

@@ -1,0 +1,7 @@
+// expected-error: E5731
+resource Socket {}
+
+function rejected(take socket: Socket): Unit {
+  let arena = PlainArena.new();
+  arena.store(socket);
+}

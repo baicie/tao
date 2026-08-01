@@ -1,0 +1,203 @@
+// Background workflows own every value retained across an await boundary.
+
+import { AppError, fromChannel, fromHost } from "./errors.ft";
+import {
+  EvidenceKind,
+  EvidenceSummary,
+  IncidentBatch,
+} from "./model.ft";
+import {
+  CameraHost,
+  CaptureHandle,
+  DatabaseHost,
+  Deadline,
+  EnvironmentHost,
+  FilesystemHost,
+  HttpRequest,
+  MicrophoneHost,
+  NetworkHost,
+  ProcessHost,
+  ProcessRequest,
+} from "./platform.ft";
+
+export type SyncReport = {
+  correlationId: String;
+  uploadedIncidents: U64;
+  responseBytes: U64;
+};
+
+export enum EvidenceMessage {
+  Captured(EvidenceSummary),
+  Failed(AppError),
+}
+
+export class EvidenceActor {
+  private accepted: U64;
+
+  public function receive(mut self, take message: EvidenceMessage): Unit {
+    match (message) {
+      case EvidenceMessage.Captured(summary) => {
+        self.accepted = self.accepted + 1;
+      }
+      case EvidenceMessage.Failed(error) => {
+        // Production code records only the stable, redacted error category.
+      }
+    }
+  }
+
+  public function count(self): U64 {
+    return self.accepted;
+  }
+}
+
+export function newEvidenceActor(): EvidenceActor {
+  return EvidenceActor({ accepted: 0 });
+}
+
+function encodeBatch(batch: IncidentBatch): Array<U8> {
+  return Utf8.encode(batch.correlationId);
+}
+
+function decodeEvidenceOnWorker(
+  take bytes: Array<U8>,
+  kind: EvidenceKind,
+  contentType: String,
+): EvidenceSummary {
+  return {
+    kind,
+    contentType,
+    byteLength: bytes.length,
+  };
+}
+
+export async function synchronize(
+  take network: NetworkHost,
+  take databaseHost: DatabaseHost,
+  take batch: IncidentBatch,
+  deadline: Deadline,
+): Result<SyncReport, AppError> {
+  const uploadedIncidents = batch.incidents.length;
+  const serviceUrl = fromHost(network.parseUrl(
+    "https://incidents.example.invalid/v1/sync",
+  ))?;
+  const request: HttpRequest = {
+    method: "POST",
+    url: serviceUrl,
+    headers: ["content-type: application/octet-stream"],
+    body: encodeBatch(batch),
+  };
+  const operation = fromHost(network.start(request))?;
+  const response = match (await withDeadline(deadline, operation.response())) {
+    case DeadlineOutcome.Completed(result) => fromHost(result)?;
+    case DeadlineOutcome.Expired => return Err(AppError.DeadlineExceeded);
+  };
+  let database = fromHost(databaseHost.open("field-cache"))?;
+
+  fromHost(database.execute(
+    "sync.commit.v1",
+    [batch.correlationId.clone(), toString(uploadedIncidents)],
+  ))?;
+  defer database.closeIgnoringError();
+
+  return Ok({
+    correlationId: batch.correlationId,
+    uploadedIncidents,
+    responseBytes: response.length,
+  });
+}
+
+async function finishCapture(
+  take capture: CaptureHandle,
+  kind: EvidenceKind,
+  contentType: String,
+): Result<EvidenceSummary, AppError> {
+  const bytes = fromHost(await capture.finish())?;
+
+  // The worker receives bytes and metadata by Move, never a UI/device handle.
+  return Ok(await Worker.run(
+    decodeEvidenceOnWorker(bytes, kind, contentType),
+  ));
+}
+
+export async function captureEvidence(
+  take camera: CameraHost,
+  take microphone: MicrophoneHost,
+  take output: Sender<EvidenceMessage>,
+  take audit: ActorSender<EvidenceMessage>,
+): Result<Unit, AppError> {
+  const photo = fromHost(camera.capture({
+    maximumBytes: 8 * 1024 * 1024,
+    contentType: "image/jpeg",
+  }))?;
+  const audio = fromHost(microphone.record({
+    maximumBytes: 16 * 1024 * 1024,
+    contentType: "audio/opus",
+  }))?;
+
+  return await TaskScope.run(async (mut scope): Result<Unit, AppError> => {
+    const photoTask = scope.spawn(finishCapture(
+      photo,
+      EvidenceKind.Photo,
+      "image/jpeg",
+    ));
+    const audioTask = scope.spawn(finishCapture(
+      audio,
+      EvidenceKind.Audio,
+      "audio/opus",
+    ));
+
+    const photoSummary = await photoTask?;
+    const audioSummary = await audioTask?;
+    const photoMessage = EvidenceMessage.Captured(photoSummary);
+    const audioMessage = EvidenceMessage.Captured(audioSummary);
+    fromChannel(await audit.send(photoMessage.clone()))?;
+    fromChannel(await output.send(photoMessage))?;
+    fromChannel(await audit.send(audioMessage.clone()))?;
+    fromChannel(await output.send(audioMessage))?;
+    return Ok(Unit);
+  });
+}
+
+function supportMode(
+  environment: EnvironmentHost,
+): Result<String, AppError> {
+  try {
+    const configured = fromHost(environment.read("FUTAO_SUPPORT_MODE"))?;
+    return Ok(match (configured) {
+      case Some(value) => value;
+      case None => "offline";
+    });
+  } catch {
+    case AppError.Host(error) => return Ok("offline");
+    case other => return Err(other);
+  }
+}
+
+export async function runSupportTool(
+  take environment: EnvironmentHost,
+  take process: ProcessHost,
+): Result<I32, AppError> {
+  const mode = supportMode(environment)?;
+  const request: ProcessRequest = {
+    executableId: "field-support-v1",
+    arguments: ["--mode", mode],
+  };
+  const child = fromHost(process.spawn(request))?;
+  return fromHost(await child.wait());
+}
+
+export function exportReport(
+  take filesystem: FilesystemHost,
+  report: SyncReport,
+): Result<Unit, AppError> {
+  let file = fromHost(filesystem.create("reports/latest.txt"))?;
+  const bytes = Utf8.encode(
+    report.correlationId + ":" + toString(report.uploadedIncidents),
+  );
+  fromHost(file.writeAll(bytes.asSlice()))?;
+
+  return match (file.close()) {
+    case Ok() => Ok(Unit);
+    case Err(error) => Err(AppError.ExplicitCloseFailed(error));
+  };
+}

@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-本目录记录 Nexa 的架构决策及其演进关系。ADR 记录的是决策约束，不代表对应实现已经交付。
+本目录记录 Futao（原 Nexa）的架构决策及其演进关系。ADR 记录的是决策约束，不代表对应实现已经交付。
 
 当前 Nexa Language 1.0 规范仍是兼容性基线。ADR-001 至 ADR-009 描述 Nexa 2.0 的目标架构；在相关实现和规格完成前，不应据此宣称 2.0 能力已经可用。
 
@@ -18,6 +18,7 @@
 | [ADR-007](007-async-structured-concurrency.md) | Accepted | Async state machine、structured concurrency、取消与 `Send`/`Sync` |
 | [ADR-008](008-wasm-js-ffi-ui-host.md) | Accepted | Wasm memory descriptor、JavaScript adapter 与跨平台 UI Host |
 | [ADR-009](009-package-lockfile-artifacts-signing.md) | Accepted | Package、lockfile、稳定组件、签名、provenance 与可复现构建 |
+| [ADR-010](010-futao-language-name.md) | Accepted | Futao 正式名称、`.ft`、工具链标识与历史兼容迁移边界 |
 
 ## Dependency Order
 
@@ -64,3 +65,6 @@ ADR-009 package, lockfile, component artifact, and signing
 6. [ADR-009](009-package-lockfile-artifacts-signing.md)：最后冻结分发、组件加载、签名与 provenance 链路。
 
 每一阶段都需要对应的 accepted、rejected/compile-fail、跨后端 conformance 和安全边界测试，才能从“已接受设计”进入“已实现能力”。
+
+ADR-010 是横跨上述阶段的命名决策，不改变 ADR-004 至 ADR-009 的技术依赖顺序。历史文档中的
+Nexa 标识保留用于追溯；新的 2.0 示例和后续规范使用 Futao 标识。

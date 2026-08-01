@@ -1,0 +1,22 @@
+import { AppError, fromChannel } from "../../src/errors.ft";
+
+async function produce(
+  take output: Sender<String>,
+): Result<Unit, AppError> {
+  fromChannel(await output.send("owned message"))?;
+  return Ok(Unit);
+}
+
+async function structured(): Result<String, AppError> {
+  const channel = Channel.bounded<String>(8);
+
+  return await TaskScope.run(async (mut scope): Result<String, AppError> => {
+    const producer = scope.spawn(produce(channel.sender));
+    const message = await channel.receiver.receive();
+    await producer?;
+    return match (message) {
+      case Some(value) => Ok(value);
+      case None => Err(AppError.ChannelClosed);
+    };
+  });
+}

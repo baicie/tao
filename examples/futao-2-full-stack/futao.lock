@@ -1,0 +1,43 @@
+lock_version = 1
+resolver_version = "futao-resolver-1"
+workspace_manifest_digest = "sha256:e326e455ab2d852c8616e8b4b1c95563cea01085889a1bb2766b359c2854b4a4"
+generated_by_toolchain = "futao-2.0-contract-fixture"
+registry_snapshot_ids = []
+fixture_status = "design-only-not-generated-by-nexac-0.0.1"
+
+[[package]]
+package_instance_id = "workspace::futao/incident-field-console@0.1.0"
+source_kind = "workspace"
+source_identity = "workspace:examples/futao-2-full-stack"
+name = "incident-field-console"
+version = "0.1.0"
+source_tree_digest = "sha256:21ffde78937d88eec68de649e9e1969f83a6ab14daf1c17422b9ebd4210dbf9a"
+dependencies = []
+resolved_features = ["default", "wasm-ui"]
+declared_capabilities = [
+  "camera:still-image",
+  "clipboard:write-text",
+  "database:field-cache",
+  "environment:FUTAO_SUPPORT_MODE",
+  "filesystem:offline-cache",
+  "filesystem:reports",
+  "gpu:timeline-buffer",
+  "microphone:bounded-recording",
+  "network:https://incidents.example.invalid",
+  "process:field-support-v1",
+  "random:correlation-id",
+  "time:monotonic",
+  "time:timer",
+  "ui:primary-window",
+]
+unsafe = false
+build_script = false
+publisher_identity = "unpublished-workspace"
+signature_identity = "unsigned-design-fixture"
+license = "MIT"
+provenance_reference = "release/component.toml#provenance"
+
+[package.digest_scope]
+algorithm = "sha256"
+canonical_paths = ["futao.toml", "release", "target-2.0"]
+excludes = ["futao.lock"]
