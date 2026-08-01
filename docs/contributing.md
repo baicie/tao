@@ -10,6 +10,9 @@ cargo xtask conformance
 Before changing the Language 1.0 compatibility baseline, also run
 `cargo xtask release-check`. The command validates but does not publish.
 
+Changes under `bootstrap/` or to ADR-000 must also pass
+`cargo xtask bootstrap-contract --rebuild-stage0`.
+
 Optional tools:
 
 ```bash

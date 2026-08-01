@@ -19,6 +19,12 @@ cargo xtask check
 cargo xtask security
 ```
 
+Bootstrap contract changes must also run the clean Stage 0 rebuild:
+
+```bash
+cargo xtask bootstrap-contract --rebuild-stage0
+```
+
 ## Branch and merge workflow
 
 - Start each change from the latest `mvp` on a dedicated branch.

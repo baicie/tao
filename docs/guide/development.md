@@ -9,18 +9,24 @@ cargo xtask lint
 cargo xtask test
 cargo xtask doc
 cargo xtask conformance
+cargo xtask bootstrap-contract
 cargo xtask fuzz-smoke
 cargo xtask perf
 cargo xtask release-check
 cargo xtask security
 ```
 
-`cargo xtask check` runs formatting, clippy, tests, and docs.
+`cargo xtask check` runs formatting, clippy, tests, Rust docs, and the Stage 0
+bootstrap contract.
 `conformance` runs the versioned language corpus. `fuzz-smoke` replays stable
 parser seeds and checks the fuzz target on Rust 1.80. `perf` runs release-mode
 reference workloads without a machine-independent threshold. `release-check`
 combines the required local release-candidate gates and has no publishing side
 effects.
+
+`bootstrap-contract` validates the pinned Stage 0 source and internal NIR
+boundary. Add `--rebuild-stage0` to recreate and smoke-test `nexac 0.0.1` with
+Rust 1.80 from its fixed source commit.
 
 ## Manual Checks
 
