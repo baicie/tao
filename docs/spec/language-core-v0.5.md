@@ -2,11 +2,9 @@
 
 ## Status
 
-Language Core v0.5 is delivered and remains a supported predecessor. Its
-implementation satisfies the exit criteria in the
-[v0.5 roadmap](../project/roadmap/language-core-v0.5.md). Language Core v0.8
-has since delivered the practical reference core, and development continues
-through the [1.0 roadmap](../project/roadmap/language-1.0.md).
+Language Core v0.5 is delivered and remains a normative predecessor of the
+[Language 1.0 contract](language-1.0.md). Its acceptance behavior remains
+covered by the compiler tests and versioned conformance corpus.
 
 ## Product Contract
 

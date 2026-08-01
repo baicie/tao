@@ -3,10 +3,8 @@
 ## Status
 
 Language Core v0.8 is delivered. This document defines its normative source,
-static, MIR, and reference-interpreter contract. Its completed delivery record
-is tracked by the
-[v0.8 roadmap](../project/roadmap/language-core-v0.8.md) and the wider
-[1.0 roadmap](../project/roadmap/language-1.0.md).
+static, MIR, and reference-interpreter contract. It is the final feature
+milestone composed into the [Language 1.0 contract](language-1.0.md).
 
 ## Product Contract
 
