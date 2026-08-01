@@ -14,6 +14,7 @@ authors.workspace = true
 nexa_diagnostics.workspace = true
 nexa_hir.workspace = true
 nexa_mir.workspace = true
+nexa_nir.workspace = true
 nexa_parser.workspace = true
 nexa_source.workspace = true
 nexa_span.workspace = true

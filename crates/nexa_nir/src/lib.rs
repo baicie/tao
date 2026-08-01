@@ -17,7 +17,7 @@ pub use artifact::{
 pub use builder::{BuilderError, ModuleBuilder};
 pub use layout::{Endianness, LayoutError, LayoutErrorCode, TargetLayout, ValueLayout};
 pub use model::{
-    BlockId, FunctionId, InstructionId, NirSpan, NirType, Operation, Terminator, TypeId,
-    TypedValue, UnverifiedModule, ValueId, ValueOwnership,
+    BlockId, FunctionId, InstructionId, IntrinsicId, NirSpan, NirType, Operation, Terminator,
+    TypeId, TypedValue, UnverifiedModule, ValueId, ValueOwnership,
 };
 pub use verify::{VerificationCode, VerificationError, VerifiedModule, Verifier};

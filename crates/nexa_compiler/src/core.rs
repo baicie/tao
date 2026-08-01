@@ -5,18 +5,20 @@ use std::path::Path;
 
 use nexa_diagnostics::{Diagnostic, LabelStyle, Severity};
 use nexa_mir::{lower as lower_mir, MirLoweringError, MirProgram};
+use nexa_nir::{
+    ArtifactError, ArtifactMetadata, CanonicalArtifact as InternalNirArtifact, VerifiedModule,
+};
 use nexa_source::{MemorySourceProvider, SourceMap};
 use nexa_span::SourceSpan;
 use rowan::{NodeOrToken, WalkEvent};
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::nir_lower::{lower as lower_nir, NirDeferred, NirLoweringError, NirLoweringOutcome};
 use crate::{canonical, check_session, CheckResult, CompilerSession, SessionBuildError};
 
 /// Schema version for every canonical compiler phase dump emitted by this toolchain.
 pub const CANONICAL_DUMP_SCHEMA_VERSION: u32 = 1;
-
-const NIR_PLANNED_VERSION: &str = "0.0.5";
 
 /// Source-language contract selected for an explicit compiler invocation.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -172,6 +174,15 @@ pub enum CompileError {
     /// Validated HIR violated a MIR lowering invariant.
     #[error(transparent)]
     Mir(#[from] MirLoweringError),
+    /// Supported N1 MIR violated an internal NIR lowering invariant.
+    #[error("failed to lower verified MIR into NIR: {message}")]
+    Nir {
+        /// Stable internal invariant description.
+        message: String,
+    },
+    /// Verified NIR could not be encoded as a private bootstrap artifact.
+    #[error(transparent)]
+    NirArtifact(#[from] ArtifactError),
     /// A canonical phase value could not be serialized.
     #[error("failed to serialize canonical compiler output: {0}")]
     Canonical(#[from] serde_json::Error),
@@ -216,8 +227,8 @@ pub enum CanonicalArtifactStatus {
     Available,
     /// Earlier source diagnostics prevented this phase from running.
     BlockedByDiagnostics,
-    /// The phase does not exist in the current toolchain.
-    NotImplemented,
+    /// The phase exists, but this input needs a later explicitly named lowering slice.
+    Deferred,
 }
 
 /// Discriminated state of one canonical compiler phase.
@@ -231,10 +242,10 @@ pub enum CanonicalArtifactState {
     },
     /// Source diagnostics prevented this phase from executing.
     SkippedDueToDiagnostics,
-    /// The phase is intentionally absent until a later milestone.
-    Unavailable {
-        /// The first planned toolchain milestone for this phase.
-        planned_version: String,
+    /// This input uses MIR capabilities outside the implemented NIR subset.
+    Deferred {
+        /// A versioned canonical explanation envelope.
+        content: String,
     },
 }
 
@@ -261,12 +272,10 @@ impl CanonicalArtifact {
         }
     }
 
-    fn unavailable(phase: CanonicalPhase, planned_version: &str) -> Self {
+    fn deferred(phase: CanonicalPhase, content: String) -> Self {
         Self {
             phase,
-            artifact: CanonicalArtifactState::Unavailable {
-                planned_version: planned_version.to_owned(),
-            },
+            artifact: CanonicalArtifactState::Deferred { content },
         }
     }
 
@@ -284,7 +293,7 @@ impl CanonicalArtifact {
             CanonicalArtifactState::SkippedDueToDiagnostics => {
                 CanonicalArtifactStatus::BlockedByDiagnostics
             }
-            CanonicalArtifactState::Unavailable { .. } => CanonicalArtifactStatus::NotImplemented,
+            CanonicalArtifactState::Deferred { .. } => CanonicalArtifactStatus::Deferred,
         }
     }
 
@@ -292,9 +301,9 @@ impl CanonicalArtifact {
     #[must_use]
     pub fn content(&self) -> Option<&str> {
         match &self.artifact {
-            CanonicalArtifactState::Produced { content } => Some(content),
-            CanonicalArtifactState::SkippedDueToDiagnostics
-            | CanonicalArtifactState::Unavailable { .. } => None,
+            CanonicalArtifactState::Produced { content }
+            | CanonicalArtifactState::Deferred { content } => Some(content),
+            CanonicalArtifactState::SkippedDueToDiagnostics => None,
         }
     }
 
@@ -460,6 +469,8 @@ pub struct CompilerOutput {
     sources: SourceMap,
     checked: CheckResult,
     mir: Option<MirProgram>,
+    nir: Option<VerifiedModule>,
+    nir_artifact: Option<Vec<u8>>,
     diagnostics: Vec<CanonicalDiagnostic>,
     dumps: CanonicalDumps,
 }
@@ -487,6 +498,18 @@ impl CompilerOutput {
     #[must_use]
     pub const fn mir(&self) -> Option<&MirProgram> {
         self.mir.as_ref()
+    }
+
+    /// Returns independently verified N1 NIR when this input uses the implemented subset.
+    #[must_use]
+    pub const fn nir(&self) -> Option<&VerifiedModule> {
+        self.nir.as_ref()
+    }
+
+    /// Returns canonical private artifact bytes for the verified NIR.
+    #[must_use]
+    pub fn nir_artifact(&self) -> Option<&[u8]> {
+        self.nir_artifact.as_deref()
     }
 
     /// Returns diagnostics normalized to source discovery ordinals and byte spans.
@@ -533,18 +556,50 @@ pub fn compile(input: &CompilerInput) -> Result<CompilerOutput, CompileError> {
 pub fn compile_session<P>(session: &CompilerSession<P>) -> Result<CompilerOutput, CompileError> {
     let checked = check_session(session);
     let mir = checked.typed().map(lower_mir).transpose()?;
+    let nir_outcome =
+        mir.as_ref()
+            .map(lower_nir)
+            .transpose()
+            .map_err(|error: NirLoweringError| CompileError::Nir {
+                message: error.to_string(),
+            })?;
+    let (nir, nir_deferred) = match nir_outcome {
+        Some(NirLoweringOutcome::Produced(nir)) => (Some(nir), None),
+        Some(NirLoweringOutcome::Deferred(deferred)) => (None, Some(deferred)),
+        None => (None, None),
+    };
+    let nir_artifact = nir
+        .as_ref()
+        .map(|nir| {
+            let metadata = ArtifactMetadata::new(
+                env!("CARGO_PKG_VERSION"),
+                "target-neutral-v1",
+                ["n1-scalar-cfg-v1"],
+            )?;
+            InternalNirArtifact::serialize(nir, &metadata)
+        })
+        .transpose()?;
     let mut diagnostics = checked
         .diagnostics()
         .iter()
         .map(canonical_diagnostic)
         .collect::<Result<Vec<_>, _>>()?;
     diagnostics.sort_by(canonical_diagnostic_order);
-    let dumps = canonical_dumps(session, &checked, mir.as_ref(), &diagnostics)?;
+    let dumps = canonical_dumps(
+        session,
+        &checked,
+        mir.as_ref(),
+        nir_artifact.as_deref(),
+        nir_deferred.as_ref(),
+        &diagnostics,
+    )?;
 
     Ok(CompilerOutput {
         sources: session.sources().clone(),
         checked,
         mir,
+        nir,
+        nir_artifact,
         diagnostics,
         dumps,
     })
@@ -676,6 +731,8 @@ fn canonical_dumps<P>(
     session: &CompilerSession<P>,
     checked: &CheckResult,
     mir: Option<&MirProgram>,
+    nir_artifact: Option<&[u8]>,
+    nir_deferred: Option<&NirDeferred>,
     diagnostics: &[CanonicalDiagnostic],
 ) -> Result<CanonicalDumps, CompileError> {
     let tokens = session
@@ -791,16 +848,42 @@ fn canonical_dumps<P>(
     } else {
         artifacts.push(CanonicalArtifact::blocked(CanonicalPhase::Mir));
     }
-    artifacts.push(CanonicalArtifact::unavailable(
-        CanonicalPhase::Nir,
-        NIR_PLANNED_VERSION,
-    ));
+    match (mir, nir_artifact, nir_deferred) {
+        (None, None, None) => artifacts.push(CanonicalArtifact::blocked(CanonicalPhase::Nir)),
+        (Some(_), Some(artifact), None) => {
+            let value = serde_json::from_slice::<serde_json::Value>(artifact)?;
+            artifacts.push(CanonicalArtifact::produced(
+                CanonicalPhase::Nir,
+                serialize_phase(CanonicalPhase::Nir, value)?,
+            ));
+        }
+        (Some(_), None, Some(deferred)) => {
+            artifacts.push(CanonicalArtifact::deferred(
+                CanonicalPhase::Nir,
+                serialize_phase(
+                    CanonicalPhase::Nir,
+                    CanonicalNirDeferred {
+                        reason_code: deferred.reason_code,
+                        planned_phase: deferred.planned_phase,
+                    },
+                )?,
+            ));
+        }
+        _ => unreachable!("NIR output state is constructed as one valid discriminated case"),
+    }
 
     Ok(CanonicalDumps {
         schema_version: CANONICAL_DUMP_SCHEMA_VERSION,
         language_version: LanguageVersion::Nexa1_0.as_str().to_owned(),
         artifacts,
     })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CanonicalNirDeferred<'a> {
+    reason_code: &'a str,
+    planned_phase: &'a str,
 }
 
 fn serialize_phase<T>(phase: CanonicalPhase, value: T) -> Result<String, serde_json::Error>

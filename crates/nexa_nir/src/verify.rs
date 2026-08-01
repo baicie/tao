@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 use crate::model::{
-    BasicBlock, BlockId, Function, FunctionId, NirType, Operation, Terminator, TypeId, TypedValue,
-    UnverifiedModule, ValueId, ValueOwnership,
+    BasicBlock, BlockId, Function, FunctionId, IntrinsicId, NirType, Operation, Terminator, TypeId,
+    TypedValue, UnverifiedModule, ValueId, ValueOwnership,
 };
 
 /// Stable category for an independently detected NIR invariant violation.
@@ -334,6 +334,20 @@ fn verify_operation(
             } else {
                 require_result_exact(instruction.result, signature.return_type)
             }
+        }
+        Operation::CallIntrinsic {
+            intrinsic,
+            arguments,
+        } => {
+            require_no_result(instruction.result, "unit intrinsic call")?;
+            let expected = match intrinsic {
+                IntrinsicId::PrintI64 => NirType::I64,
+                IntrinsicId::PrintI1 => NirType::I1,
+            };
+            if arguments.len() != 1 {
+                return type_mismatch("print intrinsic requires exactly one argument");
+            }
+            require_value_kind(arguments[0], all_values, visible, types, expected)
         }
     }
 }

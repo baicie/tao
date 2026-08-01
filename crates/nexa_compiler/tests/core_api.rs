@@ -3,6 +3,7 @@
 use nexa_compiler::{
     compile, CanonicalArtifactStatus, CanonicalPhase, CompilerInput, CompilerOutput, CompilerSource,
 };
+use nexa_nir::{ArtifactCompatibility, CanonicalArtifact as NirArtifact};
 use serde_json::{json, Value};
 
 const FUTAO_MAIN: &str = include_str!("fixtures/differential/accepted/main.ft");
@@ -73,9 +74,66 @@ fn explicit_core_compiles_futao_sources_without_host_state(
     }
     assert_eq!(
         output.dumps().artifact(CanonicalPhase::Nir).status(),
-        CanonicalArtifactStatus::NotImplemented
+        CanonicalArtifactStatus::Available
     );
+    assert!(output.nir().is_some());
+    let artifact = output
+        .nir_artifact()
+        .ok_or_else(|| std::io::Error::other("expected internal NIR artifact"))?;
+    NirArtifact::deserialize(
+        artifact,
+        &ArtifactCompatibility::exact(env!("CARGO_PKG_VERSION")),
+    )?;
 
+    Ok(())
+}
+
+#[test]
+fn canonical_nir_schema_has_a_small_exact_golden() -> Result<(), Box<dyn std::error::Error>> {
+    let value = phase_value(&accepted_output()?, CanonicalPhase::Nir)?;
+    let functions = value["module"]["functions"]
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("expected NIR function array"))?;
+
+    assert_eq!(
+        serde_json::json!({
+            "magic": value["magic"].clone(),
+            "schema": value["nirSchemaVersion"].clone(),
+            "target": value["targetProfile"].clone(),
+            "functions": functions.iter().map(|function| function["name"].clone()).collect::<Vec<_>>()
+        }),
+        json!({
+            "magic": "FUTAO-NIR",
+            "schema": 1,
+            "target": "target-neutral-v1",
+            "functions": ["m0::main", "m1::answer"]
+        })
+    );
+    Ok(())
+}
+
+#[test]
+fn unsupported_post_n1_mir_is_deferred_without_fabricating_nir(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let output = compile(&CompilerInput::new(
+        "main.ft",
+        [CompilerSource::new(
+            "main.ft",
+            "function main(): Unit { print(\"later layout\"); }",
+        )],
+    ))?;
+
+    assert!(output.is_ok());
+    assert!(output.nir().is_none());
+    assert!(output.nir_artifact().is_none());
+    assert_eq!(
+        output.dumps().artifact(CanonicalPhase::Nir).status(),
+        CanonicalArtifactStatus::Deferred
+    );
+    assert_eq!(
+        phase_value(&output, CanonicalPhase::Nir)?,
+        json!({"reasonCode": "unsupported-type", "plannedPhase": "ADR-003 N4"})
+    );
     Ok(())
 }
 

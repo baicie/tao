@@ -6,8 +6,8 @@
 )]
 
 use nexa_nir::{
-    BlockId, FunctionId, InstructionId, ModuleBuilder, NirSpan, NirType, Operation, Terminator,
-    TypeId, TypedValue, ValueId, VerificationCode, Verifier,
+    BlockId, FunctionId, InstructionId, IntrinsicId, ModuleBuilder, NirSpan, NirType, Operation,
+    Terminator, TypeId, TypedValue, ValueId, VerificationCode, Verifier,
 };
 
 const I1: TypeId = TypeId::new(0);
@@ -348,4 +348,43 @@ fn verifier_requires_cleanup_for_aggregates_with_owned_fields() {
     let error = Verifier::verify(module.finish()).expect_err("owned fields require aggregate drop");
 
     assert_eq!(error.code(), VerificationCode::OwnedValueNotConsumed);
+}
+
+#[test]
+fn verifier_accepts_the_typed_print_intrinsic_registry_entry() {
+    let mut module = minimal_module();
+    module
+        .define_function(MAIN, "main", [], UNIT, ENTRY)
+        .expect("function definition is valid");
+    module
+        .define_block(MAIN, ENTRY, [])
+        .expect("entry block is unique");
+    module
+        .append_instruction(
+            MAIN,
+            ENTRY,
+            InstructionId::new(0),
+            Some(TypedValue::new(ValueId::new(0), I64)),
+            Operation::ConstI64 { value: 42 },
+            SPAN,
+        )
+        .expect("instruction is valid");
+    module
+        .append_instruction(
+            MAIN,
+            ENTRY,
+            InstructionId::new(1),
+            None,
+            Operation::CallIntrinsic {
+                intrinsic: IntrinsicId::PrintI64,
+                arguments: vec![ValueId::new(0)],
+            },
+            SPAN,
+        )
+        .expect("instruction is valid");
+    module
+        .set_terminator(MAIN, ENTRY, Terminator::Return { value: None }, SPAN)
+        .expect("terminator is unique");
+
+    Verifier::verify(module.finish()).expect("registered intrinsic signature should verify");
 }

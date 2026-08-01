@@ -207,6 +207,7 @@ dependencies = [
  "nexa_diagnostics",
  "nexa_hir",
  "nexa_mir",
+ "nexa_nir",
  "nexa_parser",
  "nexa_source",
  "nexa_span",

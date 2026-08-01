@@ -194,6 +194,16 @@ pub struct TypedValue {
     ty: TypeId,
 }
 
+/// A registry-owned runtime operation with a frozen logical signature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum IntrinsicId {
+    /// Prints one signed 64-bit integer and returns `Unit`.
+    PrintI64,
+    /// Prints one logical boolean and returns `Unit`.
+    PrintI1,
+}
+
 impl TypedValue {
     /// Creates a typed SSA definition.
     #[must_use]
@@ -255,6 +265,13 @@ pub enum Operation {
         /// Callee identity.
         function: FunctionId,
         /// Arguments in signature order.
+        arguments: Vec<ValueId>,
+    },
+    /// Calls a registry-resolved runtime intrinsic.
+    CallIntrinsic {
+        /// Stable intrinsic registry identity.
+        intrinsic: IntrinsicId,
+        /// Arguments in registry signature order.
         arguments: Vec<ValueId>,
     },
 }
