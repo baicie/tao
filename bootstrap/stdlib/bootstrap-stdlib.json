@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "name": "futao-bootstrap",
+  "version": "0.0.1",
+  "profile": "futao-bootstrap-v1",
+  "entry": "src/bootstrap.ft",
+  "sourceFiles": [
+    "src/bootstrap.ft",
+    "src/core.ft",
+    "src/diagnostics.ft",
+    "src/option.ft",
+    "src/result.ft"
+  ],
+  "requiredCapabilities": [],
+  "iterationPolicy": "source-order",
+  "treeHashAlgorithm": "sha256",
+  "treeDigest": "sha256:060b18de6841d2e9f17e3cfbcfee62d54c75390145158a625131e8e4f2d050d7",
+  "canonicalDumpSchemaVersion": 1,
+  "buildDigest": "sha256:e4847c2f21544312344fb38460475acb822a1c8ec84d19f49560f0e761cfb78d"
+}

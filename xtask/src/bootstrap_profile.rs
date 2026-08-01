@@ -1,7 +1,10 @@
+use std::fmt::Write as _;
 use std::path::Path;
 
-use anyhow::{ensure, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
+use nexa_compiler::{compile, CompilerInput, CompilerOptions, CompilerSource};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 const PROFILE_ID: &str = "futao-bootstrap-v1";
 
@@ -47,11 +50,29 @@ struct VersionedDigest {
     digest: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BootstrapStdlibManifest {
+    schema_version: u32,
+    name: String,
+    version: String,
+    profile: String,
+    entry: String,
+    source_files: Vec<String>,
+    required_capabilities: Vec<String>,
+    iteration_policy: String,
+    tree_hash_algorithm: String,
+    tree_digest: String,
+    canonical_dump_schema_version: u32,
+    build_digest: String,
+}
+
 pub(crate) fn run() -> Result<()> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let profile_path = root.join("bootstrap/profile/bootstrap-profile-v1.json");
     let upgrade_path = root.join("bootstrap/tests/accepted/bootstrap-stdlib-upgrade.json");
     let rollback_path = root.join("bootstrap/tests/rejected/bootstrap-stdlib-rollback.json");
+    let stdlib_manifest_path = root.join("bootstrap/stdlib/bootstrap-stdlib.json");
 
     let profile = parse_file(&profile_path, parse_profile)?;
     let upgrade = parse_file(&upgrade_path, parse_transition)?;
@@ -61,10 +82,16 @@ pub(crate) fn run() -> Result<()> {
         "{} must remain a rejected rollback fixture",
         rollback_path.display()
     );
+    let stdlib = parse_file(&stdlib_manifest_path, parse_stdlib_manifest)?;
+    verify_stdlib(&root, &stdlib)?;
 
     println!(
-        "bootstrap profile {}: language {}, {} -> {} upgrade verified",
-        profile.id, profile.language_version, upgrade.installed.version, upgrade.candidate.version
+        "bootstrap profile {}: language {}, stdlib {} and {} -> {} upgrade verified",
+        profile.id,
+        profile.language_version,
+        stdlib.version,
+        upgrade.installed.version,
+        upgrade.candidate.version
     );
     Ok(())
 }
@@ -243,8 +270,7 @@ fn parse_version(field: &str, value: &str) -> Result<(u64, u64, u64)> {
 
 fn validate_sha256(field: &str, value: &str) -> Result<()> {
     let Some(hex) = value.strip_prefix("sha256:") else {
-        ensure!(false, "{field} must use the sha256 algorithm");
-        unreachable!();
+        bail!("{field} must use the sha256 algorithm");
     };
     ensure!(
         hex.len() == 64
@@ -260,15 +286,208 @@ fn validate_sha256(field: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
+fn parse_stdlib_manifest(text: &str) -> Result<BootstrapStdlibManifest> {
+    let manifest: BootstrapStdlibManifest =
+        serde_json::from_str(text).context("invalid bootstrap stdlib manifest JSON")?;
+    manifest.validate()?;
+    Ok(manifest)
+}
+
+impl BootstrapStdlibManifest {
+    fn validate(&self) -> Result<()> {
+        ensure!(self.schema_version == 1, "schemaVersion must be 1");
+        ensure!(
+            self.name == "futao-bootstrap",
+            "name must be futao-bootstrap"
+        );
+        let _ = parse_version("version", &self.version)?;
+        ensure!(self.profile == PROFILE_ID, "profile must be {PROFILE_ID}");
+        validate_source_path("entry", &self.entry)?;
+        ensure!(
+            !self.source_files.is_empty(),
+            "sourceFiles must not be empty"
+        );
+        ensure!(
+            self.source_files.windows(2).all(|pair| pair[0] < pair[1]),
+            "sourceFiles must be unique and sorted by portable path"
+        );
+        for source in &self.source_files {
+            validate_source_path("sourceFiles", source)?;
+        }
+        ensure!(
+            self.source_files.contains(&self.entry),
+            "entry must be present in sourceFiles"
+        );
+        ensure!(
+            self.required_capabilities.is_empty(),
+            "requiredCapabilities must be empty"
+        );
+        ensure!(
+            self.iteration_policy == "source-order",
+            "iterationPolicy must be source-order"
+        );
+        ensure!(
+            self.tree_hash_algorithm == "sha256",
+            "treeHashAlgorithm must be sha256"
+        );
+        validate_sha256("treeDigest", &self.tree_digest)?;
+        ensure!(
+            self.canonical_dump_schema_version == 1,
+            "canonicalDumpSchemaVersion must be 1"
+        );
+        validate_sha256("buildDigest", &self.build_digest)?;
+        Ok(())
+    }
+}
+
+fn validate_source_path(field: &str, value: &str) -> Result<()> {
+    ensure!(
+        value.starts_with("src/") && value.ends_with(".ft"),
+        "{field} entries must be `.ft` files below src/"
+    );
+    ensure!(
+        !value.contains(['\\', '\0'])
+            && value
+                .split('/')
+                .all(|component| !component.is_empty() && component != "." && component != ".."),
+        "{field} entries must be normalized portable paths"
+    );
+    Ok(())
+}
+
+fn verify_stdlib(root: &Path, manifest: &BootstrapStdlibManifest) -> Result<()> {
+    let stdlib_root = root.join("bootstrap/stdlib");
+    let discovered = discover_stdlib_sources(&stdlib_root)?;
+    ensure!(
+        discovered == manifest.source_files,
+        "bootstrap stdlib sourceFiles do not match the checked-in src directory"
+    );
+
+    let mut tree_hasher = Sha256::new();
+    tree_hasher.update(b"FUTAO-BOOTSTRAP-STDLIB\0");
+    let mut sources = Vec::with_capacity(manifest.source_files.len());
+    for relative in &manifest.source_files {
+        let path = stdlib_root.join(relative);
+        let metadata = std::fs::symlink_metadata(&path)
+            .with_context(|| format!("failed to inspect {}", path.display()))?;
+        ensure!(
+            metadata.file_type().is_file(),
+            "{} must be a file",
+            path.display()
+        );
+        let bytes =
+            std::fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+        hash_field(&mut tree_hasher, relative.as_bytes())?;
+        hash_field(&mut tree_hasher, &bytes)?;
+        let content = String::from_utf8(bytes)
+            .with_context(|| format!("{} must be UTF-8", path.display()))?;
+        sources.push(CompilerSource::new(relative, content));
+    }
+    verify_hash(
+        "bootstrap stdlib tree",
+        &manifest.tree_digest,
+        tree_hasher.finalize(),
+    )?;
+
+    let forward = compile_stdlib(manifest, sources.clone())?;
+    sources.reverse();
+    let reverse = compile_stdlib(manifest, sources)?;
+    ensure!(
+        forward == reverse,
+        "bootstrap stdlib canonical build changed with source insertion order"
+    );
+
+    let mut build_hasher = Sha256::new();
+    build_hasher.update(b"FUTAO-BOOTSTRAP-STDLIB-BUILD\0");
+    build_hasher.update(forward.as_bytes());
+    verify_hash(
+        "bootstrap stdlib build",
+        &manifest.build_digest,
+        build_hasher.finalize(),
+    )
+}
+
+fn discover_stdlib_sources(stdlib_root: &Path) -> Result<Vec<String>> {
+    let source_root = stdlib_root.join("src");
+    let mut sources = Vec::new();
+    for entry in std::fs::read_dir(&source_root)
+        .with_context(|| format!("failed to read {}", source_root.display()))?
+    {
+        let entry =
+            entry.with_context(|| format!("failed to read {} entry", source_root.display()))?;
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("failed to inspect {}", entry.path().display()))?;
+        ensure!(
+            file_type.is_file(),
+            "bootstrap stdlib src entries must be regular files"
+        );
+        let name = entry
+            .file_name()
+            .into_string()
+            .map_err(|_| anyhow::anyhow!("bootstrap stdlib source name must be UTF-8"))?;
+        validate_source_path("discovered source", &format!("src/{name}"))?;
+        sources.push(format!("src/{name}"));
+    }
+    sources.sort();
+    Ok(sources)
+}
+
+fn compile_stdlib(
+    manifest: &BootstrapStdlibManifest,
+    sources: Vec<CompilerSource>,
+) -> Result<String> {
+    let output = compile(&CompilerInput::with_options(
+        &manifest.entry,
+        sources,
+        CompilerOptions::bootstrap_v1(),
+    ))
+    .context("bootstrap stdlib compiler-core invocation failed")?;
+    if !output.is_ok() {
+        let summary = output
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| format!("{}: {}", diagnostic.code(), diagnostic.message()))
+            .collect::<Vec<_>>()
+            .join("; ");
+        bail!("bootstrap stdlib did not compile: {summary}");
+    }
+    output
+        .dumps()
+        .to_json()
+        .context("failed to serialize bootstrap stdlib canonical build")
+}
+
+fn hash_field(hasher: &mut Sha256, bytes: &[u8]) -> Result<()> {
+    let length = u64::try_from(bytes.len()).context("bootstrap stdlib hash field is too large")?;
+    hasher.update(length.to_be_bytes());
+    hasher.update(bytes);
+    Ok(())
+}
+
+fn verify_hash(field: &str, expected: &str, digest: impl IntoIterator<Item = u8>) -> Result<()> {
+    let mut actual = String::with_capacity(71);
+    actual.push_str("sha256:");
+    for byte in digest {
+        let _ = write!(actual, "{byte:02x}");
+    }
+    ensure!(
+        actual == expected,
+        "{field} digest mismatch: expected {expected}, found {actual}"
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{parse_profile, parse_transition};
+    use super::{parse_profile, parse_stdlib_manifest, parse_transition, verify_stdlib};
 
     const PROFILE: &str = include_str!("../../bootstrap/profile/bootstrap-profile-v1.json");
     const UPGRADE: &str =
         include_str!("../../bootstrap/tests/accepted/bootstrap-stdlib-upgrade.json");
     const ROLLBACK: &str =
         include_str!("../../bootstrap/tests/rejected/bootstrap-stdlib-rollback.json");
+    const STDLIB: &str = include_str!("../../bootstrap/stdlib/bootstrap-stdlib.json");
 
     #[test]
     fn checked_in_profile_freezes_the_pure_capability_surface(
@@ -304,6 +523,30 @@ mod tests {
         assert!(matches!(
             error,
             Some(error) if error.to_string().contains("must advance")
+        ));
+    }
+
+    #[test]
+    fn checked_in_stdlib_is_content_addressed_and_builds_deterministically(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let manifest = parse_stdlib_manifest(STDLIB)?;
+
+        verify_stdlib(&root, &manifest)?;
+        Ok(())
+    }
+
+    #[test]
+    fn stdlib_manifest_rejects_a_host_capability() {
+        let invalid = STDLIB.replace(
+            "\"requiredCapabilities\": []",
+            "\"requiredCapabilities\": [\"filesystem\"]",
+        );
+        let error = parse_stdlib_manifest(&invalid).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains("requiredCapabilities")
         ));
     }
 }

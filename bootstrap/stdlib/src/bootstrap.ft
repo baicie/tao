@@ -1,0 +1,6 @@
+import { Ordering, SourceId, Span } from "./core.ft";
+import { Diagnostic, Severity } from "./diagnostics.ft";
+import { Option } from "./option.ft";
+import { Result } from "./result.ft";
+
+function main(): Unit {}
