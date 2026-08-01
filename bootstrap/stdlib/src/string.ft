@@ -1,0 +1,51 @@
+import { Option } from "./option.ft";
+
+export type StringBuilder = {
+  parts: String[];
+};
+
+export function stringBuilder(): StringBuilder {
+  return { parts: [] };
+}
+
+export function push(builder: StringBuilder, value: String): StringBuilder {
+  return { parts: builder.parts.append(value) };
+}
+
+function finishFrom(parts: String[], index: Int, output: String): String {
+  if (index >= parts.length) {
+    return output;
+  }
+  return finishFrom(parts, index + 1, output + parts[index]);
+}
+
+export function finish(builder: StringBuilder): String {
+  return finishFrom(builder.parts, 0, "");
+}
+
+export type SourceText = {
+  utf8Bytes: Int[];
+  codePoints: Int[];
+  byteOffsets: Int[];
+};
+
+export function byteAt(text: SourceText, index: Int): Option<Int> {
+  if (index < 0 || index >= text.utf8Bytes.length) {
+    return Option.None();
+  }
+  return Option.Some(text.utf8Bytes[index]);
+}
+
+export function codePointAt(text: SourceText, index: Int): Option<Int> {
+  if (index < 0 || index >= text.codePoints.length) {
+    return Option.None();
+  }
+  return Option.Some(text.codePoints[index]);
+}
+
+export function byteOffsetAt(text: SourceText, index: Int): Option<Int> {
+  if (index < 0 || index >= text.byteOffsets.length) {
+    return Option.None();
+  }
+  return Option.Some(text.byteOffsets[index]);
+}

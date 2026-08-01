@@ -2,7 +2,10 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use anyhow::{bail, ensure, Context, Result};
-use nexa_compiler::{compile, CompilerInput, CompilerOptions, CompilerSource};
+use nexa_compiler::{
+    compile, run_session, CompilerInput, CompilerOptions, CompilerSession, CompilerSource,
+};
+use nexa_source::MemorySourceProvider;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -84,6 +87,11 @@ pub(crate) fn run() -> Result<()> {
     );
     let stdlib = parse_file(&stdlib_manifest_path, parse_stdlib_manifest)?;
     verify_stdlib(&root, &stdlib)?;
+    let behavior = run_stdlib_fixture(&root, &stdlib, "tests/array-string.ft")?;
+    ensure!(
+        behavior == ["10", "1", "2", "3", "1", "futao"],
+        "bootstrap stdlib array/string fixture output changed"
+    );
 
     println!(
         "bootstrap profile {}: language {}, stdlib {} and {} -> {} upgrade verified",
@@ -407,6 +415,58 @@ fn verify_stdlib(root: &Path, manifest: &BootstrapStdlibManifest) -> Result<()> 
     )
 }
 
+fn run_stdlib_fixture(
+    root: &Path,
+    manifest: &BootstrapStdlibManifest,
+    fixture: &str,
+) -> Result<Vec<String>> {
+    validate_fixture_path(fixture)?;
+    let stdlib_root = root.join("bootstrap/stdlib");
+    let mut provider = MemorySourceProvider::default();
+    for relative in &manifest.source_files {
+        let path = stdlib_root.join(relative);
+        let bytes =
+            std::fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+        let _ = provider.insert(relative, bytes);
+    }
+    let fixture_path = stdlib_root.join(fixture);
+    let fixture_bytes = std::fs::read(&fixture_path)
+        .with_context(|| format!("failed to read {}", fixture_path.display()))?;
+    let _ = provider.insert(fixture, fixture_bytes);
+
+    let session = CompilerSession::build(provider, Path::new(fixture))
+        .with_context(|| format!("failed to load bootstrap stdlib fixture {fixture}"))?;
+    let output = run_session(&session);
+    if !output.is_ok() {
+        let diagnostics = output
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| format!("{}: {}", diagnostic.code(), diagnostic.message()))
+            .collect::<Vec<_>>()
+            .join("; ");
+        let runtime = output.runtime_error().map_or_else(String::new, |error| {
+            format!("; runtime: {}", error.message())
+        });
+        bail!("bootstrap stdlib fixture {fixture} failed: {diagnostics}{runtime}");
+    }
+    Ok(output.output().to_vec())
+}
+
+fn validate_fixture_path(value: &str) -> Result<()> {
+    ensure!(
+        value.starts_with("tests/") && value.ends_with(".ft"),
+        "bootstrap stdlib fixture must be a `.ft` file below tests/"
+    );
+    ensure!(
+        !value.contains(['\\', '\0'])
+            && value
+                .split('/')
+                .all(|component| !component.is_empty() && component != "." && component != ".."),
+        "bootstrap stdlib fixture must be a normalized portable path"
+    );
+    Ok(())
+}
+
 fn discover_stdlib_sources(stdlib_root: &Path) -> Result<Vec<String>> {
     let source_root = stdlib_root.join("src");
     let mut sources = Vec::new();
@@ -442,7 +502,7 @@ fn compile_stdlib(
         sources,
         CompilerOptions::bootstrap_v1(),
     ))
-    .context("bootstrap stdlib compiler-core invocation failed")?;
+    .map_err(|error| anyhow::anyhow!("bootstrap stdlib compiler-core invocation failed: {error:?}"))?;
     if !output.is_ok() {
         let summary = output
             .diagnostics()
@@ -480,7 +540,9 @@ fn verify_hash(field: &str, expected: &str, digest: impl IntoIterator<Item = u8>
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_profile, parse_stdlib_manifest, parse_transition, verify_stdlib};
+    use super::{
+        parse_profile, parse_stdlib_manifest, parse_transition, run_stdlib_fixture, verify_stdlib,
+    };
 
     const PROFILE: &str = include_str!("../../bootstrap/profile/bootstrap-profile-v1.json");
     const UPGRADE: &str =
@@ -548,5 +610,18 @@ mod tests {
             error,
             Some(error) if error.to_string().contains("requiredCapabilities")
         ));
+    }
+
+    #[test]
+    fn array_and_string_apis_have_deterministic_observable_behavior(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let manifest = parse_stdlib_manifest(STDLIB)?;
+
+        assert_eq!(
+            run_stdlib_fixture(&root, &manifest, "tests/array-string.ft")?,
+            ["10", "1", "2", "3", "1", "futao"]
+        );
+        Ok(())
     }
 }

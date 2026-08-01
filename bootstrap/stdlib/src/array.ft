@@ -1,0 +1,149 @@
+import { Ordering } from "./core.ft";
+import { Option } from "./option.ft";
+
+function copyFrom<T>(values: T[], index: Int): T[] {
+  if (index >= values.length) {
+    return [];
+  }
+  return [values[index]].concat(copyFrom(values, index + 1));
+}
+
+function mapFrom<T, U>(
+  values: T[],
+  index: Int,
+  transform: (value: T) => U
+): U[] {
+  if (index >= values.length) {
+    return [];
+  }
+  return [transform(values[index])].concat(mapFrom(values, index + 1, transform));
+}
+
+export function map<T, U>(values: T[], transform: (value: T) => U): U[] {
+  return mapFrom(values, 0, transform);
+}
+
+function filterFrom<T>(
+  values: T[],
+  index: Int,
+  predicate: (value: T) => Bool
+): T[] {
+  if (index >= values.length) {
+    return [];
+  }
+  const tail = filterFrom(values, index + 1, predicate);
+  if (predicate(values[index])) {
+    return [values[index]].concat(tail);
+  }
+  return tail;
+}
+
+export function filter<T>(values: T[], predicate: (value: T) => Bool): T[] {
+  return filterFrom(values, 0, predicate);
+}
+
+function foldFrom<T, U>(
+  values: T[],
+  index: Int,
+  state: U,
+  combine: (state: U, value: T) => U
+): U {
+  if (index >= values.length) {
+    return state;
+  }
+  return foldFrom(values, index + 1, combine(state, values[index]), combine);
+}
+
+export function fold<T, U>(
+  values: T[],
+  initial: U,
+  combine: (state: U, value: T) => U
+): U {
+  return foldFrom(values, 0, initial, combine);
+}
+
+function findFrom<T>(
+  values: T[],
+  index: Int,
+  predicate: (value: T) => Bool
+): Option<T> {
+  if (index >= values.length) {
+    return Option.None();
+  }
+  if (predicate(values[index])) {
+    return Option.Some(values[index]);
+  }
+  return findFrom(values, index + 1, predicate);
+}
+
+export function find<T>(values: T[], predicate: (value: T) => Bool): Option<T> {
+  return findFrom(values, 0, predicate);
+}
+
+function insertSorted<T>(
+  sorted: T[],
+  index: Int,
+  value: T,
+  compare: (left: T, right: T) => Ordering
+): T[] {
+  if (index >= sorted.length) {
+    return [value];
+  }
+  const current = sorted[index];
+  const tail = copyFrom(sorted, index + 1);
+  return match (compare(value, current)) {
+    case Ordering.Less() => [value, current].concat(tail);
+    case Ordering.Equal() => [current].concat(insertSorted(tail, 0, value, compare));
+    case Ordering.Greater() => [current].concat(insertSorted(tail, 0, value, compare));
+  };
+}
+
+function sortFrom<T>(
+  values: T[],
+  index: Int,
+  sorted: T[],
+  compare: (left: T, right: T) => Ordering
+): T[] {
+  if (index >= values.length) {
+    return sorted;
+  }
+  return sortFrom(
+    values,
+    index + 1,
+    insertSorted(sorted, 0, values[index], compare),
+    compare
+  );
+}
+
+export function sortBy<T>(
+  values: T[],
+  compare: (left: T, right: T) => Ordering
+): T[] {
+  return sortFrom(values, 0, [], compare);
+}
+
+function binarySearchRange<T>(
+  values: T[],
+  target: T,
+  low: Int,
+  high: Int,
+  compare: (left: T, right: T) => Ordering
+): Option<Int> {
+  if (low >= high) {
+    return Option.None();
+  }
+  const middle = low + (high - low) / 2;
+  return match (compare(target, values[middle])) {
+    case Ordering.Less() => binarySearchRange(values, target, low, middle, compare);
+    case Ordering.Equal() => Option.Some(middle);
+    case Ordering.Greater() => binarySearchRange(values, target, middle + 1, high, compare);
+  };
+}
+
+export function binarySearch<T>(
+  values: T[],
+  target: T,
+  compare: (left: T, right: T) => Ordering
+): Option<Int> {
+  return binarySearchRange(values, target, 0, values.length, compare);
+}

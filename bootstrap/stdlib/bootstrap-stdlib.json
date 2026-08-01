@@ -5,16 +5,18 @@
   "profile": "futao-bootstrap-v1",
   "entry": "src/bootstrap.ft",
   "sourceFiles": [
+    "src/array.ft",
     "src/bootstrap.ft",
     "src/core.ft",
     "src/diagnostics.ft",
     "src/option.ft",
-    "src/result.ft"
+    "src/result.ft",
+    "src/string.ft"
   ],
   "requiredCapabilities": [],
   "iterationPolicy": "source-order",
   "treeHashAlgorithm": "sha256",
-  "treeDigest": "sha256:060b18de6841d2e9f17e3cfbcfee62d54c75390145158a625131e8e4f2d050d7",
+  "treeDigest": "sha256:0cda6537468440f412969093d48f26d3091bc54655419f410b12b812cf25902f",
   "canonicalDumpSchemaVersion": 1,
-  "buildDigest": "sha256:e4847c2f21544312344fb38460475acb822a1c8ec84d19f49560f0e761cfb78d"
+  "buildDigest": "sha256:268b88b2784c14973666392db41d61313f2d45c0287ec8715080f4683a6eac9a"
 }
