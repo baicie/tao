@@ -1,5 +1,11 @@
 # Changelog
 
+## Compiler Package 0.0.1 (Self-use)
+
+- Packaged the complete Language 1.0 Reference Core as `nexac 0.0.1`.
+- Documented local installation while keeping Rust crate APIs and distribution
+  intentionally pre-stable.
+
 ## Nexa Language 1.0 Reference Core (Delivered 2026-08-01)
 
 - Integrated the delivered v0.1 through v0.9 contracts as the Language 1.0

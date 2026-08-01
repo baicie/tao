@@ -19,6 +19,22 @@ cd nexa
 cargo build --workspace
 ```
 
+To install the self-use CLI from that checkout:
+
+```bash
+cargo install --locked --path crates/nexac
+nexac --version
+```
+
+The installed compiler reports version `0.0.1`. This pre-stable tool version
+implements the separately versioned Nexa Language 1.0 compatibility baseline.
+After the corresponding tag is published, install the same source revision
+without keeping a checkout:
+
+```bash
+cargo install --locked --git https://github.com/baicie/nexa --tag v0.0.1 nexac
+```
+
 ## Test
 
 ```bash
@@ -28,9 +44,9 @@ cargo test --workspace
 ## Try the CLI
 
 ```bash
-cargo run -p nexac -- check examples/practical-core/main.nexa
-cargo run -p nexac -- run examples/practical-core/main.nexa -- 20
-cargo run -p nexac -- parse examples/practical-core/main.nexa
+nexac check examples/practical-core/main.nexa
+nexac run examples/practical-core/main.nexa -- 20
+nexac parse examples/practical-core/main.nexa
 ```
 
 `check` parses, resolves, and type-checks the program. `run` executes the

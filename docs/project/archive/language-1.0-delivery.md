@@ -7,10 +7,10 @@ implementation was committed as `4a38329`; the final acceptance matrix was
 completed as `466eeba` on the `codex/language-1.0` branch before publication
 through the repository's squash-merge workflow.
 
-This is a language-compatibility milestone. The Rust workspace packages and
-`nexac` binary remain version `0.1.0`; Rust crate APIs, HIR/MIR layouts, and
-package-registry distribution are not declared stable or published by this
-delivery.
+This is a language-compatibility milestone. The complete self-use Rust
+workspace and `nexac` binary are packaged as version `0.0.1`; Rust crate APIs,
+HIR/MIR layouts, and package-registry distribution are not declared stable or
+published by this delivery.
 
 ## Delivered Milestones
 

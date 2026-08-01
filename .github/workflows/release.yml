@@ -1,0 +1,190 @@
+name: Release
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@1.80.0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Validate tag and package version
+        id: version
+        shell: bash
+        run: |
+          package_id="$(cargo pkgid --locked -p nexac)"
+          package_version="${package_id##*#}"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            if [[ "$GITHUB_REF_NAME" != "v${package_version}" ]]; then
+              echo "tag $GITHUB_REF_NAME does not match nexac $package_version" >&2
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+              echo "release tag must point to a commit on main" >&2
+              exit 1
+            fi
+          fi
+          echo "version=$package_version" >> "$GITHUB_OUTPUT"
+
+      - uses: taiki-e/install-action@cargo-deny
+      - uses: taiki-e/install-action@cargo-audit
+      - uses: taiki-e/install-action@cargo-machete
+
+      - name: Run security gate
+        run: |
+          cargo deny check
+          cargo audit --db "$RUNNER_TEMP/cargo-audit-db"
+          cargo machete --with-metadata
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: docs/pnpm-lock.yaml
+
+      - name: Install documentation dependencies
+        run: pnpm --dir docs install --frozen-lockfile
+
+      - name: Run release gate
+        run: cargo xtask release-check
+
+      - name: Verify local installation
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          install_root="$RUNNER_TEMP/nexa-install"
+          cargo install --locked --path crates/nexac --root "$install_root"
+          installed="$install_root/bin/nexac"
+          test "$("$installed" --version)" = "nexac ${RELEASE_VERSION}"
+          test "$("$installed" check examples/practical-core/main.nexa)" = "ok"
+          test "$("$installed" run examples/practical-core/main.nexa -- 20)" = $'42\n5'
+
+  build:
+    name: Build / ${{ matrix.os }}
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.80.0
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --locked --release -p nexac
+
+      - name: Smoke test and package
+        id: package
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          smoke() {
+            local candidate="$1"
+            local actual_version check_output run_output
+            actual_version="$("$candidate" --version)"
+            check_output="$("$candidate" check examples/practical-core/main.nexa)"
+            run_output="$("$candidate" run examples/practical-core/main.nexa -- 20)"
+            test "$actual_version" = "nexac ${RELEASE_VERSION}"
+            test "$check_output" = "ok"
+            test "$run_output" = $'42\n5'
+          }
+
+          binary="target/release/nexac"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            binary="${binary}.exe"
+          fi
+          smoke "$binary"
+
+          host="$(rustc -vV | sed -n 's/^host: //p')"
+          package="nexac-${RELEASE_VERSION}-${host}"
+          mkdir -p "dist/${package}"
+          cp "$binary" README.md LICENSE "dist/${package}/"
+          tar -czf "dist/${package}.tar.gz" -C dist "$package"
+
+          extracted="dist/extracted"
+          mkdir -p "$extracted"
+          tar -xzf "dist/${package}.tar.gz" -C "$extracted"
+          smoke "$extracted/$package/$(basename "$binary")"
+
+          archive="dist/${package}.tar.gz"
+          if command -v sha256sum >/dev/null 2>&1; then
+            checksum="$(sha256sum "$archive" | cut -d ' ' -f 1)"
+          else
+            checksum="$(shasum -a 256 "$archive" | cut -d ' ' -f 1)"
+          fi
+          printf '%s  %s\n' "$checksum" "${package}.tar.gz" > "${archive}.sha256"
+          echo "name=$package" >> "$GITHUB_OUTPUT"
+
+      - name: Upload packaged binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish prerelease
+    if: github.ref_type == 'tag'
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: nexac-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME" dist/*
+          --verify-tag
+          --prerelease
+          --latest=false
+          --generate-notes
+          --title "nexac ${RELEASE_VERSION}"
