@@ -1,0 +1,41 @@
+schema_version = 1
+status = "policy-only-no-key-or-signature"
+
+[signature]
+required_for_release = true
+algorithm = "ed25519"
+digest = "sha256"
+key_source = "external-credential-store"
+embed_private_key = false
+
+[statement]
+canonical_schema_version = 1
+required_subjects = [
+  "package-identity",
+  "source-tree-root",
+  "manifest-digest",
+  "lock-and-build-fingerprint",
+  "target-payload-table",
+  "abi-and-capability-metadata",
+  "provenance-reference",
+]
+
+[trust]
+cryptographic_validity_is_sufficient = false
+require_namespace_delegation = true
+require_revocation_check = true
+require_registry_snapshot = true
+allow_package_to_add_trust_root = false
+
+[release]
+require_reproducible_build = true
+require_external_signer = true
+require_transparency_receipt = true
+reject_unsigned_payload = true
+reject_metadata_only_signature = true
+
+[prohibited]
+private_keys = true
+access_tokens = true
+generated_fixture_signatures = true
+embedded_credentials = true

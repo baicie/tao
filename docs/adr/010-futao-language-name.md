@@ -37,6 +37,8 @@ Language 1.0 文档仍使用 Nexa / `nexac` / `.nexa`。直接在设计文档中
 | 包管理命令 | `futao pkg` |
 | Package manifest | `futao.toml` |
 | Lockfile | `futao.lock` |
+| Source package | `.ftpkg` |
+| Stable component | `.ftc` |
 
 正式文本不使用 `FuTao`。新建示例、规范片段和 2.0 package fixture 使用 Futao / `.ft` 命名。
 
@@ -52,6 +54,8 @@ Language 1.0 文档仍使用 Nexa / `nexac` / `.nexa`。直接在设计文档中
 * CLI、crate、CI、release archive 和 repository URL 的迁移必须原子化校验，不能只改显示文本。
 * `.nexa` 是否作为兼容输入长期保留，由迁移实现和版本策略另行决定；本 ADR 不隐式承诺永久双后缀。
 * `futao.toml` 与 `futao.lock` 继承 ADR-009 的 manifest、lockfile、签名和可复现性合同。
+* ADR-009 中历史性的 `.nexpkg` / `.nexc` 标识迁移为 `.ftpkg` / `.ftc`；容器语义、验证顺序和
+  签名覆盖范围不变。
 
 迁移完成的最低证明包括：全仓测试、Language 1.0 conformance、安装验证、release archive 验证、
 `.ft` module resolution 以及旧产物的明确兼容诊断。
@@ -92,6 +96,8 @@ Source:   .ft
 CLI:      futao
 Manifest: futao.toml
 Lockfile: futao.lock
+Package:  .ftpkg
+Component: .ftc
 ```
 
 Futao 以付涛之名命名。品牌决策立即生效，工具链标识按可验证的独立迁移逐步交付。

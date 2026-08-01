@@ -1,0 +1,56 @@
+schema_version = 1
+kind = "stable-component-build-plan"
+status = "input-only-no-payload-or-signature"
+
+[identity]
+package = "workspace::futao/incident-field-console@0.1.0"
+component = "field-console@1"
+source_manifest = "../futao.toml"
+source_lock = "../futao.lock"
+
+[contracts]
+host_idl = "../target-2.0/host/field-host.futao-idl"
+component_idl = "../target-2.0/component/field-console.futao-idl"
+require_host_abi_hashes = true
+require_component_abi_hashes = true
+include_private_ir = false
+
+[target]
+triple = "wasm32-unknown-unknown"
+memory_model = "single-linear-memory"
+maximum_memory_pages = 1024
+shared_memory = false
+async_runtime_abi = 1
+threading = "single-thread-with-owned-workers"
+panic = "abort"
+oom = "abort"
+
+[limits]
+maximum_open_files = 8
+maximum_network_operations = 16
+maximum_child_processes = 1
+maximum_ui_nodes = 10000
+maximum_ui_event_queue = 256
+maximum_capture_bytes = 16777216
+maximum_gpu_bytes = 33554432
+maximum_database_operations = 32
+
+[reproducibility]
+required = true
+remap_workspace_paths = true
+normalize_archive_order = true
+exclude_wall_clock = true
+exclude_undeclared_environment = true
+
+[provenance]
+required = true
+include_source_digest = true
+include_lock_digest = true
+include_toolchain_identity = true
+include_abi_and_capability_digest = true
+
+[output]
+logical_extension = ".ftc"
+payloads = []
+require_payload_digest_at_build = true
+require_signature_envelope_at_release = true

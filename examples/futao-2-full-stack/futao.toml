@@ -1,0 +1,68 @@
+manifest_version = 1
+
+[package]
+name = "incident-field-console"
+version = "0.1.0"
+edition = "2.0"
+minimum_toolchain = "0.2.0"
+license = "MIT"
+publish = false
+
+[targets.field-console]
+kind = "component"
+root = "target-2.0/src/main.ft"
+component_type = "field-console@1"
+
+[features]
+default = ["wasm-ui"]
+wasm-ui = []
+
+[capabilities.filesystem]
+scopes = ["offline-cache", "reports"]
+
+[capabilities.network]
+scopes = ["https://incidents.example.invalid"]
+
+[capabilities.time]
+scopes = ["monotonic", "timer"]
+
+[capabilities.random]
+scopes = ["correlation-id"]
+
+[capabilities.environment]
+scopes = ["FUTAO_SUPPORT_MODE"]
+
+[capabilities.process]
+scopes = ["field-support-v1"]
+
+[capabilities.ui]
+scopes = ["primary-window"]
+
+[capabilities.clipboard]
+scopes = ["write-text"]
+
+[capabilities.camera]
+scopes = ["still-image"]
+
+[capabilities.microphone]
+scopes = ["bounded-recording"]
+
+[capabilities.gpu]
+scopes = ["timeline-buffer"]
+
+[capabilities.database]
+scopes = ["field-cache"]
+
+[build]
+profiles = ["application"]
+panic = "abort"
+oom = "abort"
+async_runtime_abi = 1
+threading = "single-thread-with-owned-workers"
+reproducible = true
+build_script = false
+
+[security]
+unsafe = false
+allowed_registries = []
+signing_policy = "release/signing-policy.toml"
