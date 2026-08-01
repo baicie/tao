@@ -2,7 +2,7 @@
 
 ## 目标
 
-从当前 `nexac 0.0.1` Rust reference/bootstrap compiler 出发，逐步交付由 Futao
+从固定的 `nexac 0.0.1` Rust Stage 0 出发，逐步交付由 Futao
 编写的编译器核心，建立自动化、可复现、可回滚的 `C0 -> C1 -> C2 -> C3` 构建链。
 工具链在自举期间保持 `0.0.x`；只有 ADR-011 的完整门槛通过后才发布 `0.1.0`。
 
@@ -11,14 +11,15 @@ Accepted 状态解释为对应实现已经存在。
 
 ## 当前基线
 
-* 工具链版本：`0.0.1`。
-* Stage 0：Rust 实现，覆盖 Lexer、Parser、Resolver、Type Checker、HIR、CFG MIR、
+* 工具链版本：`0.0.2`。
+* Stage 0：固定为 `nexac 0.0.1` Rust 实现，覆盖 Lexer、Parser、Resolver、Type Checker、HIR、CFG MIR、
   reference interpreter、诊断、conformance 与 release gate。
 * 语言名称：新设计和源码使用 Futao / `.ft`；现有 Nexa / `.nexa` 输入在迁移策略
   明确前保留兼容。
 * 默认分支：`mvp`。
-* 已接受架构：ADR-001 至 ADR-011；ADR-000 仍为 Proposed。
-* 首要架构阻塞：ADR-000 的 VM/稳定 `.nca` 设想与 ADR-003 的内部 NIR 决策尚未统一。
+* 已接受架构：ADR-000 至 ADR-011。
+* `0.0.2` 已收敛产物边界：自举输出是内部 NIR，公共 stable component 仍由 ADR-009 定义为 `.nexc`。
+* 下一里程碑：`0.0.3` Futao 源码入口、纯 compiler core 与 differential 基础设施。
 
 ## 关键依赖
 
@@ -42,7 +43,7 @@ ADR-000 边界收敛
 
 | 版本 | 交付里程碑 | 发布门槛 |
 |---|---|---|
-| `0.0.1` | 当前 Rust reference/bootstrap baseline | Language 1.0 release gate 保持通过 |
+| `0.0.1` | 固定 Rust reference/bootstrap baseline | Language 1.0 release gate 保持通过 |
 | `0.0.2` | 修订并接受 ADR-000 | 冻结 Stage 0、provenance、内部自举产物及 ADR-003/009 边界 |
 | `0.0.3` | Futao 编译器入口与 differential 基础设施 | `.ft` 输入、纯 compiler core 接口、canonical diagnostics/corpus 可双实现比较 |
 | `0.0.4` | 自举 ownership/storage kernel | Move/Drop 与受限 `Vec`、字符串构建、Arena 满足编译器 workload |
@@ -73,6 +74,12 @@ ADR-000 边界收敛
 
 验收：ADR-000 Accepted；artifact、runtime、backend、package component 的边界无冲突；
 从干净环境可重建固定 C0。
+
+交付状态：已实现。`bootstrap/stage0/bootstrap-manifest.json` 固定 Stage 0 source commit、
+source archive/Cargo.lock SHA-256、Rust 1.80 与 locked release recipe；
+`cargo xtask bootstrap-contract --rebuild-stage0` 会重算 provenance、从 detached worktree
+重建 `nexac 0.0.1` 并执行版本 smoke。Bootstrap Stdlib 被显式固定为 `not-defined`，
+直到 `0.0.6` 才允许替换为真实版本与 digest。内部 NIR/public component 混用进入 rejected fixture。
 
 ### `0.0.3`：建立双实现比较面
 

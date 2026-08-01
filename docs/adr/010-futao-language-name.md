@@ -4,7 +4,7 @@
 * **日期**：2026-08-01
 * **目标版本**：Futao Language 2.0 与后续工具链
 * **关联 ADR**：ADR-001 至 ADR-009
-* **兼容性范围**：不修改 Language 1.0 语义；已发布的 `nexac 0.0.1` 标识在迁移完成前保持可追溯
+* **兼容性范围**：不修改 Language 1.0 语义；已交付的 `nexac 0.0.1` 标识在迁移完成前保持可追溯
 
 ---
 
@@ -49,7 +49,7 @@ Language 1.0 文档仍使用 Nexa / `nexac` / `.nexa`。直接在设计文档中
 本 ADR 接受名称，不宣称工具链迁移已经交付。
 
 * 历史 ADR、Language 1.0 规范、release tag 和构建证明中的 Nexa / `nexac` 保留原文，避免改写历史。
-* 当前 `nexac 0.0.1`、Cargo crate 名和 `.nexa` conformance corpus 在独立迁移 PR 完成前继续工作。
+* 当前 `nexac 0.0.x`、Cargo crate 名和 `.nexa` conformance corpus 在独立迁移 PR 完成前继续工作。
 * 新的 2.0 合同示例使用 `.ft`；其 README 必须明确当前可执行能力和未来命令之间的差异。
 * CLI、crate、CI、release archive 和 repository URL 的迁移必须原子化校验，不能只改显示文本。
 * `.nexa` 是否作为兼容输入长期保留，由迁移实现和版本策略另行决定；本 ADR 不隐式承诺永久双后缀。
