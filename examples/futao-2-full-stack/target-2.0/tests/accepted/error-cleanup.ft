@@ -1,0 +1,20 @@
+import { AppError, fromHost } from "../../src/errors.ft";
+import { FileHandle, FilesystemHost } from "../../src/platform.ft";
+
+function writeReport(
+  filesystem: FilesystemHost,
+  bytes: Array<U8>,
+): Result<Unit, AppError> {
+  let file = match (filesystem.create("report.txt")) {
+    case Ok(handle) => handle;
+    case Err(error) => return Err(AppError.Host(error));
+  };
+  defer file.closeIgnoringError();
+
+  try {
+    fromHost(file.writeAll(bytes.asSlice()))?;
+    return Ok(Unit);
+  } catch {
+    case error => return Err(error);
+  }
+}

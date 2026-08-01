@@ -1,0 +1,22 @@
+import { Incident } from "../../src/model.ft";
+
+function consume(take incident: Incident): Unit {}
+
+function ownershipAndMemory(take incident: Incident): U64 {
+  const copy = incident.clone();
+  let queue = Vec<Incident>();
+  queue.push(incident);
+  const frozen = queue.freeze();
+  const boxed = Box.new(copy);
+  const shared = Shared.new(boxed);
+  const secondOwner = shared.clone();
+  const observer = secondOwner.weak();
+  let arena = DropArena.new();
+  let labels = arena.vec<String>();
+  labels.push("owned by arena");
+
+  return match (observer.upgrade()) {
+    case Some(owner) => frozen.length + 1;
+    case None => frozen.length;
+  };
+}

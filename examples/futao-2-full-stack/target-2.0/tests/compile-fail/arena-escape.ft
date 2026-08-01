@@ -1,0 +1,6 @@
+// expected-error: E5730
+function rejected(): StringView {
+  let arena = DropArena.new();
+  const text = arena.string("temporary");
+  return text.view();
+}

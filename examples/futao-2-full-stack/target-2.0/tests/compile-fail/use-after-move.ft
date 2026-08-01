@@ -1,0 +1,10 @@
+// expected-error: E4101
+resource Ticket {}
+
+function submit(take ticket: Ticket): Unit {}
+function inspect(ticket: Ticket): Unit {}
+
+function rejected(take ticket: Ticket): Unit {
+  submit(ticket);
+  inspect(ticket);
+}

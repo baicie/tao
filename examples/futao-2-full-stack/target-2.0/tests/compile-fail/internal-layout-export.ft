@@ -1,0 +1,5 @@
+// expected-error: E5750
+@componentExport("bad/internal-layout@1")
+function rejected(take values: Vec<String>): Vec<String> {
+  return values;
+}

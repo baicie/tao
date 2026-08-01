@@ -1,0 +1,9 @@
+// expected-error: E5820
+resource File {
+  function close(take self): Result<Unit, String>;
+}
+
+function rejected(take file: File): Result<Unit, String> {
+  defer file.close()?;
+  return Ok(Unit);
+}

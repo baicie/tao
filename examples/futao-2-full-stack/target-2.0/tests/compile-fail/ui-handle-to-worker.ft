@@ -1,0 +1,8 @@
+// expected-error: E6050
+import { WindowHandle } from "../../src/platform.ft";
+
+function rejected(take window: WindowHandle): Unit {
+  Worker.spawn((): Unit => {
+    window.close();
+  });
+}

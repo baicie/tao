@@ -1,0 +1,8 @@
+// expected-error: E5901
+type Document = { title: String; };
+
+async function rejected(document: Document): Unit {
+  const title = document.title.view();
+  await yieldNow();
+  print(title);
+}
