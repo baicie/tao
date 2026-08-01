@@ -7,8 +7,8 @@ application layer.
 The current implementation and compatibility contract remain defined by
 Language 1.0. The [architecture decision log](adr/index.md) records the
 bootstrap route and accepted Nexa 2.0 target architecture. Those decisions
-constrain future work but do not imply that the 2.0 ownership, NIR, LLVM, or
-stable ABI designs are already implemented.
+constrain future work but do not imply that the 2.0 ownership, NIR, LLVM,
+runtime, Host, async, Wasm/UI, or package designs are already implemented.
 
 The delivered 1.0 architecture preserves these phase boundaries. The compiler
 driver owns a source session and module

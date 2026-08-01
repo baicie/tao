@@ -74,6 +74,12 @@ export default defineConfig({
             { text: "ADR-001 Language 2.0", link: "/adr/001-language-architecture-ownership-runtime" },
             { text: "ADR-002 Ownership", link: "/adr/002-ownership-borrowing-move-drop" },
             { text: "ADR-003 NIR and ABI", link: "/adr/003-nir-llvm-backend-stable-abi" },
+            { text: "ADR-004 Memory Layout", link: "/adr/004-runtime-memory-layout" },
+            { text: "ADR-005 Host ABI", link: "/adr/005-host-abi-capabilities-handles" },
+            { text: "ADR-006 Failure Model", link: "/adr/006-errors-panic-defer-abi" },
+            { text: "ADR-007 Async", link: "/adr/007-async-structured-concurrency" },
+            { text: "ADR-008 Wasm and UI", link: "/adr/008-wasm-js-ffi-ui-host" },
+            { text: "ADR-009 Packages", link: "/adr/009-package-lockfile-artifacts-signing" },
           ],
         },
         {
