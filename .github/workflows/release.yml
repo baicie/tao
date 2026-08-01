@@ -59,7 +59,10 @@ jobs:
       - uses: taiki-e/install-action@cargo-machete
 
       - name: Run security gate
-        run: cargo xtask security
+        run: |
+          cargo deny check
+          cargo audit --db "$RUNNER_TEMP/cargo-audit-db"
+          cargo machete --with-metadata
 
       - uses: pnpm/action-setup@v4
         with:
