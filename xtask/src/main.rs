@@ -1,6 +1,7 @@
 //! Repository automation tasks for Nexa.
 
 mod bootstrap;
+mod bootstrap_profile;
 mod conformance;
 
 use std::path::{Path, PathBuf};
@@ -55,6 +56,8 @@ enum Task {
     },
     /// Validate accepted and rejected private NIR artifact fixtures.
     NirArtifact,
+    /// Validate Futao Bootstrap Profile v1 and stdlib version transitions.
+    BootstrapProfile,
 }
 
 fn main() -> Result<()> {
@@ -87,6 +90,7 @@ fn main() -> Result<()> {
             bootstrap::run(&manifest, rebuild_stage0)?;
         }
         Task::NirArtifact => bootstrap::verify_nir_artifacts()?,
+        Task::BootstrapProfile => bootstrap_profile::run()?,
     }
 
     Ok(())

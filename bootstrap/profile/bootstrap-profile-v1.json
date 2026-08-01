@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "id": "futao-bootstrap-v1",
+  "languageVersion": "1.0",
+  "sourceExtension": ".ft",
+  "declarations": [
+    "record",
+    "tagged-union",
+    "function",
+    "generic-function",
+    "generic-type",
+    "closure",
+    "explicit-relative-import"
+  ],
+  "statements": ["const", "if", "for-of", "return", "expression"],
+  "values": [
+    "Int",
+    "Bool",
+    "String",
+    "Unit",
+    "Array<T>",
+    "Option<T>",
+    "Result<T,E>",
+    "record",
+    "tagged-union",
+    "function"
+  ],
+  "pureBuiltins": [
+    "array.length",
+    "array.append",
+    "array.concat",
+    "string.length",
+    "toString",
+    "parseInt"
+  ],
+  "ownership": {
+    "copy": ["Int", "Bool", "Unit"],
+    "immutableOwned": ["String", "Array<T>", "record", "tagged-union", "closure"],
+    "sourceOperations": []
+  },
+  "iterationOrders": ["array-index", "source-order", "sorted-key"],
+  "deniedSyntax": ["let", "assignment", "while", "break", "continue"],
+  "deniedCapabilities": [
+    "filesystem",
+    "network",
+    "process",
+    "clock",
+    "environment",
+    "random",
+    "thread",
+    "async",
+    "ui",
+    "dynamic-loading",
+    "plugin",
+    "reflection"
+  ],
+  "hostEffects": []
+}
