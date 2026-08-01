@@ -11,7 +11,7 @@ Accepted 状态解释为对应实现已经存在。
 
 ## 当前基线
 
-* 工具链版本：`0.0.3`。
+* 工具链版本：`0.0.4`。
 * Stage 0：固定为 `nexac 0.0.1` Rust 实现，覆盖 Lexer、Parser、Resolver、Type Checker、HIR、CFG MIR、
   reference interpreter、诊断、conformance 与 release gate。
 * 语言名称：新设计和源码使用 Futao / `.ft`；现有 Nexa / `.nexa` 输入在迁移策略
@@ -20,7 +20,8 @@ Accepted 状态解释为对应实现已经存在。
 * 已接受架构：ADR-000 至 ADR-011。
 * `0.0.2` 已收敛产物边界：自举输出是内部 NIR，公共 stable component 仍由 ADR-009 定义为 `.nexc`。
 * `0.0.3` 已建立 Futao 源码入口、纯 compiler core 与 differential 基础设施。
-* 下一里程碑：`0.0.4` 自举 ownership/storage kernel。
+* `0.0.4` 已建立自举 ownership/storage reference kernel 与独立验收门槛。
+* 下一里程碑：`0.0.5` target-neutral NIR、独立 verifier 与内部自举产物。
 
 ## 关键依赖
 
@@ -111,6 +112,14 @@ Futao adapter 明确报告 unavailable；NIR 明确报告计划于 `0.0.5` 提�
 
 验收：accepted 与 compile-fail 测试同时存在；Miri/sanitizer 可覆盖的 Rust 底座通过；
 大型 corpus 不出现数量级内存或时间退化。
+
+交付状态：已实现。`nexa_storage` 以 `#![forbid(unsafe_code)]` 提供 Host-reference layout、
+不可伪造 allocator provenance、失败保持原值的受限 owned storage、UTF-8 构建、逆序 Drop、
+generation-checked Arena、稳定有界集合与纯 Place ownership state machine。accepted、rejected、
+compile-fail、ZST、溢出、资源清理、Rust 1.80、Miri 和 20,000-entry release workload 均进入
+自动化门槛。该状态只表示自举所需子集交付，不宣称 ADR-004 的 target layout/NIR verifier、
+Box/Shared、跨后端或 ABI 验收完成。详细边界见
+[`storage-kernel-0.0.4.md`](storage-kernel-0.0.4.md)。
 
 ### `0.0.5`：交付可验证的内部 NIR
 

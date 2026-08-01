@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.0.4 - 2026-08-02
+
+- Add the safe `nexa_storage` reference kernel for checked layout arithmetic,
+  unforgeable allocator provenance, bounded owned storage, UTF-8 construction,
+  generation-checked arenas, and deterministic compiler collections.
+- Add a pure Place initialization/Copy/Move/Drop state machine with reverse
+  successful-initialization cleanup and conservative control-flow joins.
+- Cover ZST Drop, failed-growth atomicity, stale and foreign arena handles,
+  collection bounds, ownership rejection, compile-fail lifetimes, a 20,000-entry
+  release workload, Rust 1.80, and Miri CI.
+- Keep target layouts, NIR verification, Box/Shared, Host ABI, backend lowering,
+  and the complete ADR-004 conformance matrix deferred to their planned phases.
+
 ## 0.0.3 - 2026-08-02
 
 - Accept `.ft` source entries and imports while preserving the `.nexa`

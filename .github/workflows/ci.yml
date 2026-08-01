@@ -63,6 +63,21 @@ jobs:
           path: fuzz/artifacts/parser
           if-no-files-found: ignore
 
+  storage-miri:
+    name: Storage kernel / Miri
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nightly Rust and Miri
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+
+      - name: Run storage kernel under Miri
+        run: cargo miri test --locked -p nexa_storage --tests
+
   ci:
     name: CI / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

@@ -40,6 +40,8 @@ enum Task {
     FuzzSmoke,
     /// Run release-mode reference performance workloads without timing thresholds.
     Perf,
+    /// Validate the bounded ownership/storage kernel and its release workload.
+    StorageKernel,
     /// Run every required local Language 1.0 release-candidate gate.
     ReleaseCheck,
     /// Validate the pinned Stage 0 and internal bootstrap artifact contract.
@@ -73,6 +75,7 @@ fn main() -> Result<()> {
         }
         Task::FuzzSmoke => fuzz_smoke()?,
         Task::Perf => perf()?,
+        Task::StorageKernel => storage_kernel()?,
         Task::ReleaseCheck => release_check()?,
         Task::BootstrapContract {
             manifest,
@@ -179,6 +182,37 @@ fn perf() -> Result<()> {
     )
 }
 
+fn storage_kernel() -> Result<()> {
+    run(
+        "cargo",
+        &[
+            "+1.80.0",
+            "test",
+            "--locked",
+            "-p",
+            "nexa_storage",
+            "--all-targets",
+            "--all-features",
+        ],
+    )?;
+    run(
+        "cargo",
+        &[
+            "+1.80.0",
+            "test",
+            "--locked",
+            "--release",
+            "-p",
+            "nexa_storage",
+            "--test",
+            "workload",
+            "--",
+            "--ignored",
+            "--nocapture",
+        ],
+    )
+}
+
 fn release_check() -> Result<()> {
     check()?;
     bootstrap::run(&bootstrap::default_manifest_path(), true)?;
@@ -196,6 +230,7 @@ fn release_check() -> Result<()> {
     conformance::run(&conformance::default_manifest_path())?;
     fuzz_smoke()?;
     perf()?;
+    storage_kernel()?;
     run("cargo", &["build", "--locked", "--release", "-p", "nexac"])?;
 
     let binary = release_binary();

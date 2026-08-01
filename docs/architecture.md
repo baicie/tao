@@ -41,6 +41,7 @@ only on resolved identities, layouts, capture slots, and intrinsic enums.
 | `nexa_parser` | parser entry points and recovery diagnostics |
 | `nexa_hir` | CST lowering, name resolution, typed expressions, and type checking |
 | `nexa_mir` | CFG MIR lowering, immutable runtime values, and interpreter |
+| `nexa_storage` | safe Host-backed ownership, allocation, arena, and deterministic collection contracts for bootstrap |
 | `nexa_compiler` | source sessions, module graphs, checking, lowering, and execution orchestration |
 | `nexac` | file-system source provider, command-line interface, and diagnostic rendering |
 
@@ -55,6 +56,8 @@ nexac -> nexa_source -> nexa_span
                      +-> nexa_hir -> nexa_syntax
                      |             \-> nexa_diagnostics -> nexa_span
                      \-> nexa_mir -> nexa_hir
+
+nexa_storage -> safe Host-backed bootstrap ownership/storage contracts
 ```
 
 Rules:
@@ -81,6 +84,8 @@ Rules:
 - Future TypeScript interop may use OXC or SWC only behind an isolated adapter
   crate that lowers into Nexa HIR; their AST types must not enter core crates.
 - Placeholder crates are avoided until a phase boundary has real behavior.
+- `nexa_storage` remains independent of frontend and backend crates until a
+  later bootstrap phase consumes it; it does not define NIR or physical ABI.
 
 ## Language 1.0 Architecture
 

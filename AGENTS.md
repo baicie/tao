@@ -9,6 +9,7 @@ crates/nexa_span         -> FileId, TextRange, and source spans
 crates/nexa_diagnostics  -> errors, warnings, and source labels
 crates/nexa_syntax       -> tokens, SyntaxKind, and future lossless CST
 crates/nexa_parser       -> parser entry points and recovery diagnostics
+crates/nexa_storage      -> bootstrap ownership and bounded storage contracts
 crates/nexac             -> CLI entry point
 xtask                    -> development automation
 docs/spec                -> language design notes
@@ -20,6 +21,8 @@ crates/*/tests           -> crate-level integration tests
 ```text
 nexac -> nexa_parser -> nexa_syntax -> nexa_span
                     \-> nexa_diagnostics -> nexa_span
+
+nexa_storage -> safe Host-backed bootstrap ownership/storage contracts
 ```
 
 Do not introduce circular dependencies. Add new crates only when a real phase boundary exists.
@@ -33,6 +36,7 @@ Do not introduce circular dependencies. Add new crates only when a real phase bo
 | `cargo doc --workspace --no-deps` | Build documentation |
 | `cargo xtask security` | Run optional dependency and security checks |
 | `cargo xtask bootstrap-contract` | Validate the pinned Stage 0 provenance and artifact boundary |
+| `cargo xtask storage-kernel` | Validate the ownership/storage kernel and release workload |
 
 Never commit code that fails `make check`.
 

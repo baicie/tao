@@ -7,6 +7,7 @@ members = [
     "crates/nexa_parser",
     "crates/nexa_hir",
     "crates/nexa_mir",
+    "crates/nexa_storage",
     "crates/nexa_compiler",
     "crates/nexac",
     "xtask",
@@ -14,7 +15,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.0.3"
+version = "0.0.4"
 publish = false
 edition = "2021"
 rust-version = "1.80"
@@ -28,14 +29,15 @@ keywords = ["compiler", "language", "rust", "workspace"]
 categories = ["compilers", "command-line-utilities"]
 
 [workspace.dependencies]
-nexa_span = { path = "crates/nexa_span", version = "0.0.3" }
-nexa_source = { path = "crates/nexa_source", version = "0.0.3" }
-nexa_diagnostics = { path = "crates/nexa_diagnostics", version = "0.0.3" }
-nexa_syntax = { path = "crates/nexa_syntax", version = "0.0.3" }
-nexa_parser = { path = "crates/nexa_parser", version = "0.0.3" }
-nexa_hir = { path = "crates/nexa_hir", version = "0.0.3" }
-nexa_mir = { path = "crates/nexa_mir", version = "0.0.3" }
-nexa_compiler = { path = "crates/nexa_compiler", version = "0.0.3" }
+nexa_span = { path = "crates/nexa_span", version = "0.0.4" }
+nexa_source = { path = "crates/nexa_source", version = "0.0.4" }
+nexa_diagnostics = { path = "crates/nexa_diagnostics", version = "0.0.4" }
+nexa_syntax = { path = "crates/nexa_syntax", version = "0.0.4" }
+nexa_parser = { path = "crates/nexa_parser", version = "0.0.4" }
+nexa_hir = { path = "crates/nexa_hir", version = "0.0.4" }
+nexa_mir = { path = "crates/nexa_mir", version = "0.0.4" }
+nexa_storage = { path = "crates/nexa_storage", version = "0.0.4" }
+nexa_compiler = { path = "crates/nexa_compiler", version = "0.0.4" }
 
 anyhow = "1"
 thiserror = "2"
