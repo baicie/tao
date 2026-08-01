@@ -2,9 +2,9 @@
 layout: home
 
 hero:
-  name: "Nexa"
-  text: "Nexa Language 1.0 Delivered"
-  tagline: "A TS-shaped language with independent static semantics and a MIR interpreter."
+  name: "Futao"
+  text: "Nexa 1.0 Bootstrap Compiler"
+  tagline: "The current Rust bootstrap for Futao, with independent static semantics and a MIR interpreter."
   actions:
     - theme: brand
       text: Get Started

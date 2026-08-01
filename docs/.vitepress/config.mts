@@ -1,8 +1,8 @@
 import { defineConfig } from "vitepress";
 
 export default defineConfig({
-  title: "Nexa",
-  description: "A TS-shaped language with independent static semantics and a MIR interpreter",
+  title: "Futao",
+  description: "The Rust bootstrap compiler and architecture for the Futao language",
   lang: "en-US",
   lastUpdated: true,
   cleanUrls: true,
@@ -79,6 +79,7 @@ export default defineConfig({
             { text: "ADR-007 Async", link: "/adr/007-async-structured-concurrency" },
             { text: "ADR-008 Wasm and UI", link: "/adr/008-wasm-js-ffi-ui-host" },
             { text: "ADR-009 Packages", link: "/adr/009-package-lockfile-artifacts-signing" },
+            { text: "ADR-010 Futao Name", link: "/adr/010-futao-language-name" },
           ],
         },
         {
