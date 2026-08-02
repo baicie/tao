@@ -1,0 +1,3 @@
+identifier_0123456789 identifier_0123456789 identifier_0123456789
+// this comment crosses several immutable scan leaves without changing mode
+function afterBoundary(value: String): Unit { const text = "still scanning"; }

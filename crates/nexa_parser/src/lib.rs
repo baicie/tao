@@ -3,12 +3,39 @@
 
 mod parser;
 
-use nexa_diagnostics::{Diagnostic, Severity};
-use nexa_span::FileId;
+use nexa_diagnostics::{Diagnostic, DiagnosticCode, Label, Severity};
+use nexa_span::{FileId, SourceSpan};
 use nexa_syntax::{tokenize, SyntaxNode, Token};
 use rowan::{GreenNode, NodeOrToken, WalkEvent};
 
 use crate::parser::parse_tokens;
+
+const LEXICAL_ERROR: DiagnosticCode = DiagnosticCode::new("E1001");
+
+/// Result of lexing one source file without running parser recovery.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LexedSource {
+    tokens: Vec<Token>,
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl LexedSource {
+    /// Returns the ordered lossless token stream.
+    #[must_use]
+    pub fn tokens(&self) -> &[Token] {
+        &self.tokens
+    }
+
+    /// Returns only diagnostics produced by lexical classification.
+    #[must_use]
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
+    }
+
+    fn into_parts(self) -> (Vec<Token>, Vec<Diagnostic>) {
+        (self.tokens, self.diagnostics)
+    }
+}
 
 /// Result of parsing one source file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,12 +121,36 @@ impl Parse {
 /// Panics when `source` is larger than Rowan's four-gibibyte tree limit.
 #[must_use]
 pub fn parse_source(file: FileId, source: &str) -> Parse {
-    let tokens = tokenize(source);
-    let (green, diagnostics) = parse_tokens(file, source.len(), &tokens);
+    let (tokens, lexical_diagnostics) = lex_source(file, source).into_parts();
+    let (green, diagnostics) = parse_tokens(file, source.len(), &tokens, lexical_diagnostics);
 
     Parse {
         tokens,
         green,
+        diagnostics,
+    }
+}
+
+/// Lexes one source file without running parser recovery.
+///
+/// The returned tokens cover the complete UTF-8 input losslessly. Every
+/// unrecognized token produces one source-spanned `E1001` diagnostic.
+#[must_use]
+pub fn lex_source(file: FileId, source: &str) -> LexedSource {
+    let tokens = tokenize(source);
+    let diagnostics = tokens
+        .iter()
+        .filter(|token| token.kind() == nexa_syntax::SyntaxKind::Unknown)
+        .map(|token| {
+            Diagnostic::error(LEXICAL_ERROR, "unknown token").with_label(Label::new(
+                SourceSpan::new(file, token.range()),
+                format!("unexpected `{}`", token.text()),
+            ))
+        })
+        .collect();
+
+    LexedSource {
+        tokens,
         diagnostics,
     }
 }

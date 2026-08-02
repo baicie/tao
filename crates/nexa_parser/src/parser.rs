@@ -234,6 +234,7 @@ pub(super) fn parse_tokens(
     file: FileId,
     source_len: usize,
     tokens: &[Token],
+    lexical_diagnostics: Vec<Diagnostic>,
 ) -> (GreenNode, Vec<Diagnostic>) {
     Parser {
         file,
@@ -242,22 +243,9 @@ pub(super) fn parse_tokens(
         position: 0,
         pending_split_eq: false,
         builder: GreenNodeBuilder::new(),
-        diagnostics: lexical_diagnostics(file, tokens),
+        diagnostics: lexical_diagnostics,
     }
     .parse()
-}
-
-fn lexical_diagnostics(file: FileId, tokens: &[Token]) -> Vec<Diagnostic> {
-    tokens
-        .iter()
-        .filter(|token| token.kind() == SyntaxKind::Unknown)
-        .map(|token| {
-            Diagnostic::error(PARSE_ERROR, "unknown token").with_label(Label::new(
-                SourceSpan::new(file, token.range()),
-                format!("unexpected `{}`", token.text()),
-            ))
-        })
-        .collect()
 }
 
 struct Parser<'tokens> {

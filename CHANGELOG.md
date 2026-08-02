@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.0.7 - 2026-08-02
+
+- Add the first executable Futao-written compiler phase: a pure, bounded lexer
+  compiled under `futao-bootstrap-v1` with explicit Unicode scalar and UTF-8
+  byte-offset inputs.
+- Freeze lexer snapshot schema 1 for token kinds, byte ranges, trivia, and
+  structured lexical diagnostics, with strict Rust and Futao adapters.
+- Gate 4 accepted cases, 3 rejected cases, and 4 fuzz seeds at zero observable
+  differences while retaining canonical mismatch artifacts for diagnosis.
+- Content-address the Futao compiler source tree in a strict compiler manifest
+  and bind its digest, implemented phase, corpus, and Rust-reference default
+  into the Stage 0 contract.
+- Add the lexer differential command to local, CI, MSRV, fuzz, bootstrap, and
+  release validation while keeping the Rust lexer as the default path.
+
 ## 0.0.6 - 2026-08-02
 
 - Freeze `futao-bootstrap-v1` as a `.ft`-only pure compiler profile with stable

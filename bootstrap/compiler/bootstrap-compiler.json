@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "name": "futao-bootstrap-compiler",
+  "version": "0.0.1",
+  "toolchainVersion": "0.0.7",
+  "profile": "futao-bootstrap-v1",
+  "profileEntry": "src/lexer_profile.ft",
+  "driverEntry": "src/lexer_driver.ft",
+  "implementedPhases": ["lexer"],
+  "sourceFiles": [
+    "src/lexer.ft",
+    "src/lexer_bridge.ft",
+    "src/lexer_driver.ft",
+    "src/lexer_profile.ft"
+  ],
+  "treeHashAlgorithm": "sha256",
+  "treeDigest": "sha256:565a901ae34c25251aad8db4761f4d8207561d28652f93c28841ea29deec5717",
+  "lexerSnapshotSchemaVersion": 1,
+  "differentialCorpus": {
+    "accepted": 4,
+    "rejected": 3,
+    "fuzzSeeds": 4,
+    "total": 11
+  },
+  "defaultImplementation": "rust-reference"
+}

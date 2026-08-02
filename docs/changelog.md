@@ -1,5 +1,20 @@
 # Changelog
 
+## Compiler Package 0.0.7 (Futao Lexer Differential)
+
+- Added the first real Futao-written compiler phase under
+  `futao-bootstrap-v1`, with immutable bounded traversal over explicit Unicode
+  scalar and UTF-8 byte-offset input.
+- Froze a lexer-only snapshot schema for numeric token kinds, byte ranges,
+  trivia, and structured lexical diagnostics without fabricating later compiler
+  phases.
+- Added strict Rust/Futao adapters, snapshot validation, fail-closed reports,
+  and retained mismatch artifacts.
+- Added 11 accepted, rejected, and fuzz-seed cases plus a bounded differential
+  fuzz target and local, MSRV, CI, and release gates.
+- Kept the Rust lexer as the default path until the Futao parser and remaining
+  ADR-011 compiler slices are verified.
+
 ## Compiler Package 0.0.6 (Bootstrap Profile and Stdlib)
 
 - Froze the `.ft`-only `futao-bootstrap-v1` capability surface and added stable

@@ -1,4 +1,4 @@
-# Parser Fuzzing
+# Front-End Fuzzing
 
 The `parser` target checks four invariants for every valid UTF-8 input:
 
@@ -6,6 +6,10 @@ The `parser` target checks four invariants for every valid UTF-8 input:
 - the CST reproduces the complete source text;
 - tokens and diagnostics are deterministic; and
 - the line-oriented CST dump is deterministic.
+
+The `lexer` target compares the real Rust and Futao lexer adapters over valid
+UTF-8 inputs up to 512 bytes. Every token, trivia bit, byte range, and lexical
+diagnostic must match; adapter or protocol failures are crashes.
 
 The checked-in lockfile keeps the target buildable with the workspace MSRV:
 
@@ -25,6 +29,7 @@ Continuous mutation fuzzing is an explicit maintainer task and requires
 ```text
 cargo install cargo-fuzz
 cargo fuzz run parser
+cargo fuzz run lexer
 ```
 
 Crash artifacts, coverage output, and the fuzz build directory are ignored.

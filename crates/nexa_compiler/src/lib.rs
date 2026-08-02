@@ -5,6 +5,7 @@ mod bootstrap_profile;
 mod canonical;
 mod core;
 mod differential;
+mod lexer_differential;
 mod nir_lower;
 mod session;
 
@@ -29,6 +30,12 @@ pub use differential::{
     CompilerAdapter, CompilerAdapterState, CompilerImplementation, DifferenceClassification,
     DifferentialHarness, DifferentialIssue, DifferentialIssueKind, DifferentialOutcome,
     DifferentialReport, RustReferenceCompiler,
+};
+pub use lexer_differential::{
+    FutaoLexerAdapter, LexerAdapter, LexerAdapterError, LexerDiagnosticSnapshot, LexerDifference,
+    LexerDifferentialHarness, LexerDifferentialOutcome, LexerDifferentialReport,
+    LexerImplementation, LexerLabelStyle, LexerObservable, LexerSeverity, LexerSnapshot,
+    LexerTokenSnapshot, RustLexerAdapter, LEXER_SNAPSHOT_SCHEMA_VERSION,
 };
 pub use nexa_mir::{MirProgram, RuntimeError};
 pub use session::{CompilerSession, ImportEdge, SessionBuildError, SessionModule};

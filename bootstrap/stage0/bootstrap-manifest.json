@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "toolchainVersion": "0.0.6",
+  "toolchainVersion": "0.0.7",
   "languageVersion": "1.0",
   "stage0": {
     "implementation": "rust",
@@ -30,6 +30,17 @@
     "treeDigest": "sha256:d302a92827072fdb6c9ef85ffc53cca9472f9dfe69f604132d5acd50a6f92da2",
     "buildDigest": "sha256:03c183622af98e72f667443a1995f96f0314ab8cf9c7e1eaf70dbe114175538b"
   },
+  "bootstrapCompiler": {
+    "status": "lexer-differential",
+    "version": "0.0.1",
+    "profile": "futao-bootstrap-v1",
+    "manifest": "bootstrap/compiler/bootstrap-compiler.json",
+    "treeDigest": "sha256:565a901ae34c25251aad8db4761f4d8207561d28652f93c28841ea29deec5717",
+    "implementedPhases": ["lexer"],
+    "lexerSnapshotSchemaVersion": 1,
+    "differentialCaseCount": 11,
+    "defaultImplementation": "rust-reference"
+  },
   "bootstrapOutput": {
     "kind": "internal-nir",
     "stability": "toolchain-internal",
@@ -38,7 +49,7 @@
     "artifactMagic": "FUTAO-NIR",
     "nirSchemaVersion": 1,
     "verifierCrate": "nexa_nir",
-    "verifierVersion": "0.0.6",
+    "verifierVersion": "0.0.7",
     "targetProfile": "target-neutral-v1",
     "featureFlags": ["n1-scalar-cfg-v1"],
     "canonicalEncoding": "strict-json",
