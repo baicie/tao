@@ -1,0 +1,7 @@
+function calculate(value: Int): Bool {
+  return value + 2 * 3 == 7 && !false || false;
+}
+
+function postfix(records: Pair<Int>[]): Int {
+  return records[0].left;
+}

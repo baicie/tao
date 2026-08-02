@@ -1,0 +1,7 @@
+import { core, values } from "./core.ft";
+
+export function identity<T>(value: T): T {
+  return value;
+}
+
+function local(): Unit {}

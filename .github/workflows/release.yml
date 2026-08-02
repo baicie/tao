@@ -8,6 +8,7 @@ on:
       - "Cargo.lock"
       - "bootstrap/**"
       - "crates/**"
+      - "fuzz/**"
       - "xtask/**"
   push:
     tags:
@@ -94,6 +95,15 @@ jobs:
 
       - name: Run release gate
         run: cargo xtask release-check
+
+      - name: Upload parser differential mismatch artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parser-differential-release-mismatch
+          path: target/parser-differential
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Verify local installation
         shell: bash

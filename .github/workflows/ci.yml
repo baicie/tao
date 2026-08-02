@@ -40,6 +40,18 @@ jobs:
       - name: Validate Futao lexer differential
         run: cargo run --locked --package xtask -- lexer-differential
 
+      - name: Validate Futao parser differential
+        run: cargo run --locked --package xtask -- parser-differential
+
+      - name: Upload parser differential mismatch artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parser-differential-mismatch
+          path: target/parser-differential
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Validate private NIR artifacts
         run: cargo run --locked --package xtask -- nir-artifact
 

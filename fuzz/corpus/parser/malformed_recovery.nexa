@@ -1,2 +1,0 @@
-function first(: Int) { const value = [1,; }
-function second(): Unit { print(2); }

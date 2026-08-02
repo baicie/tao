@@ -1,0 +1,3 @@
+const nope = 1;
+
+function after(): Unit {}

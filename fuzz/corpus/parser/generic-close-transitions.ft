@@ -1,0 +1,8 @@
+type Box<T>= {
+  value: T;
+};
+
+type Pair<T, U>= {
+  left: Box<T>;
+  right: Box<U>;
+};

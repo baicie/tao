@@ -1,0 +1,3 @@
+function broken(value: Int]): Unit {}
+
+function after(): Unit {}

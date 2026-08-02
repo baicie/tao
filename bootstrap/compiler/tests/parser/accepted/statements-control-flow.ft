@@ -1,0 +1,14 @@
+function control(values: Int[]): Int {
+  let total: Int = 0;
+  for (const value of values) {
+    total = total + value;
+  }
+  if (total < 1) {
+    continue;
+  } else {
+    while (false) {
+      break;
+    }
+  }
+  return total;
+}

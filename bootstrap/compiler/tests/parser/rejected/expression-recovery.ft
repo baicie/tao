@@ -1,0 +1,6 @@
+function broken(): Unit {
+  const value = 1 + @;
+  return;
+}
+
+function after(): Unit {}

@@ -1,0 +1,5 @@
+// 波涛 remains lossless trivia.
+function text(): String {
+  const value = "Futao 你好";
+  return value;
+}
