@@ -89,8 +89,17 @@ pub(crate) fn run() -> Result<()> {
     verify_stdlib(&root, &stdlib)?;
     let behavior = run_stdlib_fixture(&root, &stdlib, "tests/array-string.ft")?;
     ensure!(
-        behavior == ["10", "1", "2", "3", "1", "futao"],
+        behavior == ["10", "1", "2", "3", "1", "0", "2", "futao"],
         "bootstrap stdlib array/string fixture output changed"
+    );
+    let large_behavior = run_stdlib_fixture(&root, &stdlib, "tests/large-collections.ft")?;
+    ensure!(
+        large_behavior
+            == [
+                "80", "2", "3160", "0", "79", "79", "79", "80", "79", "800", "79", "800", "true",
+                "true", "true",
+            ],
+        "bootstrap stdlib large-collection fixture output changed"
     );
 
     println!(
@@ -622,7 +631,7 @@ mod tests {
 
         assert_eq!(
             run_stdlib_fixture(&root, &manifest, "tests/array-string.ft")?,
-            ["10", "1", "2", "3", "1", "futao"]
+            ["10", "1", "2", "3", "1", "0", "2", "futao"]
         );
         Ok(())
     }
@@ -636,6 +645,22 @@ mod tests {
         assert_eq!(
             run_stdlib_fixture(&root, &manifest, "tests/collections.ft")?,
             ["3", "2", "b", "a", "1", "20", "10", "true", "true", "true"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stdlib_operations_cross_the_reference_call_depth_boundary(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let manifest = parse_stdlib_manifest(STDLIB)?;
+
+        assert_eq!(
+            run_stdlib_fixture(&root, &manifest, "tests/large-collections.ft")?,
+            [
+                "80", "2", "3160", "0", "79", "79", "79", "80", "79", "800", "79", "800", "true",
+                "true", "true",
+            ]
         );
         Ok(())
     }

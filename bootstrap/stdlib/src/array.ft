@@ -1,57 +1,80 @@
 import { Ordering } from "./core.ft";
 import { Option } from "./option.ft";
 
-function copyFrom<T>(values: T[], index: Int): T[] {
-  if (index >= values.length) {
+function copyRange<T>(values: T[], start: Int, end: Int): T[] {
+  if (start >= end) {
     return [];
   }
-  return [values[index]].concat(copyFrom(values, index + 1));
+  if (end - start === 1) {
+    return [values[start]];
+  }
+  const middle = start + (end - start) / 2;
+  return copyRange(values, start, middle).concat(copyRange(values, middle, end));
 }
 
-function mapFrom<T, U>(
+function mapRange<T, U>(
   values: T[],
-  index: Int,
+  start: Int,
+  end: Int,
   transform: (value: T) => U
 ): U[] {
-  if (index >= values.length) {
+  if (start >= end) {
     return [];
   }
-  return [transform(values[index])].concat(mapFrom(values, index + 1, transform));
+  if (end - start === 1) {
+    return [transform(values[start])];
+  }
+  const middle = start + (end - start) / 2;
+  return mapRange(values, start, middle, transform).concat(
+    mapRange(values, middle, end, transform)
+  );
 }
 
 export function map<T, U>(values: T[], transform: (value: T) => U): U[] {
-  return mapFrom(values, 0, transform);
+  return mapRange(values, 0, values.length, transform);
 }
 
-function filterFrom<T>(
+function filterRange<T>(
   values: T[],
-  index: Int,
+  start: Int,
+  end: Int,
   predicate: (value: T) => Bool
 ): T[] {
-  if (index >= values.length) {
+  if (start >= end) {
     return [];
   }
-  const tail = filterFrom(values, index + 1, predicate);
-  if (predicate(values[index])) {
-    return [values[index]].concat(tail);
+  if (end - start === 1) {
+    if (predicate(values[start])) {
+      return [values[start]];
+    }
+    return [];
   }
-  return tail;
+  const middle = start + (end - start) / 2;
+  return filterRange(values, start, middle, predicate).concat(
+    filterRange(values, middle, end, predicate)
+  );
 }
 
 export function filter<T>(values: T[], predicate: (value: T) => Bool): T[] {
-  return filterFrom(values, 0, predicate);
+  return filterRange(values, 0, values.length, predicate);
 }
 
-function foldFrom<T, U>(
+function foldRange<T, U>(
   values: T[],
-  index: Int,
+  start: Int,
+  end: Int,
   state: U,
   combine: (state: U, value: T) => U
 ): U {
-  if (index >= values.length) {
+  if (start >= end) {
     return state;
   }
-  return foldFrom(values, index + 1, combine(state, values[index]), combine);
+  if (end - start === 1) {
+    return combine(state, values[start]);
+  }
+  const middle = start + (end - start) / 2;
+  const left = foldRange(values, start, middle, state, combine);
+  return foldRange(values, middle, end, left, combine);
 }
 
 export function fold<T, U>(
@@ -59,67 +82,106 @@ export function fold<T, U>(
   initial: U,
   combine: (state: U, value: T) => U
 ): U {
-  return foldFrom(values, 0, initial, combine);
-}
-
-function findFrom<T>(
-  values: T[],
-  index: Int,
-  predicate: (value: T) => Bool
-): Option<T> {
-  if (index >= values.length) {
-    return Option.None();
-  }
-  if (predicate(values[index])) {
-    return Option.Some(values[index]);
-  }
-  return findFrom(values, index + 1, predicate);
+  return foldRange(values, 0, values.length, initial, combine);
 }
 
 export function find<T>(values: T[], predicate: (value: T) => Bool): Option<T> {
-  return findFrom(values, 0, predicate);
+  for (const value of values) {
+    if (predicate(value)) {
+      return Option.Some(value);
+    }
+  }
+  return Option.None();
 }
 
-function insertSorted<T>(
-  sorted: T[],
-  index: Int,
+function lowerBoundRange<T>(
+  values: T[],
   value: T,
+  low: Int,
+  high: Int,
   compare: (left: T, right: T) => Ordering
-): T[] {
-  if (index >= sorted.length) {
-    return [value];
+): Int {
+  if (low >= high) {
+    return low;
   }
-  const current = sorted[index];
-  const tail = copyFrom(sorted, index + 1);
-  return match (compare(value, current)) {
-    case Ordering.Less() => [value, current].concat(tail);
-    case Ordering.Equal() => [current].concat(insertSorted(tail, 0, value, compare));
-    case Ordering.Greater() => [current].concat(insertSorted(tail, 0, value, compare));
+  const middle = low + (high - low) / 2;
+  return match (compare(values[middle], value)) {
+    case Ordering.Less() => lowerBoundRange(values, value, middle + 1, high, compare);
+    case Ordering.Equal() => lowerBoundRange(values, value, low, middle, compare);
+    case Ordering.Greater() => lowerBoundRange(values, value, low, middle, compare);
   };
 }
 
-function sortFrom<T>(
-  values: T[],
-  index: Int,
-  sorted: T[],
+function mergeRanges<T>(
+  left: T[],
+  leftStart: Int,
+  leftEnd: Int,
+  right: T[],
+  rightStart: Int,
+  rightEnd: Int,
   compare: (left: T, right: T) => Ordering
 ): T[] {
-  if (index >= values.length) {
-    return sorted;
+  if (leftStart >= leftEnd) {
+    return copyRange(right, rightStart, rightEnd);
   }
-  return sortFrom(
-    values,
-    index + 1,
-    insertSorted(sorted, 0, values[index], compare),
+  if (rightStart >= rightEnd) {
+    return copyRange(left, leftStart, leftEnd);
+  }
+  const leftMiddle = leftStart + (leftEnd - leftStart) / 2;
+  const pivot = left[leftMiddle];
+  const rightMiddle = lowerBoundRange(
+    right,
+    pivot,
+    rightStart,
+    rightEnd,
     compare
   );
+  return mergeRanges(
+    left,
+    leftStart,
+    leftMiddle,
+    right,
+    rightStart,
+    rightMiddle,
+    compare
+  )
+    .concat([pivot])
+    .concat(
+      mergeRanges(
+        left,
+        leftMiddle + 1,
+        leftEnd,
+        right,
+        rightMiddle,
+        rightEnd,
+        compare
+      )
+    );
+}
+
+function sortRange<T>(
+  values: T[],
+  start: Int,
+  end: Int,
+  compare: (left: T, right: T) => Ordering
+): T[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [values[start]];
+  }
+  const middle = start + (end - start) / 2;
+  const left = sortRange(values, start, middle, compare);
+  const right = sortRange(values, middle, end, compare);
+  return mergeRanges(left, 0, left.length, right, 0, right.length, compare);
 }
 
 export function sortBy<T>(
   values: T[],
   compare: (left: T, right: T) => Ordering
 ): T[] {
-  return sortFrom(values, 0, [], compare);
+  return sortRange(values, 0, values.length, compare);
 }
 
 function binarySearchRange<T>(

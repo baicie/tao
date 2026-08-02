@@ -6,24 +6,22 @@ export type IntSet = {
   values: Int[];
 };
 
-function containsString(values: String[], value: String, index: Int): Bool {
-  if (index >= values.length) {
-    return false;
+function containsString(values: String[], value: String): Bool {
+  for (const candidate of values) {
+    if (candidate === value) {
+      return true;
+    }
   }
-  if (values[index] === value) {
-    return true;
-  }
-  return containsString(values, value, index + 1);
+  return false;
 }
 
-function containsInt(values: Int[], value: Int, index: Int): Bool {
-  if (index >= values.length) {
-    return false;
+function containsInt(values: Int[], value: Int): Bool {
+  for (const candidate of values) {
+    if (candidate === value) {
+      return true;
+    }
   }
-  if (values[index] === value) {
-    return true;
-  }
-  return containsInt(values, value, index + 1);
+  return false;
 }
 
 export function stringSet(): StringSet {
@@ -31,14 +29,14 @@ export function stringSet(): StringSet {
 }
 
 export function stringSetInsert(set: StringSet, value: String): StringSet {
-  if (containsString(set.values, value, 0)) {
+  if (containsString(set.values, value)) {
     return set;
   }
   return { values: set.values.append(value) };
 }
 
 export function stringSetContains(set: StringSet, value: String): Bool {
-  return containsString(set.values, value, 0);
+  return containsString(set.values, value);
 }
 
 export function stringSetValues(set: StringSet): String[] {
@@ -50,14 +48,14 @@ export function intSet(): IntSet {
 }
 
 export function intSetInsert(set: IntSet, value: Int): IntSet {
-  if (containsInt(set.values, value, 0)) {
+  if (containsInt(set.values, value)) {
     return set;
   }
   return { values: set.values.append(value) };
 }
 
 export function intSetContains(set: IntSet, value: Int): Bool {
-  return containsInt(set.values, value, 0);
+  return containsInt(set.values, value);
 }
 
 export function intSetValues(set: IntSet): Int[] {

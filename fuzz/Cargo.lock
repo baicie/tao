@@ -74,14 +74,14 @@ dependencies = [
 
 [[package]]
 name = "nexa_diagnostics"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "nexa_span",
 ]
 
 [[package]]
 name = "nexa_parser"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "nexa_diagnostics",
  "nexa_span",
@@ -91,11 +91,11 @@ dependencies = [
 
 [[package]]
 name = "nexa_span"
-version = "0.0.5"
+version = "0.0.6"
 
 [[package]]
 name = "nexa_syntax"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "nexa_span",
  "rowan",

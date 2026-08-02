@@ -7,6 +7,9 @@ use nexa_nir::{
     ArtifactCompatibility, ArtifactErrorCode, CanonicalArtifact, NIR_ARTIFACT_MAGIC,
     NIR_SCHEMA_VERSION,
 };
+use nexa_parser::parse_source;
+use nexa_span::FileId;
+use nexa_syntax::SyntaxKind;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -66,6 +69,13 @@ struct BootstrapStdlib {
     profile: String,
     tree_digest: String,
     build_digest: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BootstrapStdlibSources {
+    entry: String,
+    source_files: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -506,7 +516,7 @@ fn rebuild_stage0(manifest: &BootstrapManifest, root: &Path) -> Result<()> {
         .current_dir(root);
     run_status(&mut add, "create Stage 0 worktree")?;
 
-    let build_result = build_and_smoke_stage0(manifest, &worktree);
+    let build_result = build_and_smoke_stage0(manifest, root, &worktree);
     let mut remove = Command::new("git");
     remove
         .arg("worktree")
@@ -520,7 +530,11 @@ fn rebuild_stage0(manifest: &BootstrapManifest, root: &Path) -> Result<()> {
     cleanup_result
 }
 
-fn build_and_smoke_stage0(manifest: &BootstrapManifest, worktree: &Path) -> Result<()> {
+fn build_and_smoke_stage0(
+    manifest: &BootstrapManifest,
+    root: &Path,
+    worktree: &Path,
+) -> Result<()> {
     let target = stage0_target_dir(worktree);
     let manifest_path = worktree.join("Cargo.toml");
     let mut build = Command::new("cargo");
@@ -565,11 +579,156 @@ fn build_and_smoke_stage0(manifest: &BootstrapManifest, worktree: &Path) -> Resu
         "rebuilt Stage 0 wrote to stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    verify_stage0_bootstrap_stdlib(&binary, root, worktree)?;
     Ok(())
 }
 
 fn stage0_target_dir(worktree: &Path) -> PathBuf {
     worktree.join("target")
+}
+
+fn project_source_for_stage0(source: &str) -> Result<String> {
+    let parse = parse_source(FileId::new(0), source);
+    ensure!(
+        parse.is_ok(),
+        "cannot project malformed Bootstrap Stdlib source for Stage 0"
+    );
+
+    let mut replacements = Vec::new();
+    for declaration in parse
+        .syntax()
+        .descendants()
+        .filter(|node| node.kind() == SyntaxKind::ImportDeclaration)
+    {
+        let specifier = declaration
+            .children_with_tokens()
+            .filter_map(|element| element.into_token())
+            .find(|token| token.kind() == SyntaxKind::String)
+            .context("Bootstrap Stdlib import is missing its path")?;
+        let text = specifier.text();
+        let prefix = text
+            .strip_suffix(".ft\"")
+            .filter(|prefix| prefix.starts_with('"'))
+            .context("Bootstrap Stdlib import must be an unescaped `.ft` path")?;
+        let range = specifier.text_range();
+        let start = usize::try_from(u32::from(range.start()))
+            .context("Bootstrap Stdlib import offset does not fit usize")?;
+        let end = usize::try_from(u32::from(range.end()))
+            .context("Bootstrap Stdlib import offset does not fit usize")?;
+        replacements.push((start, end, format!("{prefix}.nexa\"")));
+    }
+
+    let mut projected = String::with_capacity(source.len());
+    let mut cursor = 0;
+    for (start, end, replacement) in replacements {
+        projected.push_str(&source[cursor..start]);
+        projected.push_str(&replacement);
+        cursor = end;
+    }
+    projected.push_str(&source[cursor..]);
+    Ok(projected)
+}
+
+fn project_bootstrap_stdlib_for_stage0(root: &Path, destination: &Path) -> Result<PathBuf> {
+    let manifest_path = root.join("bootstrap/stdlib/bootstrap-stdlib.json");
+    let manifest_text = std::fs::read_to_string(&manifest_path)
+        .with_context(|| format!("failed to read {}", manifest_path.display()))?;
+    let manifest: BootstrapStdlibSources = serde_json::from_str(&manifest_text)
+        .with_context(|| format!("invalid JSON in {}", manifest_path.display()))?;
+    ensure!(
+        !manifest.source_files.is_empty(),
+        "Bootstrap Stdlib sourceFiles must not be empty"
+    );
+    ensure!(
+        manifest
+            .source_files
+            .windows(2)
+            .all(|pair| pair[0] < pair[1]),
+        "Bootstrap Stdlib sourceFiles must be unique and sorted"
+    );
+    ensure!(
+        manifest.source_files.contains(&manifest.entry),
+        "Bootstrap Stdlib entry must be present in sourceFiles"
+    );
+
+    std::fs::create_dir_all(destination)
+        .with_context(|| format!("failed to create {}", destination.display()))?;
+    for relative in &manifest.source_files {
+        let projected_relative = stage0_source_path(relative)?;
+        let source_path = root.join("bootstrap/stdlib").join(relative);
+        let metadata = std::fs::symlink_metadata(&source_path)
+            .with_context(|| format!("failed to inspect {}", source_path.display()))?;
+        ensure!(
+            metadata.file_type().is_file(),
+            "{} must be a regular file",
+            source_path.display()
+        );
+        let source = std::fs::read_to_string(&source_path)
+            .with_context(|| format!("failed to read {}", source_path.display()))?;
+        let target_path = destination.join(projected_relative);
+        ensure!(
+            !target_path.exists(),
+            "Stage 0 projection target already exists at {}",
+            target_path.display()
+        );
+        let parent = target_path
+            .parent()
+            .context("Stage 0 projection target must have a parent")?;
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+        std::fs::write(&target_path, project_source_for_stage0(&source)?)
+            .with_context(|| format!("failed to write {}", target_path.display()))?;
+    }
+
+    Ok(destination.join(stage0_source_path(&manifest.entry)?))
+}
+
+fn stage0_source_path(relative: &str) -> Result<PathBuf> {
+    ensure!(
+        relative.starts_with("src/")
+            && !relative.contains(['\\', '\0'])
+            && relative
+                .split('/')
+                .all(|component| !component.is_empty() && component != "." && component != ".."),
+        "Bootstrap Stdlib source path must be normalized below src/"
+    );
+    let prefix = relative
+        .strip_suffix(".ft")
+        .context("Bootstrap Stdlib source path must end in `.ft`")?;
+    Ok(PathBuf::from(format!("{prefix}.nexa")))
+}
+
+fn verify_stage0_bootstrap_stdlib(binary: &Path, root: &Path, worktree: &Path) -> Result<()> {
+    let projection = worktree.join("stage0-bootstrap-stdlib");
+    let entry = project_bootstrap_stdlib_for_stage0(root, &projection)?;
+    let output = Command::new(binary)
+        .arg("check")
+        .arg(&entry)
+        .current_dir(worktree)
+        .stdin(Stdio::null())
+        .output()
+        .with_context(|| {
+            format!(
+                "failed to check Bootstrap Stdlib with rebuilt Stage 0 at {}",
+                binary.display()
+            )
+        })?;
+    ensure!(
+        output.status.success(),
+        "rebuilt Stage 0 rejected Bootstrap Stdlib: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    ensure!(
+        output.stdout == b"ok\n",
+        "rebuilt Stage 0 Bootstrap Stdlib check wrote unexpected stdout: {:?}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    ensure!(
+        output.stderr.is_empty(),
+        "rebuilt Stage 0 Bootstrap Stdlib check wrote stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
 }
 
 fn run_status(command: &mut Command, description: &str) -> Result<()> {
@@ -597,16 +756,20 @@ fn valid_lower_hex(value: &str, length: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::path::Path;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::{
-        canonical_fixture_bytes, parse_manifest, stage0_target_dir, verify_bootstrap_inputs,
-        verify_digest, verify_source, workspace_root,
+        canonical_fixture_bytes, parse_manifest, project_bootstrap_stdlib_for_stage0,
+        project_source_for_stage0, stage0_target_dir, verify_bootstrap_inputs, verify_digest,
+        verify_source, workspace_root,
     };
 
     const ACCEPTED: &str = include_str!("../../bootstrap/stage0/bootstrap-manifest.json");
     const PUBLIC_NIR: &str =
         include_str!("../../bootstrap/tests/rejected/public-nir-artifact.json");
+    static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 
     #[test]
     fn checked_in_stage0_manifest_defines_the_internal_bootstrap_boundary(
@@ -625,18 +788,18 @@ mod tests {
         assert_eq!(manifest.bootstrap_stdlib.profile, "futao-bootstrap-v1");
         assert_eq!(
             manifest.bootstrap_stdlib.tree_digest,
-            "sha256:3975bf631766ee20db013310459229d99909d8ff39f540044ff0691b2c33789c"
+            "sha256:d302a92827072fdb6c9ef85ffc53cca9472f9dfe69f604132d5acd50a6f92da2"
         );
         assert_eq!(
             manifest.bootstrap_stdlib.build_digest,
-            "sha256:cc65fcedbd22067b125dc26379493db00a80d28fb36e8a2f76492169dccf43fd"
+            "sha256:03c183622af98e72f667443a1995f96f0314ab8cf9c7e1eaf70dbe114175538b"
         );
         assert_eq!(manifest.bootstrap_output.kind, "internal-nir");
         assert_eq!(manifest.bootstrap_output.consumer, "rust-verifier-backend");
         assert_eq!(manifest.bootstrap_output.artifact_magic, "FUTAO-NIR");
         assert_eq!(manifest.bootstrap_output.nir_schema_version, 1);
         assert_eq!(manifest.bootstrap_output.verifier_crate, "nexa_nir");
-        assert_eq!(manifest.bootstrap_output.verifier_version, "0.0.5");
+        assert_eq!(manifest.bootstrap_output.verifier_version, "0.0.6");
         assert_eq!(
             manifest.bootstrap_output.target_profile,
             "target-neutral-v1"
@@ -736,6 +899,42 @@ mod tests {
     }
 
     #[test]
+    fn stage0_projection_rewrites_only_ft_import_specifiers(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"import { Value } from "./value.ft";
+
+function main(): Unit {
+  const fixtureName = "value.ft";
+}
+"#;
+
+        assert_eq!(
+            project_source_for_stage0(source)?,
+            r#"import { Value } from "./value.nexa";
+
+function main(): Unit {
+  const fixtureName = "value.ft";
+}
+"#
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stage0_projection_uses_the_checked_in_stdlib_manifest(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let directory = TestDirectory::new()?;
+
+        let entry = project_bootstrap_stdlib_for_stage0(&workspace_root(), directory.path())?;
+
+        assert_eq!(entry, directory.path().join("src/bootstrap.nexa"));
+        assert!(directory.path().join("src/array.nexa").is_file());
+        assert!(!directory.path().join("src/array.ft").exists());
+        assert!(fs::read_to_string(entry)?.contains("from \"./array.nexa\""));
+        Ok(())
+    }
+
+    #[test]
     fn checked_in_stage0_provenance_matches_the_pinned_git_objects(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let manifest = parse_manifest(ACCEPTED)?;
@@ -743,5 +942,31 @@ mod tests {
         verify_source(&manifest, &workspace_root())?;
 
         Ok(())
+    }
+
+    struct TestDirectory {
+        path: std::path::PathBuf,
+    }
+
+    impl TestDirectory {
+        fn new() -> Result<Self, std::io::Error> {
+            let sequence = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "nexa-bootstrap-test-{}-{sequence}",
+                std::process::id()
+            ));
+            fs::create_dir(&path)?;
+            Ok(Self { path })
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
     }
 }

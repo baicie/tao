@@ -202,7 +202,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "nexa_compiler"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "nexa_diagnostics",
  "nexa_hir",
@@ -221,14 +221,14 @@ dependencies = [
 
 [[package]]
 name = "nexa_diagnostics"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "nexa_span",
 ]
 
 [[package]]
 name = "nexa_hir"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "nexa_diagnostics",
  "nexa_parser",
@@ -238,7 +238,7 @@ dependencies = [
 
 [[package]]
 name = "nexa_mir"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "nexa_hir",
  "nexa_parser",
@@ -247,7 +247,7 @@ dependencies = [
 
 [[package]]
 name = "nexa_nir"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "serde",
  "serde_json",
@@ -257,7 +257,7 @@ dependencies = [
 
 [[package]]
 name = "nexa_parser"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "nexa_diagnostics",
  "nexa_span",
@@ -267,7 +267,7 @@ dependencies = [
 
 [[package]]
 name = "nexa_source"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "nexa_span",
  "thiserror",
@@ -275,18 +275,18 @@ dependencies = [
 
 [[package]]
 name = "nexa_span"
-version = "0.0.5"
+version = "0.0.6"
 
 [[package]]
 name = "nexa_storage"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "thiserror",
 ]
 
 [[package]]
 name = "nexa_syntax"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "nexa_span",
  "rowan",
@@ -294,7 +294,7 @@ dependencies = [
 
 [[package]]
 name = "nexac"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "anyhow",
  "clap",
@@ -496,14 +496,17 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "anyhow",
  "clap",
  "nexa_compiler",
  "nexa_diagnostics",
  "nexa_nir",
+ "nexa_parser",
  "nexa_source",
+ "nexa_span",
+ "nexa_syntax",
  "serde",
  "serde_json",
  "sha2",

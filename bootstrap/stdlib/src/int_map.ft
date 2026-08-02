@@ -4,36 +4,56 @@ export type IntMap<V> =
   | Empty()
   | Entries(keys: Int[], values: V[]);
 
-function findIntKey(keys: Int[], key: Int, index: Int): Int {
-  if (index >= keys.length) {
+function findIntKey(keys: Int[], key: Int, start: Int, end: Int): Int {
+  if (start >= end) {
     return -1;
   }
-  if (keys[index] === key) {
-    return index;
+  if (end - start === 1) {
+    if (keys[start] === key) {
+      return start;
+    }
+    return -1;
   }
-  return findIntKey(keys, key, index + 1);
+  const middle = start + (end - start) / 2;
+  const left = findIntKey(keys, key, start, middle);
+  if (left >= 0) {
+    return left;
+  }
+  return findIntKey(keys, key, middle, end);
 }
 
-function replaceValue<V>(values: V[], target: Int, index: Int, value: V): V[] {
-  if (index >= values.length) {
+function replaceValue<V>(
+  values: V[],
+  target: Int,
+  start: Int,
+  end: Int,
+  value: V
+): V[] {
+  if (start >= end) {
     return [];
   }
-  if (index === target) {
-    return [value].concat(replaceValue(values, target, index + 1, value));
+  if (end - start === 1) {
+    if (start === target) {
+      return [value];
+    }
+    return [values[start]];
   }
-  return [values[index]].concat(replaceValue(values, target, index + 1, value));
+  const middle = start + (end - start) / 2;
+  return replaceValue(values, target, start, middle, value).concat(
+    replaceValue(values, target, middle, end, value)
+  );
 }
 
 function insertEntry<V>(keys: Int[], values: V[], key: Int, value: V): IntMap<V> {
-  const index = findIntKey(keys, key, 0);
+  const index = findIntKey(keys, key, 0, keys.length);
   if (index < 0) {
     return IntMap.Entries(keys.append(key), values.append(value));
   }
-  return IntMap.Entries(keys, replaceValue(values, index, 0, value));
+  return IntMap.Entries(keys, replaceValue(values, index, 0, values.length, value));
 }
 
 function getEntry<V>(keys: Int[], values: V[], key: Int): Option<V> {
-  const index = findIntKey(keys, key, 0);
+  const index = findIntKey(keys, key, 0, keys.length);
   if (index < 0) {
     return Option.None();
   }
@@ -57,7 +77,7 @@ export function intMapGet<V>(map: IntMap<V>, key: Int): Option<V> {
 export function intMapContains<V>(map: IntMap<V>, key: Int): Bool {
   return match (map) {
     case IntMap.Empty() => false;
-    case IntMap.Entries(keys, values) => findIntKey(keys, key, 0) >= 0;
+    case IntMap.Entries(keys, values) => findIntKey(keys, key, 0, keys.length) >= 0;
   };
 }
 

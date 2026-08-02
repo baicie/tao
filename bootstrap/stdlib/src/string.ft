@@ -12,15 +12,19 @@ export function push(builder: StringBuilder, value: String): StringBuilder {
   return { parts: builder.parts.append(value) };
 }
 
-function finishFrom(parts: String[], index: Int, output: String): String {
-  if (index >= parts.length) {
-    return output;
+function finishRange(parts: String[], start: Int, end: Int): String {
+  if (start >= end) {
+    return "";
   }
-  return finishFrom(parts, index + 1, output + parts[index]);
+  if (end - start === 1) {
+    return parts[start];
+  }
+  const middle = start + (end - start) / 2;
+  return finishRange(parts, start, middle) + finishRange(parts, middle, end);
 }
 
 export function finish(builder: StringBuilder): String {
-  return finishFrom(builder.parts, 0, "");
+  return finishRange(builder.parts, 0, builder.parts.length);
 }
 
 export type SourceText = {

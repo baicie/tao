@@ -2,14 +2,13 @@ export type BitSet = {
   values: Int[];
 };
 
-function containsBit(values: Int[], value: Int, index: Int): Bool {
-  if (index >= values.length) {
-    return false;
+function containsBit(values: Int[], value: Int): Bool {
+  for (const candidate of values) {
+    if (candidate === value) {
+      return true;
+    }
   }
-  if (values[index] === value) {
-    return true;
-  }
-  return containsBit(values, value, index + 1);
+  return false;
 }
 
 export function bitSet(): BitSet {
@@ -17,7 +16,7 @@ export function bitSet(): BitSet {
 }
 
 export function bitSetInsert(set: BitSet, value: Int): BitSet {
-  if (value < 0 || containsBit(set.values, value, 0)) {
+  if (value < 0 || containsBit(set.values, value)) {
     return set;
   }
   return { values: set.values.append(value) };
@@ -27,7 +26,7 @@ export function bitSetContains(set: BitSet, value: Int): Bool {
   if (value < 0) {
     return false;
   }
-  return containsBit(set.values, value, 0);
+  return containsBit(set.values, value);
 }
 
 export function bitSetValues(set: BitSet): Int[] {
