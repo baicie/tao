@@ -3,6 +3,7 @@
 mod bootstrap;
 mod bootstrap_profile;
 mod conformance;
+mod lexer_differential;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -58,6 +59,8 @@ enum Task {
     NirArtifact,
     /// Validate Futao Bootstrap Profile v1 and stdlib version transitions.
     BootstrapProfile,
+    /// Compare the Rust and Futao lexers over the checked-in corpus.
+    LexerDifferential,
 }
 
 fn main() -> Result<()> {
@@ -91,6 +94,7 @@ fn main() -> Result<()> {
         }
         Task::NirArtifact => bootstrap::verify_nir_artifacts()?,
         Task::BootstrapProfile => bootstrap_profile::run()?,
+        Task::LexerDifferential => lexer_differential::run()?,
     }
 
     Ok(())
@@ -102,7 +106,8 @@ fn check() -> Result<()> {
     test()?;
     doc()?;
     bootstrap::run(&bootstrap::default_manifest_path(), false)?;
-    bootstrap_profile::run()
+    bootstrap_profile::run()?;
+    lexer_differential::run()
 }
 
 fn lint() -> Result<()> {

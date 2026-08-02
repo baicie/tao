@@ -1,0 +1,1 @@
+"bad\q" "zero\0" "multiple\x\y" "valid-then-bad\n\u"

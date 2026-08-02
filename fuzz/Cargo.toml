@@ -10,12 +10,20 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+nexa_compiler = { path = "../crates/nexa_compiler" }
 nexa_parser = { path = "../crates/nexa_parser" }
 nexa_span = { path = "../crates/nexa_span" }
 
 [[bin]]
 name = "parser"
 path = "fuzz_targets/parser.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lexer"
+path = "fuzz_targets/lexer.rs"
 test = false
 doc = false
 bench = false
