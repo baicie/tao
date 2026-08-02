@@ -19,7 +19,7 @@ and the completed integration evidence is retained in the
 
 The language compatibility version and compiler package version are separate.
 The complete Language 1.0 reference core currently ships as the self-use
-`nexac 0.0.5`; Rust crate APIs and distribution remain intentionally unstable.
+`nexac 0.0.6`; Rust crate APIs and distribution remain intentionally unstable.
 
 ## Layout
 
@@ -64,6 +64,7 @@ nexa_storage -> safe Host-backed bootstrap ownership/storage contracts
 ```bash
 cargo xtask check
 cargo xtask bootstrap-contract
+cargo xtask bootstrap-profile
 cargo xtask storage-kernel
 cargo xtask nir-artifact
 cargo run -p nexac -- check examples/practical-core/main.nexa
@@ -81,6 +82,9 @@ documented in
 The `0.0.5` typed NIR, verifier, layout, and private artifact boundary is
 documented in
 [docs/implementation/nir-artifact-0.0.5.md](docs/implementation/nir-artifact-0.0.5.md).
+The `0.0.6` pure compiler profile, deterministic Bootstrap Stdlib, and pinned
+Stage 0 compatibility proof are documented in
+[docs/implementation/bootstrap-profile-stdlib-0.0.6.md](docs/implementation/bootstrap-profile-stdlib-0.0.6.md).
 
 Install the self-use CLI from a local checkout with:
 
@@ -93,11 +97,11 @@ Version tags publish checked Linux, macOS, and Windows archives with SHA-256
 files through [GitHub Releases](https://github.com/baicie/nexa/releases). The
 compiler remains a prerelease and is not published to crates.io.
 
-After `v0.0.5` is published, the same version can be installed reproducibly
+After `v0.0.6` is published, the same version can be installed reproducibly
 from its tag:
 
 ```bash
-cargo install --locked --git https://github.com/baicie/nexa --tag v0.0.5 nexac
+cargo install --locked --git https://github.com/baicie/nexa --tag v0.0.6 nexac
 ```
 
 Nexa intentionally borrows familiar TypeScript surface syntax without

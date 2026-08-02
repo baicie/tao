@@ -74,6 +74,25 @@ Same-namespace local/import collisions use `E2002`. Malformed import grammar
 uses `E1001`. Entry-source failures that occur before a source span exists are
 host-level compiler errors rather than `E4001` diagnostics.
 
+## Bootstrap Profile
+
+These diagnostics are emitted only when compiler options select
+`futao-bootstrap-v1`. The default `application` profile preserves the Language
+1.0 behavior above.
+
+| Code | Condition | Primary label | Secondary labels |
+|---|---|---|---|
+| `E6201` | mutable `let` binding or assignment in compiler-core source | complete declaration or assignment | none |
+| `E6202` | `while`, `break`, or `continue` in compiler-core source | complete loop/control statement | none |
+| `E6203` | ambient `print` output from compiler-core source | resolved builtin name | none |
+
+Bootstrap source identities that do not end in `.ft` fail before a stable
+source span exists and are reported as host-level compiler input errors. The
+machine-readable profile also denies filesystem, network, process, clock,
+environment, random, thread, async, UI, dynamic-loading, plugin, and reflection
+capabilities; profile lint must grow before any such capability enters the
+language surface.
+
 ## Normative Runtime Failures
 
 Runtime failures occur only after static checking succeeds. They have a source

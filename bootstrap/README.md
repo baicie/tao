@@ -22,6 +22,13 @@ Rebuild Stage 0 from a temporary detached worktree and smoke-test its version:
 cargo xtask bootstrap-contract --rebuild-stage0
 ```
 
+The fixed `nexac 0.0.1` predates the Futao rename and accepts only `.nexa`
+imports. The rebuild gate therefore creates a temporary compatibility
+projection using the current lossless parser: only import-specifier suffixes
+are rewritten from `.ft` to `.nexa`, ordinary string contents are preserved,
+and the rebuilt compiler must check the complete projected stdlib. The checked
+in `.ft` files and their tree digest remain the source of truth.
+
 The contract deliberately separates two artifact classes:
 
 * Bootstrap Stage output is target-neutral internal NIR consumed only by the

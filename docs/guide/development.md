@@ -10,6 +10,7 @@ cargo xtask test
 cargo xtask doc
 cargo xtask conformance
 cargo xtask bootstrap-contract
+cargo xtask bootstrap-profile
 cargo xtask nir-artifact
 cargo xtask fuzz-smoke
 cargo xtask perf
@@ -17,8 +18,8 @@ cargo xtask release-check
 cargo xtask security
 ```
 
-`cargo xtask check` runs formatting, clippy, tests, Rust docs, and the Stage 0
-bootstrap contract.
+`cargo xtask check` runs formatting, clippy, tests, Rust docs, the Stage 0
+bootstrap contract, and the Bootstrap Profile/Stdlib gate.
 `conformance` runs the versioned language corpus. `fuzz-smoke` replays stable
 parser seeds and checks the fuzz target on Rust 1.80. `perf` runs release-mode
 reference workloads without a machine-independent threshold. `release-check`
@@ -27,7 +28,12 @@ effects.
 
 `bootstrap-contract` validates the pinned Stage 0 source and internal NIR
 boundary. Add `--rebuild-stage0` to recreate and smoke-test `nexac 0.0.1` with
-Rust 1.80 from its fixed source commit.
+Rust 1.80 from its fixed source commit, project `.ft` imports to the historical
+`.nexa` spelling, and check the complete Bootstrap Stdlib with that compiler.
+`bootstrap-profile` validates the frozen capability manifest, deterministic
+stdlib source/build digests, behavior fixtures, and forward-only version
+transition. Profile-only diagnostic acceptance/rejection tests run in the Rust
+test phase of `cargo xtask check`.
 `nir-artifact` validates the exact private schema against one canonical
 accepted artifact and mutation, unknown-field, and unsupported-schema
 rejections.

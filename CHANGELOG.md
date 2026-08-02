@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.0.6 - 2026-08-02
+
+- Freeze `futao-bootstrap-v1` as a `.ft`-only pure compiler profile with stable
+  `E6201` through `E6203` diagnostics for mutation, unbounded loop control, and
+  ambient output.
+- Add Bootstrap Stdlib `0.0.1` with pure compiler data types, arrays, text,
+  deterministic persistent maps/sets/bit sets, and generation-checked arenas.
+- Keep core stdlib operations below the former linear-recursion failure point,
+  with an 80-element reference-interpreter regression workload.
+- Bind profile, stdlib source tree, and canonical build digests into the Stage
+  0 manifest and canonical compiler dumps, with forward upgrade and rollback
+  rejection fixtures.
+- Require the profile gate in local/CI checks and prove the complete stdlib is
+  accepted by rebuilt `nexac 0.0.1` through a parser-guided `.ft` compatibility
+  projection.
+
 ## 0.0.5 - 2026-08-02
 
 - Add typed target-neutral NIR construction with explicit functions, basic
