@@ -6,7 +6,7 @@ Git archive and `Cargo.lock` SHA-256 digests, Rust 1.80 toolchain, and locked
 release build recipe.
 
 Milestone `0.0.8` binds Futao bootstrap compiler source version `0.0.2`. Its
-manifest records all eight lexer/parser source files, the source-tree digest,
+manifest records all nine lexer/parser/storage source files, the source-tree digest,
 both snapshot schemas, the 11-case lexer and 21-case parser differential
 corpora, implemented `lexer` and `parser` phases, and the Rust-reference
 default-path boundary. The top-level contract repeats these values and rejects
@@ -15,7 +15,7 @@ any mismatch.
 The compiler source tree digest for this milestone is:
 
 ```text
-sha256:fa0073490738a48efd269577a2598a9ad4d8cb032cae2b96c2879158e10f81dd
+sha256:fc654f1177071faabea6fec294ff7b768391b551102555611f6679d6e301c51b
 ```
 
 Validate the manifest, referenced bootstrap inputs, Git objects, and digests:

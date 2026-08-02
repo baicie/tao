@@ -1,4 +1,5 @@
 import { lex, LexerInput, LexerToken } from "./lexer.ft";
+import { Sequence, append, toArray } from "./sequence.ft";
 
 export type ParserCstEvent =
   | StartNode(kind: Int, offset: Int)
@@ -44,11 +45,11 @@ type ParserState = {
   tokens: LexerToken[];
   position: Int;
   pendingSplitEq: Bool;
-  events: ParserCstEvent[];
+  events: Sequence<ParserCstEvent>;
   deferredStarts: DeferredStartGroup[];
   openNodes: OpenNode[];
-  recoveryEvents: ParserRecoveryEvent[];
-  diagnostics: ParserDiagnostic[];
+  recoveryEvents: Sequence<ParserRecoveryEvent>;
+  diagnostics: Sequence<ParserDiagnostic>;
 };
 
 type ParseAttempt = {
@@ -422,14 +423,15 @@ function materializeEventRange(
 }
 
 function materializeEvents(state: ParserState): ParserCstEvent[] {
+  const events = toArray(state.events);
   if (state.deferredStarts.length === 0) {
-    return state.events;
+    return events;
   }
   return materializeEventRange(
-    state.events,
+    events,
     state.deferredStarts,
     0,
-    state.events.length,
+    events.length,
     0,
     state.deferredStarts.length
   );
@@ -450,7 +452,7 @@ function withPosition(
   state: ParserState,
   position: Int,
   pendingSplitEq: Bool,
-  events: ParserCstEvent[]
+  events: Sequence<ParserCstEvent>
 ): ParserState {
   return {
     input: state.input,
@@ -507,7 +509,7 @@ function startNode(state: ParserState, kind: Int): ParserState {
     tokens: state.tokens,
     position: state.position,
     pendingSplitEq: state.pendingSplitEq,
-    events: state.events.append(ParserCstEvent.StartNode(kind, offset)),
+    events: append(state.events, ParserCstEvent.StartNode(kind, offset)),
     deferredStarts: state.deferredStarts,
     openNodes: state.openNodes.append({ kind: kind, start: offset }),
     recoveryEvents: state.recoveryEvents,
@@ -520,29 +522,6 @@ function startNodeAt(
   point: Checkpoint,
   kind: Int
 ): ParserState {
-  const event = ParserCstEvent.StartNode(kind, point.offset);
-  if (
-    state.deferredStarts.length === 0 &&
-    state.events.length - point.eventIndex <= 16
-  ) {
-    const prefix = eventRange(state.events, 0, point.eventIndex);
-    const suffix = eventRange(
-      state.events,
-      point.eventIndex,
-      state.events.length
-    );
-    return {
-      input: state.input,
-      tokens: state.tokens,
-      position: state.position,
-      pendingSplitEq: state.pendingSplitEq,
-      events: prefix.append(event).concat(suffix),
-      deferredStarts: state.deferredStarts,
-      openNodes: state.openNodes.append({ kind: kind, start: point.offset }),
-      recoveryEvents: state.recoveryEvents,
-      diagnostics: state.diagnostics
-    };
-  }
   return {
     input: state.input,
     tokens: state.tokens,
@@ -552,7 +531,7 @@ function startNodeAt(
     deferredStarts: addDeferredStart(
       state.deferredStarts,
       point.eventIndex,
-      event
+      ParserCstEvent.StartNode(kind, point.offset)
     ),
     openNodes: state.openNodes.append({ kind: kind, start: point.offset }),
     recoveryEvents: state.recoveryEvents,
@@ -570,10 +549,13 @@ function finishNode(state: ParserState): ParserState {
       tokens: state.tokens,
       position: state.position,
       pendingSplitEq: state.pendingSplitEq,
-      events: state.events.append(ParserCstEvent.FinishNode(offset)),
+      events: append(state.events, ParserCstEvent.FinishNode(offset)),
       deferredStarts: state.deferredStarts,
       openNodes: remaining,
-      recoveryEvents: state.recoveryEvents.append({ start: open.start, end: offset }),
+      recoveryEvents: append(
+        state.recoveryEvents,
+        { start: open.start, end: offset }
+      ),
       diagnostics: state.diagnostics
     };
   }
@@ -582,7 +564,7 @@ function finishNode(state: ParserState): ParserState {
     tokens: state.tokens,
     position: state.position,
     pendingSplitEq: state.pendingSplitEq,
-    events: state.events.append(ParserCstEvent.FinishNode(offset)),
+    events: append(state.events, ParserCstEvent.FinishNode(offset)),
     deferredStarts: state.deferredStarts,
     openNodes: remaining,
     recoveryEvents: state.recoveryEvents,
@@ -597,23 +579,38 @@ function bump(state: ParserState): ParserState {
       state,
       state.position + 1,
       false,
-      state.events.append(ParserCstEvent.Token(10, token.start + 1, token.end))
+      append(state.events, ParserCstEvent.Token(10, token.start + 1, token.end))
     );
   }
   return withPosition(
     state,
     state.position + 1,
     false,
-    state.events.append(ParserCstEvent.Token(token.kind, token.start, token.end))
+    append(state.events, ParserCstEvent.Token(token.kind, token.start, token.end))
   );
 }
 
 function skipTrivia(state: ParserState): ParserState {
+  const nearby = skipTriviaSmall(state, 4);
+  if (nearby.value) {
+    return nearby.state;
+  }
   return skipTriviaRange(
-    state,
-    state.position,
-    state.tokens.length
+    nearby.state,
+    nearby.state.position,
+    nearby.state.tokens.length
   );
+}
+
+function skipTriviaSmall(state: ParserState, remaining: Int): StateFlag {
+  if (remaining === 0) {
+    return { state: state, value: false };
+  }
+  const kind = currentKind(state);
+  if (!(kind === 2 || kind === 3)) {
+    return { state: state, value: true };
+  }
+  return skipTriviaSmall(bump(state), remaining - 1);
 }
 
 function skipTriviaRange(
@@ -650,7 +647,7 @@ function errorAtCurrent(state: ParserState): ParserState {
     deferredStarts: state.deferredStarts,
     openNodes: state.openNodes,
     recoveryEvents: state.recoveryEvents,
-    diagnostics: state.diagnostics.append(diagnostic)
+    diagnostics: append(state.diagnostics, diagnostic)
   };
 }
 
@@ -674,7 +671,7 @@ function bumpTypeListClose(state: ParserState): ParserState {
       state,
       state.position,
       true,
-      state.events.append(ParserCstEvent.Token(37, token.start, token.start + 1))
+      append(state.events, ParserCstEvent.Token(37, token.start, token.start + 1))
     );
   }
   return bump(state);
@@ -767,7 +764,16 @@ function nthNonTriviaCursorFrom(
     kind: -1,
     finished: false
   };
-  const scanned = nthNonTriviaRange(tokens, initial, index, tokens.length);
+  const nearby = nthNonTriviaBatch(tokens, initial, 8);
+  if (nearby.finished) {
+    return nearby;
+  }
+  const scanned = nthNonTriviaRange(
+    tokens,
+    nearby,
+    nearby.index,
+    tokens.length
+  );
   if (scanned.finished) {
     return scanned;
   }
@@ -816,6 +822,45 @@ function nthNonTriviaStep(
   };
 }
 
+function nthNonTriviaBatch(
+  tokens: LexerToken[],
+  scan: LookaheadChunk,
+  remaining: Int
+): LookaheadChunk {
+  if (scan.finished || remaining === 0) {
+    return scan;
+  }
+  const one = nthNonTriviaStep(tokens, scan);
+  if (one.finished || remaining === 1) {
+    return one;
+  }
+  const two = nthNonTriviaStep(tokens, one);
+  if (two.finished || remaining === 2) {
+    return two;
+  }
+  const three = nthNonTriviaStep(tokens, two);
+  if (three.finished || remaining === 3) {
+    return three;
+  }
+  const four = nthNonTriviaStep(tokens, three);
+  if (four.finished || remaining === 4) {
+    return four;
+  }
+  const five = nthNonTriviaStep(tokens, four);
+  if (five.finished || remaining === 5) {
+    return five;
+  }
+  const six = nthNonTriviaStep(tokens, five);
+  if (six.finished || remaining === 6) {
+    return six;
+  }
+  const seven = nthNonTriviaStep(tokens, six);
+  if (seven.finished || remaining === 7) {
+    return seven;
+  }
+  return nthNonTriviaStep(tokens, seven);
+}
+
 function nthNonTriviaRange(
   tokens: LexerToken[],
   scan: LookaheadChunk,
@@ -825,8 +870,8 @@ function nthNonTriviaRange(
   if (scan.finished || start >= end) {
     return scan;
   }
-  if (end - start === 1) {
-    return nthNonTriviaStep(tokens, scan);
+  if (end - start <= 8) {
+    return nthNonTriviaBatch(tokens, scan, end - start);
   }
   const middle = start + (end - start) / 2;
   const left = nthNonTriviaRange(tokens, scan, start, middle);
@@ -924,7 +969,16 @@ function scanArrow(state: ParserState, index: Int, depth: Int): Bool {
     found: false,
     finished: false
   };
-  return scanArrowRange(state, initial, index, state.tokens.length).found;
+  const nearby = scanArrowBatch(state, initial, 16);
+  if (nearby.finished) {
+    return nearby.found;
+  }
+  return scanArrowRange(
+    state,
+    nearby,
+    nearby.index,
+    state.tokens.length
+  ).found;
 }
 
 function scanArrowStep(
@@ -981,6 +1035,77 @@ function scanArrowStep(
   };
 }
 
+function scanArrowBatch(
+  state: ParserState,
+  scan: ArrowScanChunk,
+  remaining: Int
+): ArrowScanChunk {
+  if (scan.finished || remaining === 0) {
+    return scan;
+  }
+  const one = scanArrowStep(state, scan);
+  if (one.finished || remaining === 1) {
+    return one;
+  }
+  const two = scanArrowStep(state, one);
+  if (two.finished || remaining === 2) {
+    return two;
+  }
+  const three = scanArrowStep(state, two);
+  if (three.finished || remaining === 3) {
+    return three;
+  }
+  const four = scanArrowStep(state, three);
+  if (four.finished || remaining === 4) {
+    return four;
+  }
+  const five = scanArrowStep(state, four);
+  if (five.finished || remaining === 5) {
+    return five;
+  }
+  const six = scanArrowStep(state, five);
+  if (six.finished || remaining === 6) {
+    return six;
+  }
+  const seven = scanArrowStep(state, six);
+  if (seven.finished || remaining === 7) {
+    return seven;
+  }
+  const eight = scanArrowStep(state, seven);
+  if (eight.finished || remaining === 8) {
+    return eight;
+  }
+  const nine = scanArrowStep(state, eight);
+  if (nine.finished || remaining === 9) {
+    return nine;
+  }
+  const ten = scanArrowStep(state, nine);
+  if (ten.finished || remaining === 10) {
+    return ten;
+  }
+  const eleven = scanArrowStep(state, ten);
+  if (eleven.finished || remaining === 11) {
+    return eleven;
+  }
+  const twelve = scanArrowStep(state, eleven);
+  if (twelve.finished || remaining === 12) {
+    return twelve;
+  }
+  const thirteen = scanArrowStep(state, twelve);
+  if (thirteen.finished || remaining === 13) {
+    return thirteen;
+  }
+  const fourteen = scanArrowStep(state, thirteen);
+  if (fourteen.finished || remaining === 14) {
+    return fourteen;
+  }
+  const fifteen = scanArrowStep(state, fourteen);
+  if (fifteen.finished || remaining === 15) {
+    return fifteen;
+  }
+  return scanArrowStep(state, fifteen);
+}
+
 function scanArrowRange(
   state: ParserState,
   scan: ArrowScanChunk,
@@ -990,8 +1115,8 @@ function scanArrowRange(
   if (scan.finished || start >= end) {
     return scan;
   }
-  if (end - start === 1) {
-    return scanArrowStep(state, scan);
+  if (end - start <= 16) {
+    return scanArrowBatch(state, scan, end - start);
   }
   const middle = start + (end - start) / 2;
   const left = scanArrowRange(state, scan, start, middle);
@@ -1175,38 +1300,113 @@ function binaryPrecedence(state: ParserState): Int {
 }
 
 function parseSourceItems(state: ParserState): ParserState {
-  const chunk = parseSourceItemsSmall(state, 16);
-  if (chunk.value) {
-    return chunk.state;
-  }
-  return parseSourceItems(chunk.state);
+  const initial: StateFlag = { state: state, value: false };
+  const remainingTokens = state.tokens.length - state.position + 1;
+  return runSourceItemsRange(initial, 0, remainingTokens).state;
 }
 
-function parseSourceItemsSmall(
-  state: ParserState,
-  remaining: Int
+function runSourceItemsRange(
+  items: StateFlag,
+  start: Int,
+  end: Int
 ): StateFlag {
+  if (items.value || start >= end) {
+    return items;
+  }
+  if (end - start <= 16) {
+    return runSourceItemsBatch(items, end - start);
+  }
+  const middle = start + (end - start) / 2;
+  const left = runSourceItemsRange(items, start, middle);
+  return runSourceItemsRange(left, middle, end);
+}
+
+function runSourceItemsBatch(items: StateFlag, remaining: Int): StateFlag {
+  if (items.value || remaining <= 0) {
+    return items;
+  }
+  const one = stepSourceItem(items.state);
+  if (one.value || remaining === 1) {
+    return one;
+  }
+  const two = stepSourceItem(one.state);
+  if (two.value || remaining === 2) {
+    return two;
+  }
+  const three = stepSourceItem(two.state);
+  if (three.value || remaining === 3) {
+    return three;
+  }
+  const four = stepSourceItem(three.state);
+  if (four.value || remaining === 4) {
+    return four;
+  }
+  const five = stepSourceItem(four.state);
+  if (five.value || remaining === 5) {
+    return five;
+  }
+  const six = stepSourceItem(five.state);
+  if (six.value || remaining === 6) {
+    return six;
+  }
+  const seven = stepSourceItem(six.state);
+  if (seven.value || remaining === 7) {
+    return seven;
+  }
+  const eight = stepSourceItem(seven.state);
+  if (eight.value || remaining === 8) {
+    return eight;
+  }
+  const nine = stepSourceItem(eight.state);
+  if (nine.value || remaining === 9) {
+    return nine;
+  }
+  const ten = stepSourceItem(nine.state);
+  if (ten.value || remaining === 10) {
+    return ten;
+  }
+  const eleven = stepSourceItem(ten.state);
+  if (eleven.value || remaining === 11) {
+    return eleven;
+  }
+  const twelve = stepSourceItem(eleven.state);
+  if (twelve.value || remaining === 12) {
+    return twelve;
+  }
+  const thirteen = stepSourceItem(twelve.state);
+  if (thirteen.value || remaining === 13) {
+    return thirteen;
+  }
+  const fourteen = stepSourceItem(thirteen.state);
+  if (fourteen.value || remaining === 14) {
+    return fourteen;
+  }
+  const fifteen = stepSourceItem(fourteen.state);
+  if (fifteen.value || remaining === 15) {
+    return fifteen;
+  }
+  return stepSourceItem(fifteen.state);
+}
+
+function stepSourceItem(state: ParserState): StateFlag {
   const skipped = skipTrivia(state);
   const kind = currentKind(skipped);
   if (kind === -1) {
     return { state: skipped, value: true };
   }
-  if (remaining === 0) {
-    return { state: skipped, value: false };
-  }
   if (kind === 92) {
-    return parseSourceItemsSmall(parseImportDeclaration(skipped), remaining - 1);
+    return { state: parseImportDeclaration(skipped), value: false };
   }
   if (kind === 93) {
-    return parseSourceItemsSmall(parseExportedDeclaration(skipped), remaining - 1);
+    return { state: parseExportedDeclaration(skipped), value: false };
   }
   if (kind === 12) {
-    return parseSourceItemsSmall(parseFunctionDeclaration(skipped), remaining - 1);
+    return { state: parseFunctionDeclaration(skipped), value: false };
   }
   if (kind === 74) {
-    return parseSourceItemsSmall(parseTypeDeclaration(skipped), remaining - 1);
+    return { state: parseTypeDeclaration(skipped), value: false };
   }
-  return parseSourceItemsSmall(parseUnexpectedTopLevelItem(skipped), remaining - 1);
+  return { state: parseUnexpectedTopLevelItem(skipped), value: false };
 }
 
 function parseTypeDeclaration(state: ParserState): ParserState {
@@ -2093,9 +2293,23 @@ function runTypeTask(state: ParserState, task: TypeTask): TypeMachine {
     parsed: false,
     done: false
   };
+  const nearby = runTypeMachineSmall(initial, 16);
+  if (nearby.done) {
+    return nearby;
+  }
   const remainingTokens = state.tokens.length - state.position + 1;
   const budget = remainingTokens * 128 + 128;
-  return runTypeMachineRange(initial, 0, budget);
+  return runTypeMachineRange(nearby, 0, budget);
+}
+
+function runTypeMachineSmall(
+  machine: TypeMachine,
+  remaining: Int
+): TypeMachine {
+  if (machine.done || remaining === 0) {
+    return machine;
+  }
+  return runTypeMachineSmall(stepTypeMachine(machine), remaining - 1);
 }
 
 function parseType(state: ParserState): ParserState {
@@ -3242,12 +3456,82 @@ function runExpressionMachineRange(
   if (machine.done || start >= end) {
     return machine;
   }
-  if (end - start === 1) {
-    return stepExpressionMachine(machine);
+  if (end - start <= 16) {
+    return runExpressionMachineBatch(machine, end - start);
   }
   const middle = start + (end - start) / 2;
   const left = runExpressionMachineRange(machine, start, middle);
   return runExpressionMachineRange(left, middle, end);
+}
+
+function runExpressionMachineBatch(
+  machine: ExpressionMachine,
+  remaining: Int
+): ExpressionMachine {
+  if (machine.done || remaining <= 0) {
+    return machine;
+  }
+  const one = stepExpressionMachine(machine);
+  if (one.done || remaining === 1) {
+    return one;
+  }
+  const two = stepExpressionMachine(one);
+  if (two.done || remaining === 2) {
+    return two;
+  }
+  const three = stepExpressionMachine(two);
+  if (three.done || remaining === 3) {
+    return three;
+  }
+  const four = stepExpressionMachine(three);
+  if (four.done || remaining === 4) {
+    return four;
+  }
+  const five = stepExpressionMachine(four);
+  if (five.done || remaining === 5) {
+    return five;
+  }
+  const six = stepExpressionMachine(five);
+  if (six.done || remaining === 6) {
+    return six;
+  }
+  const seven = stepExpressionMachine(six);
+  if (seven.done || remaining === 7) {
+    return seven;
+  }
+  const eight = stepExpressionMachine(seven);
+  if (eight.done || remaining === 8) {
+    return eight;
+  }
+  const nine = stepExpressionMachine(eight);
+  if (nine.done || remaining === 9) {
+    return nine;
+  }
+  const ten = stepExpressionMachine(nine);
+  if (ten.done || remaining === 10) {
+    return ten;
+  }
+  const eleven = stepExpressionMachine(ten);
+  if (eleven.done || remaining === 11) {
+    return eleven;
+  }
+  const twelve = stepExpressionMachine(eleven);
+  if (twelve.done || remaining === 12) {
+    return twelve;
+  }
+  const thirteen = stepExpressionMachine(twelve);
+  if (thirteen.done || remaining === 13) {
+    return thirteen;
+  }
+  const fourteen = stepExpressionMachine(thirteen);
+  if (fourteen.done || remaining === 14) {
+    return fourteen;
+  }
+  const fifteen = stepExpressionMachine(fourteen);
+  if (fifteen.done || remaining === 15) {
+    return fifteen;
+  }
+  return stepExpressionMachine(fifteen);
 }
 
 function runExpressionTask(
@@ -3352,12 +3636,79 @@ function runPatternBindingsRange(
   if (bindings.value || start >= end) {
     return bindings;
   }
-  if (end - start === 1) {
-    return stepPatternBinding(bindings.state);
+  if (end - start <= 16) {
+    return runPatternBindingsBatch(bindings, end - start);
   }
   const middle = start + (end - start) / 2;
   const left = runPatternBindingsRange(bindings, start, middle);
   return runPatternBindingsRange(left, middle, end);
+}
+
+function runPatternBindingsBatch(bindings: StateFlag, remaining: Int): StateFlag {
+  if (bindings.value || remaining <= 0) {
+    return bindings;
+  }
+  const one = stepPatternBinding(bindings.state);
+  if (one.value || remaining === 1) {
+    return one;
+  }
+  const two = stepPatternBinding(one.state);
+  if (two.value || remaining === 2) {
+    return two;
+  }
+  const three = stepPatternBinding(two.state);
+  if (three.value || remaining === 3) {
+    return three;
+  }
+  const four = stepPatternBinding(three.state);
+  if (four.value || remaining === 4) {
+    return four;
+  }
+  const five = stepPatternBinding(four.state);
+  if (five.value || remaining === 5) {
+    return five;
+  }
+  const six = stepPatternBinding(five.state);
+  if (six.value || remaining === 6) {
+    return six;
+  }
+  const seven = stepPatternBinding(six.state);
+  if (seven.value || remaining === 7) {
+    return seven;
+  }
+  const eight = stepPatternBinding(seven.state);
+  if (eight.value || remaining === 8) {
+    return eight;
+  }
+  const nine = stepPatternBinding(eight.state);
+  if (nine.value || remaining === 9) {
+    return nine;
+  }
+  const ten = stepPatternBinding(nine.state);
+  if (ten.value || remaining === 10) {
+    return ten;
+  }
+  const eleven = stepPatternBinding(ten.state);
+  if (eleven.value || remaining === 11) {
+    return eleven;
+  }
+  const twelve = stepPatternBinding(eleven.state);
+  if (twelve.value || remaining === 12) {
+    return twelve;
+  }
+  const thirteen = stepPatternBinding(twelve.state);
+  if (thirteen.value || remaining === 13) {
+    return thirteen;
+  }
+  const fourteen = stepPatternBinding(thirteen.state);
+  if (fourteen.value || remaining === 14) {
+    return fourteen;
+  }
+  const fifteen = stepPatternBinding(fourteen.state);
+  if (fifteen.value || remaining === 15) {
+    return fifteen;
+  }
+  return stepPatternBinding(fifteen.state);
 }
 
 function stepPatternBinding(state: ParserState): StateFlag {
@@ -3416,18 +3767,18 @@ export function parse(input: LexerInput): ParserResult {
     tokens: tokenized.tokens,
     position: 0,
     pendingSplitEq: false,
-    events: [],
+    events: { chunks: [], tail: [], length: 0 },
     deferredStarts: [],
     openNodes: [],
-    recoveryEvents: [],
-    diagnostics: []
+    recoveryEvents: { chunks: [], tail: [], length: 0 },
+    diagnostics: { chunks: [], tail: [], length: 0 }
   };
   const opened = startNode(initial, 39);
   const parsed = parseSourceItems(opened);
   const completed = finishNode(parsed);
   return {
     cstEvents: materializeEvents(completed),
-    recoveryEvents: completed.recoveryEvents,
-    diagnostics: completed.diagnostics
+    recoveryEvents: toArray(completed.recoveryEvents),
+    diagnostics: toArray(completed.diagnostics)
   };
 }

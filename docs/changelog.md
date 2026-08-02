@@ -8,8 +8,10 @@
   recovery regions, and parser-only structured diagnostics.
 - Compared 8 accepted cases, 8 rejected cases, and 5 fuzz seeds through both real
   adapters with no accepted differences or suppression list.
-- Bound all eight Futao compiler source files, the lexer/parser phase boundary,
+- Bound all nine Futao compiler source files, the lexer/parser phase boundary,
   both snapshot schemas, and exact corpus counts into Stage 0 provenance.
+- Added chunked persistent accumulation and a 64-million-step per-source release
+  gate that parses the complete sorted bootstrap compiler source graph.
 - Kept the Rust parser as the production path until the remaining compiler
   phases and ADR-011 fixed-point gate are complete.
 

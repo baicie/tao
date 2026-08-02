@@ -1,9 +1,10 @@
 //! Parser-only differential comparison for the second self-hosted compiler slice.
 
 use nexa_diagnostics::{LabelStyle, Severity};
-use nexa_mir::{run_with_args_and_step_limit as run_mir_with_args, MirProgram};
+use nexa_mir::{run_with_args_and_step_limit as run_mir_with_args, MirProgram, RuntimeFailure};
 use nexa_parser::parse_source;
-use nexa_span::FileId;
+use nexa_source::SourceMap;
+use nexa_span::{FileId, SourceSpan};
 use nexa_syntax::SyntaxKind;
 use rowan::{NodeOrToken, WalkEvent};
 use serde::Serialize;
@@ -17,11 +18,13 @@ pub const PARSER_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
 
 const FUTAO_LEXER_SOURCE: &str = include_str!("../../../bootstrap/compiler/src/lexer.ft");
 const FUTAO_PARSER_SOURCE: &str = include_str!("../../../bootstrap/compiler/src/parser.ft");
+const FUTAO_SEQUENCE_SOURCE: &str = include_str!("../../../bootstrap/compiler/src/sequence.ft");
 const FUTAO_BRIDGE_SOURCE: &str = include_str!("../../../bootstrap/compiler/src/parser_bridge.ft");
 const FUTAO_PROFILE_ENTRY: &str = include_str!("../../../bootstrap/compiler/src/parser_profile.ft");
 const FUTAO_DRIVER_ENTRY: &str = include_str!("../../../bootstrap/compiler/src/parser_driver.ft");
 // This is a bounded tool budget; the Language 1.0 runtime default remains unchanged.
 const FUTAO_PARSER_STEP_LIMIT: usize = 2_000_000;
+const FUTAO_PARSER_SELF_SOURCE_STEP_LIMIT: usize = 64_000_000;
 
 /// Identifies one implementation participating in parser differential tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -398,8 +401,14 @@ pub enum ParserAdapterError {
     #[error("Futao parser source was rejected: {0}")]
     FutaoSource(String),
     /// Futao MIR execution failed.
-    #[error("Futao parser execution failed: {0}")]
-    Runtime(String),
+    #[error("Futao parser execution failed: {failure} at {location}")]
+    Runtime {
+        /// Complete interpreter failure, including its structured source span.
+        #[source]
+        failure: RuntimeFailure,
+        /// Human-readable source path, line, column, file ID, and byte range.
+        location: String,
+    },
     /// The private Host bridge emitted an invalid protocol.
     #[error("invalid Futao parser protocol: {0}")]
     Protocol(String),
@@ -521,6 +530,7 @@ impl ParserAdapter for RustParserAdapter {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FutaoParserAdapter {
     program: MirProgram,
+    sources: SourceMap,
 }
 
 impl FutaoParserAdapter {
@@ -542,12 +552,44 @@ impl FutaoParserAdapter {
             futao_sources("parser_driver.ft", FUTAO_DRIVER_ENTRY),
         ))?;
         ensure_compiled("application driver", &driver_output)?;
+        let sources = driver_output.sources().clone();
         let program = driver_output.mir().cloned().ok_or_else(|| {
             ParserAdapterError::FutaoSource(
                 "application driver produced no executable MIR".to_owned(),
             )
         })?;
-        Ok(Self { program })
+        Ok(Self { program, sources })
+    }
+
+    /// Parses one large self-hosting source with the separately bounded tool budget.
+    ///
+    /// This does not relax the 512-byte differential/fuzz budget used by
+    /// [`ParserAdapter::parse`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an adapter, execution, protocol, or snapshot validation error.
+    pub fn parse_self_hosting_source(
+        &self,
+        source: &str,
+    ) -> Result<ParserSnapshot, ParserAdapterError> {
+        self.parse_with_step_limit(source, FUTAO_PARSER_SELF_SOURCE_STEP_LIMIT)
+    }
+
+    fn parse_with_step_limit(
+        &self,
+        source: &str,
+        step_limit: usize,
+    ) -> Result<ParserSnapshot, ParserAdapterError> {
+        let arguments = encoded_source_arguments(source)?;
+        let execution =
+            run_mir_with_args(&self.program, &arguments, step_limit).map_err(|failure| {
+                let location = runtime_location(&self.sources, failure.error().span());
+                ParserAdapterError::Runtime { failure, location }
+            })?;
+        let snapshot = parse_futao_output(execution.output())?;
+        snapshot.validate(source)?;
+        Ok(snapshot)
     }
 }
 
@@ -557,12 +599,7 @@ impl ParserAdapter for FutaoParserAdapter {
     }
 
     fn parse(&self, source: &str) -> Result<ParserSnapshot, ParserAdapterError> {
-        let arguments = encoded_source_arguments(source)?;
-        let execution = run_mir_with_args(&self.program, &arguments, FUTAO_PARSER_STEP_LIMIT)
-            .map_err(|failure| ParserAdapterError::Runtime(failure.to_string()))?;
-        let snapshot = parse_futao_output(execution.output())?;
-        snapshot.validate(source)?;
-        Ok(snapshot)
+        self.parse_with_step_limit(source, FUTAO_PARSER_STEP_LIMIT)
     }
 }
 
@@ -572,6 +609,7 @@ fn futao_sources(entry: &str, entry_source: &str) -> Vec<CompilerSource> {
         CompilerSource::new("lexer.ft", FUTAO_LEXER_SOURCE),
         CompilerSource::new("parser.ft", FUTAO_PARSER_SOURCE),
         CompilerSource::new("parser_bridge.ft", FUTAO_BRIDGE_SOURCE),
+        CompilerSource::new("sequence.ft", FUTAO_SEQUENCE_SOURCE),
     ]
 }
 
@@ -588,6 +626,28 @@ fn ensure_compiled(role: &str, output: &crate::CompilerOutput) -> Result<(), Par
     Err(ParserAdapterError::FutaoSource(format!(
         "{role} failed: {summary}"
     )))
+}
+
+fn runtime_location(sources: &SourceMap, span: SourceSpan) -> String {
+    let range = span.range();
+    if let Some((file, location)) = sources.location(span) {
+        format!(
+            "{}:{}:{} (source #{}, bytes {}..{})",
+            file.path().display(),
+            location.line(),
+            location.column(),
+            span.file().raw(),
+            range.start(),
+            range.end()
+        )
+    } else {
+        format!(
+            "<unknown> (source #{}, bytes {}..{})",
+            span.file().raw(),
+            range.start(),
+            range.end()
+        )
+    }
 }
 
 fn encoded_source_arguments(source: &str) -> Result<Vec<String>, ParserAdapterError> {
@@ -996,7 +1056,51 @@ const fn is_node_kind(kind: u16) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_futao_output, ParserAdapterError};
+    use super::{parse_futao_output, FutaoParserAdapter, ParserAdapterError};
+
+    #[test]
+    fn futao_runtime_failure_retains_and_displays_its_source_span(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let adapter = FutaoParserAdapter::new()?;
+        let error = match adapter.parse_with_step_limit("", 0) {
+            Ok(_) => {
+                return Err(
+                    std::io::Error::other("zero execution steps unexpectedly succeeded").into(),
+                );
+            }
+            Err(error) => error,
+        };
+
+        let ParserAdapterError::Runtime { failure, location } = &error else {
+            return Err(std::io::Error::other(format!(
+                "expected a runtime failure, found {error:?}"
+            ))
+            .into());
+        };
+        let span = failure.error().span();
+        let rendered = error.to_string();
+
+        assert!(location.contains(".ft:"), "location: {location}");
+        assert!(
+            location.contains(&format!("source #{}", span.file().raw())),
+            "location: {location}"
+        );
+        assert!(
+            location.contains(&format!(
+                "bytes {}..{}",
+                span.range().start(),
+                span.range().end()
+            )),
+            "location: {location}"
+        );
+        assert!(rendered.contains(location), "error: {rendered}");
+        assert!(
+            rendered.contains(failure.error().message()),
+            "error: {rendered}"
+        );
+
+        Ok(())
+    }
 
     #[test]
     fn futao_protocol_rejects_cst_count_larger_than_remaining_lines() {

@@ -1,0 +1,41 @@
+export type Sequence<T> = {
+  chunks: T[][];
+  tail: T[];
+  length: Int;
+};
+
+function chunkRange<T>(
+  chunks: T[][],
+  start: Int,
+  end: Int
+): T[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return chunks[start];
+  }
+  const middle = start + (end - start) / 2;
+  return chunkRange(chunks, start, middle).concat(
+    chunkRange(chunks, middle, end)
+  );
+}
+
+export function append<T>(values: Sequence<T>, value: T): Sequence<T> {
+  if (values.tail.length < 128) {
+    return {
+      chunks: values.chunks,
+      tail: values.tail.append(value),
+      length: values.length + 1
+    };
+  }
+  return {
+    chunks: values.chunks.append(values.tail),
+    tail: [value],
+    length: values.length + 1
+  };
+}
+
+export function toArray<T>(values: Sequence<T>): T[] {
+  return chunkRange(values.chunks, 0, values.chunks.length).concat(values.tail);
+}

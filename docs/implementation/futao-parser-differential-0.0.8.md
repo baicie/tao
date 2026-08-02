@@ -253,6 +253,8 @@ bootstrap/compiler/src/parser_profile.ft
   Bootstrap Profile validation entry
 bootstrap/compiler/src/parser_driver.ft
   application-only line-protocol driver
+bootstrap/compiler/src/sequence.ft
+  shared chunked persistent accumulation for lexer and parser outputs
 bootstrap/compiler/tests/parser/{accepted,rejected}
   stable differential fixtures
 crates/nexa_compiler/src/parser_differential.rs
@@ -306,16 +308,17 @@ pnpm --dir docs build
 
 ## Content Addressing
 
-`bootstrap/compiler/bootstrap-compiler.json` adds the four parser source files,
-the implemented `parser` phase, parser snapshot schema 1, and exact corpus
-counts: 8 accepted, 8 rejected, and 5 fuzz seeds. The compiler source-tree
+`bootstrap/compiler/bootstrap-compiler.json` contains the four parser source
+files plus the shared `sequence.ft` storage primitive, the implemented `parser`
+phase, parser snapshot schema 1, and exact corpus counts: 8 accepted, 8 rejected,
+and 5 fuzz seeds. The compiler source-tree
 digest continues to cover every sorted `.ft` file below
 `bootstrap/compiler/src` with the existing length-delimited
 `FUTAO-BOOTSTRAP-COMPILER` domain. The Stage 0 manifest repeats the digest and
 fails when the manifest or any source byte drifts.
 
 ```text
-sha256:fa0073490738a48efd269577a2598a9ad4d8cb032cae2b96c2879158e10f81dd
+sha256:fc654f1177071faabea6fec294ff7b768391b551102555611f6679d6e301c51b
 ```
 
 Corpus files remain versioned gate inputs outside the compiler-source digest.

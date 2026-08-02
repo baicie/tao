@@ -204,6 +204,12 @@ rejected 与 5 个 fuzz seed 均以真实 adapter 运行且无分类差异；512
 mutation gate 继续 fail closed。Rust Parser 仍为默认路径。详细合同见
 [`futao-parser-differential-0.0.8.md`](futao-parser-differential-0.0.8.md)。
 
+Phase B5 的 parser scalability 前置已实现：chunked persistent sequence 取代大数组逐项
+复制，固定顺序叶批处理避免多个分治 runner 叠加越过 64 层调用限制；独立 release gate
+在每文件 64,000,000 step ceiling 下解析排序后的 9 文件 bootstrap compiler 完整源码图，
+且保持 `0.0.7`/`0.0.8` observable 与 512-byte mutation ceiling 不变。详细边界见
+[`futao-parser-self-graph-scalability-0.0.8.md`](futao-parser-self-graph-scalability-0.0.8.md)。
+
 ### `0.0.12` 至 `0.0.14`：建立自举链
 
 `0.0.12` 交付 C1，且 C1 能编译自身、Bootstrap Stdlib 和至少一个覆盖模块、泛型、
