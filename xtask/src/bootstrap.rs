@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{bail, ensure, Context, Result};
+use nexa_compiler::LEXER_SNAPSHOT_SCHEMA_VERSION;
 use nexa_nir::{
     ArtifactCompatibility, ArtifactErrorCode, CanonicalArtifact, NIR_ARTIFACT_MAGIC,
     NIR_SCHEMA_VERSION,
@@ -22,6 +23,7 @@ struct BootstrapManifest {
     stage0: Stage0,
     bootstrap_profile: BootstrapProfile,
     bootstrap_stdlib: BootstrapStdlib,
+    bootstrap_compiler: BootstrapCompiler,
     bootstrap_output: BootstrapOutput,
     stable_component: StableComponent,
 }
@@ -69,6 +71,48 @@ struct BootstrapStdlib {
     profile: String,
     tree_digest: String,
     build_digest: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BootstrapCompiler {
+    status: String,
+    version: String,
+    profile: String,
+    manifest: String,
+    tree_digest: String,
+    implemented_phases: Vec<String>,
+    lexer_snapshot_schema_version: u32,
+    differential_case_count: usize,
+    default_implementation: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BootstrapCompilerManifest {
+    schema_version: u32,
+    name: String,
+    version: String,
+    toolchain_version: String,
+    profile: String,
+    profile_entry: String,
+    driver_entry: String,
+    implemented_phases: Vec<String>,
+    source_files: Vec<String>,
+    tree_hash_algorithm: String,
+    tree_digest: String,
+    lexer_snapshot_schema_version: u32,
+    differential_corpus: LexerDifferentialCorpus,
+    default_implementation: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LexerDifferentialCorpus {
+    accepted: usize,
+    rejected: usize,
+    fuzz_seeds: usize,
+    total: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -222,6 +266,47 @@ impl BootstrapManifest {
             "bootstrapStdlib.buildDigest",
             &self.bootstrap_stdlib.build_digest,
         )?;
+        expect(
+            "bootstrapCompiler.status",
+            &self.bootstrap_compiler.status,
+            "lexer-differential",
+        )?;
+        expect(
+            "bootstrapCompiler.version",
+            &self.bootstrap_compiler.version,
+            "0.0.1",
+        )?;
+        expect(
+            "bootstrapCompiler.profile",
+            &self.bootstrap_compiler.profile,
+            &self.bootstrap_profile.id,
+        )?;
+        expect(
+            "bootstrapCompiler.manifest",
+            &self.bootstrap_compiler.manifest,
+            "bootstrap/compiler/bootstrap-compiler.json",
+        )?;
+        validate_sha256(
+            "bootstrapCompiler.treeDigest",
+            &self.bootstrap_compiler.tree_digest,
+        )?;
+        ensure!(
+            self.bootstrap_compiler.implemented_phases == ["lexer"],
+            "bootstrapCompiler.implementedPhases must contain only lexer"
+        );
+        ensure!(
+            self.bootstrap_compiler.lexer_snapshot_schema_version == LEXER_SNAPSHOT_SCHEMA_VERSION,
+            "bootstrapCompiler.lexerSnapshotSchemaVersion must be {LEXER_SNAPSHOT_SCHEMA_VERSION}"
+        );
+        ensure!(
+            self.bootstrap_compiler.differential_case_count == 11,
+            "bootstrapCompiler.differentialCaseCount must be 11"
+        );
+        expect(
+            "bootstrapCompiler.defaultImplementation",
+            &self.bootstrap_compiler.default_implementation,
+            "rust-reference",
+        )?;
 
         expect(
             "bootstrapOutput.kind",
@@ -355,6 +440,157 @@ fn verify_bootstrap_inputs(manifest: &BootstrapManifest, root: &Path) -> Result<
             expected,
         )?;
     }
+    verify_bootstrap_compiler(manifest, root)?;
+    Ok(())
+}
+
+fn verify_bootstrap_compiler(manifest: &BootstrapManifest, root: &Path) -> Result<()> {
+    let compiler_path = root.join(&manifest.bootstrap_compiler.manifest);
+    let compiler_bytes = std::fs::read(&compiler_path)
+        .with_context(|| format!("failed to read {}", compiler_path.display()))?;
+    let compiler: BootstrapCompilerManifest = serde_json::from_slice(&compiler_bytes)
+        .with_context(|| format!("invalid JSON in {}", compiler_path.display()))?;
+
+    ensure!(
+        compiler.schema_version == 1,
+        "compiler schemaVersion must be 1"
+    );
+    expect("compiler.name", &compiler.name, "futao-bootstrap-compiler")?;
+    expect(
+        "compiler.version",
+        &compiler.version,
+        &manifest.bootstrap_compiler.version,
+    )?;
+    expect(
+        "compiler.toolchainVersion",
+        &compiler.toolchain_version,
+        &manifest.toolchain_version,
+    )?;
+    expect(
+        "compiler.profile",
+        &compiler.profile,
+        &manifest.bootstrap_compiler.profile,
+    )?;
+    expect(
+        "compiler.profileEntry",
+        &compiler.profile_entry,
+        "src/lexer_profile.ft",
+    )?;
+    expect(
+        "compiler.driverEntry",
+        &compiler.driver_entry,
+        "src/lexer_driver.ft",
+    )?;
+    ensure!(
+        compiler.implemented_phases == manifest.bootstrap_compiler.implemented_phases,
+        "compiler implementedPhases do not match the top-level contract"
+    );
+    expect(
+        "compiler.treeHashAlgorithm",
+        &compiler.tree_hash_algorithm,
+        "sha256",
+    )?;
+    expect(
+        "compiler.treeDigest",
+        &compiler.tree_digest,
+        &manifest.bootstrap_compiler.tree_digest,
+    )?;
+    ensure!(
+        compiler.lexer_snapshot_schema_version
+            == manifest.bootstrap_compiler.lexer_snapshot_schema_version,
+        "compiler lexerSnapshotSchemaVersion does not match the top-level contract"
+    );
+    ensure!(
+        compiler.differential_corpus.accepted == 4
+            && compiler.differential_corpus.rejected == 3
+            && compiler.differential_corpus.fuzz_seeds == 4
+            && compiler.differential_corpus.total
+                == manifest.bootstrap_compiler.differential_case_count,
+        "compiler differentialCorpus must describe 4 accepted, 3 rejected, and 4 fuzz cases"
+    );
+    expect(
+        "compiler.defaultImplementation",
+        &compiler.default_implementation,
+        &manifest.bootstrap_compiler.default_implementation,
+    )?;
+
+    let compiler_root = root.join("bootstrap/compiler");
+    let discovered = discover_compiler_sources(&compiler_root)?;
+    ensure!(
+        compiler.source_files == discovered,
+        "compiler sourceFiles do not match the checked-in src directory"
+    );
+    let mut tree_hasher = Sha256::new();
+    tree_hasher.update(b"FUTAO-BOOTSTRAP-COMPILER\0");
+    for relative in &compiler.source_files {
+        validate_compiler_source_path(relative)?;
+        let path = compiler_root.join(relative);
+        let metadata = std::fs::symlink_metadata(&path)
+            .with_context(|| format!("failed to inspect {}", path.display()))?;
+        ensure!(
+            metadata.file_type().is_file(),
+            "{} must be a file",
+            path.display()
+        );
+        let bytes =
+            std::fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+        std::str::from_utf8(&bytes).with_context(|| format!("{} must be UTF-8", path.display()))?;
+        hash_tree_field(&mut tree_hasher, relative.as_bytes())?;
+        hash_tree_field(&mut tree_hasher, &bytes)?;
+    }
+    let actual = format!("sha256:{:x}", tree_hasher.finalize());
+    ensure!(
+        actual == compiler.tree_digest,
+        "bootstrap compiler tree digest mismatch: expected {}, found {actual}",
+        compiler.tree_digest
+    );
+    Ok(())
+}
+
+fn discover_compiler_sources(root: &Path) -> Result<Vec<String>> {
+    let source_root = root.join("src");
+    let entries = std::fs::read_dir(&source_root)
+        .with_context(|| format!("failed to read {}", source_root.display()))?;
+    let mut sources = Vec::new();
+    for entry in entries {
+        let entry =
+            entry.with_context(|| format!("failed to inspect {}", source_root.display()))?;
+        let path = entry.path();
+        ensure!(
+            entry.file_type()?.is_file(),
+            "bootstrap compiler source entry must be a file: {}",
+            path.display()
+        );
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .context("bootstrap compiler source filename must be UTF-8")?;
+        sources.push(format!("src/{name}"));
+    }
+    sources.sort();
+    Ok(sources)
+}
+
+fn validate_compiler_source_path(value: &str) -> Result<()> {
+    ensure!(
+        value.starts_with("src/") && value.ends_with(".ft"),
+        "compiler sourceFiles entries must be `.ft` files below src/"
+    );
+    ensure!(
+        !value.contains(['\\', '\0'])
+            && value
+                .split('/')
+                .all(|component| !component.is_empty() && component != "." && component != ".."),
+        "compiler sourceFiles entries must be normalized portable paths"
+    );
+    Ok(())
+}
+
+fn hash_tree_field(hasher: &mut Sha256, bytes: &[u8]) -> Result<()> {
+    let length =
+        u64::try_from(bytes.len()).context("bootstrap compiler hash field is too large")?;
+    hasher.update(length.to_be_bytes());
+    hasher.update(bytes);
     Ok(())
 }
 
@@ -762,8 +998,8 @@ mod tests {
 
     use super::{
         canonical_fixture_bytes, parse_manifest, project_bootstrap_stdlib_for_stage0,
-        project_source_for_stage0, stage0_target_dir, verify_bootstrap_inputs, verify_digest,
-        verify_source, workspace_root,
+        project_source_for_stage0, stage0_target_dir, verify_bootstrap_compiler,
+        verify_bootstrap_inputs, verify_digest, verify_source, workspace_root,
     };
 
     const ACCEPTED: &str = include_str!("../../bootstrap/stage0/bootstrap-manifest.json");
@@ -794,12 +1030,26 @@ mod tests {
             manifest.bootstrap_stdlib.build_digest,
             "sha256:03c183622af98e72f667443a1995f96f0314ab8cf9c7e1eaf70dbe114175538b"
         );
+        assert_eq!(manifest.bootstrap_compiler.status, "lexer-differential");
+        assert_eq!(manifest.bootstrap_compiler.version, "0.0.1");
+        assert_eq!(manifest.bootstrap_compiler.profile, "futao-bootstrap-v1");
+        assert_eq!(manifest.bootstrap_compiler.implemented_phases, ["lexer"]);
+        assert_eq!(
+            manifest.bootstrap_compiler.tree_digest,
+            "sha256:565a901ae34c25251aad8db4761f4d8207561d28652f93c28841ea29deec5717"
+        );
+        assert_eq!(manifest.bootstrap_compiler.lexer_snapshot_schema_version, 1);
+        assert_eq!(manifest.bootstrap_compiler.differential_case_count, 11);
+        assert_eq!(
+            manifest.bootstrap_compiler.default_implementation,
+            "rust-reference"
+        );
         assert_eq!(manifest.bootstrap_output.kind, "internal-nir");
         assert_eq!(manifest.bootstrap_output.consumer, "rust-verifier-backend");
         assert_eq!(manifest.bootstrap_output.artifact_magic, "FUTAO-NIR");
         assert_eq!(manifest.bootstrap_output.nir_schema_version, 1);
         assert_eq!(manifest.bootstrap_output.verifier_crate, "nexa_nir");
-        assert_eq!(manifest.bootstrap_output.verifier_version, "0.0.6");
+        assert_eq!(manifest.bootstrap_output.verifier_version, "0.0.7");
         assert_eq!(
             manifest.bootstrap_output.target_profile,
             "target-neutral-v1"
@@ -878,6 +1128,26 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_compiler_provenance_rejects_source_drift() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let manifest = parse_manifest(ACCEPTED)?;
+        let directory = TestDirectory::new()?;
+        copy_bootstrap_compiler_fixture(directory.path())?;
+        let lexer = directory.path().join("bootstrap/compiler/src/lexer.ft");
+        let mut source = fs::read_to_string(&lexer)?;
+        source.push_str("// provenance drift\n");
+        fs::write(&lexer, source)?;
+
+        let error = verify_bootstrap_compiler(&manifest, directory.path()).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains("bootstrap compiler tree digest mismatch")
+        ));
+        Ok(())
+    }
+
+    #[test]
     fn provenance_rejects_content_that_does_not_match_its_digest(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let expected = "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
@@ -941,6 +1211,21 @@ function main(): Unit {
 
         verify_source(&manifest, &workspace_root())?;
 
+        Ok(())
+    }
+
+    fn copy_bootstrap_compiler_fixture(destination: &Path) -> Result<(), std::io::Error> {
+        let source = workspace_root().join("bootstrap/compiler");
+        let target = destination.join("bootstrap/compiler");
+        fs::create_dir_all(target.join("src"))?;
+        fs::copy(
+            source.join("bootstrap-compiler.json"),
+            target.join("bootstrap-compiler.json"),
+        )?;
+        for entry in fs::read_dir(source.join("src"))? {
+            let entry = entry?;
+            fs::copy(entry.path(), target.join("src").join(entry.file_name()))?;
+        }
         Ok(())
     }
 

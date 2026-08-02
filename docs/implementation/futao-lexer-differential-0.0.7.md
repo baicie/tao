@@ -169,6 +169,21 @@ This is a deliberate distinction between an executable self-hosted phase and a
 default compiler path. `0.0.8` may build the Futao parser on this verified phase;
 it must not bypass or reinterpret the lexer snapshot.
 
+## Content Addressing
+
+`bootstrap/compiler/bootstrap-compiler.json` pins the four Futao source files,
+their roles, the implemented `lexer` phase, snapshot schema 1, the 11-case
+corpus, and the Rust-reference default. The source tree uses length-delimited
+portable paths and bytes under the `FUTAO-BOOTSTRAP-COMPILER` domain separator:
+
+```text
+sha256:565a901ae34c25251aad8db4761f4d8207561d28652f93c28841ea29deec5717
+```
+
+The Stage 0 manifest repeats this digest and fails when either manifest or any
+source byte drifts. Test corpus files are versioned inputs to the differential
+gate but are deliberately outside this compiler-source digest.
+
 ## Validation and Success Criteria
 
 Milestone-specific validation is:

@@ -11,7 +11,7 @@ Accepted 状态解释为对应实现已经存在。
 
 ## 当前基线
 
-* 工具链版本：`0.0.6`。
+* 工具链版本：`0.0.7`。
 * Stage 0：固定为 `nexac 0.0.1` Rust 实现，覆盖 Lexer、Parser、Resolver、Type Checker、HIR、CFG MIR、
   reference interpreter、诊断、conformance 与 release gate。
 * 语言名称：新设计和源码使用 Futao / `.ft`；现有 Nexa / `.nexa` 输入在迁移策略
@@ -23,7 +23,8 @@ Accepted 状态解释为对应实现已经存在。
 * `0.0.4` 已建立自举 ownership/storage reference kernel 与独立验收门槛。
 * `0.0.5` 已建立 target-neutral typed NIR、独立 verifier、显式 target layout 与私有自举产物。
 * `0.0.6` 已冻结 `futao-bootstrap-v1` 并交付 content-addressed Bootstrap Stdlib `0.0.1`。
-* 下一里程碑：`0.0.7` Futao Lexer differential。
+* `0.0.7` 已交付真实 Futao Lexer、UTF-8 snapshot schema 与无差异 corpus/fuzz gate。
+* 下一里程碑：`0.0.8` Futao Parser differential。
 
 ## 关键依赖
 
@@ -182,6 +183,16 @@ accepted/rejected 与 fuzz seeds，运行 differential，记录并消除差异�
 | `0.0.9` | module graph、symbol identity、scope/visibility diagnostics |
 | `0.0.10` | inferred types、generic substitution、ownership/match diagnostics |
 | `0.0.11` | HIR/MIR/NIR、diagnostics ordering、compiler driver result |
+
+`0.0.7` 交付状态：已实现。`nexa_parser::lex_source` 冻结 Rust reference
+observable；`bootstrap/compiler/src/lexer.ft` 是在 `futao-bootstrap-v1` 下编译的
+纯 Futao FSM lexer。Host 只显式提供 Unicode scalar 与 UTF-8 byte-offset 表，
+application-only driver 以严格版本协议返回 snapshot，不把 `print` 带入 compiler core。
+4 个 accepted、3 个 rejected 与 4 个 fuzz seed 全部运行真实 Rust/Futao
+adapter，token kind/range/trivia 与 lexical diagnostic 零差异。差异失败时
+保留双侧 canonical snapshot；不存在 suppression list。Rust Lexer 仍为默认路径，
+直到后续 parser 与 driver slice 验证完成。详细合同见
+[`futao-lexer-differential-0.0.7.md`](futao-lexer-differential-0.0.7.md)。
 
 ### `0.0.12` 至 `0.0.14`：建立自举链
 
