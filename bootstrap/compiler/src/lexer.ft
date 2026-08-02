@@ -92,7 +92,8 @@ function emit(
 }
 
 function isAsciiWhitespace(codePoint: Int): Bool {
-  return (codePoint >= 9 && codePoint <= 13) || codePoint === 32;
+  return codePoint === 9 || codePoint === 10 || codePoint === 12 ||
+    codePoint === 13 || codePoint === 32;
 }
 
 function isAsciiLetter(codePoint: Int): Bool {

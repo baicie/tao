@@ -20,7 +20,8 @@ const FUTAO_PARSER_SOURCE: &str = include_str!("../../../bootstrap/compiler/src/
 const FUTAO_BRIDGE_SOURCE: &str = include_str!("../../../bootstrap/compiler/src/parser_bridge.ft");
 const FUTAO_PROFILE_ENTRY: &str = include_str!("../../../bootstrap/compiler/src/parser_profile.ft");
 const FUTAO_DRIVER_ENTRY: &str = include_str!("../../../bootstrap/compiler/src/parser_driver.ft");
-const FUTAO_PARSER_STEP_LIMIT: usize = 500_000;
+// This is a bounded tool budget; the Language 1.0 runtime default remains unchanged.
+const FUTAO_PARSER_STEP_LIMIT: usize = 2_000_000;
 
 /// Identifies one implementation participating in parser differential tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -603,7 +604,7 @@ fn encoded_source_arguments(source: &str) -> Result<Vec<String>, ParserAdapterEr
 fn parse_futao_output(output: &[String]) -> Result<ParserSnapshot, ParserAdapterError> {
     let mut reader = ProtocolReader::new(output);
     reader.expect("header", "FUTAO-PARSER-1")?;
-    let event_count = reader.usize("CST event count")?;
+    let event_count = reader.count("CST event count")?;
     let mut cst_events = Vec::with_capacity(event_count);
     for _ in 0..event_count {
         let tag = reader.next("CST event tag")?;
@@ -629,7 +630,7 @@ fn parse_futao_output(output: &[String]) -> Result<ParserSnapshot, ParserAdapter
         cst_events.push(event);
     }
 
-    let recovery_count = reader.usize("recovery event count")?;
+    let recovery_count = reader.count("recovery event count")?;
     let mut recovery_events = Vec::with_capacity(recovery_count);
     for _ in 0..recovery_count {
         recovery_events.push(ParserRecoverySnapshot {
@@ -638,7 +639,7 @@ fn parse_futao_output(output: &[String]) -> Result<ParserSnapshot, ParserAdapter
         });
     }
 
-    let diagnostic_count = reader.usize("diagnostic count")?;
+    let diagnostic_count = reader.count("diagnostic count")?;
     let mut diagnostics = Vec::with_capacity(diagnostic_count);
     for _ in 0..diagnostic_count {
         diagnostics.push(ParserDiagnosticSnapshot {
@@ -695,6 +696,17 @@ impl<'output> ProtocolReader<'output> {
         self.next(field)?.parse::<usize>().map_err(|_| {
             ParserAdapterError::Protocol(format!("{field} is not an unsigned integer"))
         })
+    }
+
+    fn count(&mut self, field: &str) -> Result<usize, ParserAdapterError> {
+        let count = self.usize(field)?;
+        let remaining_lines = self.output.len().saturating_sub(self.position);
+        if count > remaining_lines {
+            return Err(ParserAdapterError::Protocol(format!(
+                "{field} {count} exceeds {remaining_lines} remaining protocol line(s)"
+            )));
+        }
+        Ok(count)
     }
 
     fn u16(&mut self, field: &str) -> Result<u16, ParserAdapterError> {
@@ -980,4 +992,96 @@ const fn is_node_kind(kind: u16) -> bool {
         kind,
         39..=63 | 69..=73 | 75..=79 | 85..=91 | 95..=100 | 102..=106
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_futao_output, ParserAdapterError};
+
+    #[test]
+    fn futao_protocol_rejects_cst_count_larger_than_remaining_lines() {
+        let output = vec!["FUTAO-PARSER-1".to_owned(), usize::MAX.to_string()];
+
+        let error = parse_futao_output(&output).err();
+
+        assert!(
+            matches!(error, Some(ParserAdapterError::Protocol(message)) if message.contains("CST event count") && message.contains("remaining protocol line"))
+        );
+    }
+
+    #[test]
+    fn futao_protocol_rejects_recovery_count_larger_than_remaining_lines() {
+        let output = vec![
+            "FUTAO-PARSER-1".to_owned(),
+            "0".to_owned(),
+            usize::MAX.to_string(),
+        ];
+
+        let error = parse_futao_output(&output).err();
+
+        assert!(
+            matches!(error, Some(ParserAdapterError::Protocol(message)) if message.contains("recovery event count") && message.contains("remaining protocol line"))
+        );
+    }
+
+    #[test]
+    fn futao_protocol_rejects_diagnostic_count_larger_than_remaining_lines() {
+        let output = vec![
+            "FUTAO-PARSER-1".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            usize::MAX.to_string(),
+        ];
+
+        let error = parse_futao_output(&output).err();
+
+        assert!(
+            matches!(error, Some(ParserAdapterError::Protocol(message)) if message.contains("diagnostic count") && message.contains("remaining protocol line"))
+        );
+    }
+
+    #[test]
+    fn futao_protocol_rejects_missing_event_fields() {
+        let output = ["FUTAO-PARSER-1", "1", "start", "39"].map(str::to_owned);
+
+        let error = parse_futao_output(&output).err();
+
+        assert!(
+            matches!(error, Some(ParserAdapterError::Protocol(message)) if message.contains("missing node offset"))
+        );
+    }
+
+    #[test]
+    fn futao_protocol_rejects_unknown_event_tags() {
+        let output = ["FUTAO-PARSER-1", "1", "mystery"].map(str::to_owned);
+
+        let error = parse_futao_output(&output).err();
+
+        assert!(
+            matches!(error, Some(ParserAdapterError::Protocol(message)) if message.contains("unknown CST event tag"))
+        );
+    }
+
+    #[test]
+    fn futao_protocol_rejects_trailing_fields() {
+        let output = [
+            "FUTAO-PARSER-1",
+            "2",
+            "start",
+            "39",
+            "0",
+            "finish",
+            "0",
+            "0",
+            "0",
+            "unexpected",
+        ]
+        .map(str::to_owned);
+
+        let error = parse_futao_output(&output).err();
+
+        assert!(
+            matches!(error, Some(ParserAdapterError::Protocol(message)) if message == "1 trailing line(s)")
+        );
+    }
 }

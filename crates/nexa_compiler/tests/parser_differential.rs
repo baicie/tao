@@ -247,6 +247,123 @@ fn futao_adapter_matches_the_rejected_recovery_surface() -> Result<(), Box<dyn s
     Ok(())
 }
 
+fn assert_futao_parser_matches(
+    case_id: &str,
+    source: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let rust = RustParserAdapter;
+    let futao = FutaoParserAdapter::new()?;
+    let harness = ParserDifferentialHarness::new(&rust, &futao);
+
+    let report = harness.run_case(case_id, source)?;
+    assert_eq!(
+        report.reference_snapshot(),
+        report.candidate_snapshot(),
+        "parser snapshots differ for {case_id}"
+    );
+    Ok(())
+}
+
+#[test]
+fn futao_adapter_preserves_import_recovery_after_repeated_commas(
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_futao_parser_matches(
+        "rejected/import-repeated-commas",
+        "import { , , x } from \"x\";",
+    )
+}
+
+#[test]
+fn futao_adapter_preserves_import_recovery_after_repeated_invalid_tokens(
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_futao_parser_matches(
+        "rejected/import-repeated-invalid-tokens",
+        "import { @, @, x } from \"x\";",
+    )
+}
+
+#[test]
+fn futao_adapter_recovers_vertical_tab_like_the_rust_parser(
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_futao_parser_matches("rejected/vertical-tab", "\u{000b}")
+}
+
+#[test]
+fn futao_adapter_preserves_union_state_across_parser_chunks(
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_futao_parser_matches(
+        "rejected/union-chunk-without-variant",
+        &format!("type Empty = {};", "| ".repeat(17)),
+    )
+}
+
+#[test]
+fn futao_adapter_handles_the_maximum_type_discriminator_budget(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = format!("type T<{}Z>=V;", "A,".repeat(245));
+    assert_eq!(source.len(), 502);
+
+    assert_futao_parser_matches("fuzz/max-type-declaration-discriminator", &source)
+}
+
+#[test]
+fn futao_adapter_matches_nine_nested_parenthesized_expressions(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = format!(
+        "function f():Int{{return {}1{};}}",
+        "(".repeat(9),
+        ")".repeat(9)
+    );
+    assert!(source.is_ascii());
+    assert_eq!(source.len(), 45);
+    assert!(source.len() <= 512);
+
+    assert_futao_parser_matches("fuzz/nested-parenthesized-expressions", &source)
+}
+
+#[test]
+fn futao_adapter_matches_eight_nested_array_expressions() -> Result<(), Box<dyn std::error::Error>>
+{
+    let source = format!("function f():Unit{{{}1{};}}", "[".repeat(8), "]".repeat(8));
+    assert!(source.is_ascii());
+    assert_eq!(source.len(), 37);
+    assert!(source.len() <= 512);
+
+    assert_futao_parser_matches("fuzz/nested-array-expressions", &source)
+}
+
+#[test]
+fn futao_adapter_matches_sixty_nested_unary_expressions() -> Result<(), Box<dyn std::error::Error>>
+{
+    let source = format!("function f():Int{{return {}1;}}", "-".repeat(60));
+    assert!(source.is_ascii());
+    assert_eq!(source.len(), 87);
+    assert!(source.len() <= 512);
+
+    assert_futao_parser_matches("fuzz/nested-unary-expressions", &source)
+}
+
+#[test]
+fn futao_adapter_matches_the_maximum_legal_pattern_binding_list(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = format!(
+        "type U=A();function f(x:I):I{{return match(x){{case U.A({}z)=>0;}};}}",
+        "a,".repeat(224)
+    );
+    assert!(source.is_ascii());
+    assert_eq!(source.len(), 511);
+    assert!(source.len() <= 512);
+
+    let rust = RustParserAdapter;
+    let futao = FutaoParserAdapter::new()?;
+    let harness = ParserDifferentialHarness::new(&rust, &futao);
+    let report = harness.run_case("fuzz/max-legal-pattern-bindings", &source)?;
+
+    assert!(report.reference_snapshot().diagnostics().is_empty());
+    assert_eq!(report.outcome(), ParserDifferentialOutcome::Match);
+    Ok(())
+}
+
 #[test]
 fn futao_adapter_handles_the_complete_parser_byte_budget() -> Result<(), Box<dyn std::error::Error>>
 {
@@ -299,6 +416,10 @@ fn futao_adapter_handles_the_complete_parser_byte_budget() -> Result<(), Box<dyn
             format!("type Dense = {{ value: Box<{}Z>; }};", "T,".repeat(100)),
         ),
         (
+            "fuzz/max-type-declaration-discriminator",
+            format!("type Dense<{}Z> = Value;", "T,".repeat(100)),
+        ),
+        (
             "fuzz/max-arguments",
             format!("function f(): Unit {{ call({}1); }}", "1,".repeat(200)),
         ),
@@ -324,6 +445,125 @@ fn futao_adapter_handles_the_complete_parser_byte_budget() -> Result<(), Box<dyn
             ),
         ),
         (
+            "fuzz/nested-record-values",
+            format!(
+                "function f():Unit{{{}1{};}}",
+                "{v:".repeat(120),
+                "}".repeat(120)
+            ),
+        ),
+        (
+            "fuzz/nested-call-arguments",
+            format!(
+                "function f():Unit{{{}1{};}}",
+                "f(".repeat(160),
+                ")".repeat(160)
+            ),
+        ),
+        (
+            "fuzz/nested-index-expressions",
+            format!(
+                "function f():Unit{{{}1{};}}",
+                "a[".repeat(160),
+                "]".repeat(160)
+            ),
+        ),
+        (
+            "fuzz/nested-expression-arrow-bodies",
+            format!("function f():Unit{{{}1;}}", "():Int=>".repeat(60)),
+        ),
+        (
+            "fuzz/nested-block-arrow-bodies",
+            format!(
+                "function f():Unit{{{}1;{}}}",
+                "():Int=>{return ".repeat(27),
+                "};".repeat(27)
+            ),
+        ),
+        (
+            "fuzz/nested-match-values",
+            format!(
+                "function f(x:Int):Int{{return {}0;{}}}",
+                "match(x){default=>".repeat(23),
+                "};".repeat(23)
+            ),
+        ),
+        (
+            "fuzz/mixed-container-chain",
+            format!(
+                "function f():Unit{{{}1{};}}",
+                "{v:[f(a[".repeat(40),
+                "])]}".repeat(40)
+            ),
+        ),
+        (
+            "fuzz/max-parenthesized-depth",
+            format!(
+                "function f():Unit{{{}1{};}}",
+                "(".repeat(240),
+                ")".repeat(240)
+            ),
+        ),
+        (
+            "fuzz/max-array-depth",
+            format!(
+                "function f():Unit{{{}1{};}}",
+                "[".repeat(240),
+                "]".repeat(240)
+            ),
+        ),
+        (
+            "fuzz/max-unary-depth",
+            format!("function f():Int{{return {}1;}}", "-".repeat(480)),
+        ),
+        (
+            "fuzz/nested-function-result-types",
+            format!("function f():{}Int{{}}", "()=>".repeat(120)),
+        ),
+        (
+            "fuzz/nested-generic-types",
+            format!(
+                "type R={{value:{}Int{};}};",
+                "Box<".repeat(95),
+                ">".repeat(95)
+            ),
+        ),
+        (
+            "fuzz/max-array-type-suffixes",
+            format!("type R={{value:Int{};}};", "[]".repeat(240)),
+        ),
+        (
+            "fuzz/nested-if-blocks",
+            format!(
+                "function f():Unit{{{}return;{}}}",
+                "if(true){".repeat(48),
+                "}".repeat(48)
+            ),
+        ),
+        (
+            "fuzz/nested-while-blocks",
+            format!(
+                "function f():Unit{{{}return;{}}}",
+                "while(true){".repeat(37),
+                "}".repeat(37)
+            ),
+        ),
+        (
+            "fuzz/max-expression-trivia",
+            format!("function f():Int{{return 1+{}1;}}", "//\n".repeat(160)),
+        ),
+        (
+            "fuzz/max-expression-recovery",
+            format!("function f():Unit{{[{}];}}", "@".repeat(480)),
+        ),
+        (
+            "fuzz/max-arrow-lookahead-trivia",
+            format!(
+                "function f():Unit{{(x:Int){}:Int=>1;}}",
+                "//\n".repeat(159)
+            ),
+        ),
+        (
             "fuzz/max-binary-chain",
             format!("function f(): Int {{ return {}1; }}", "1+".repeat(200)),
         ),
@@ -341,13 +581,20 @@ fn futao_adapter_handles_the_complete_parser_byte_budget() -> Result<(), Box<dyn
         ),
     ];
 
+    let mut failures = Vec::new();
     for (case_id, source) in cases {
         assert!(source.len() <= 512, "{case_id} exceeds parser byte budget");
-        let report = harness.run_case(case_id, &source).map_err(|error| {
-            std::io::Error::other(format!("parser case `{case_id}` failed: {error}"))
-        })?;
-        assert_eq!(report.outcome(), ParserDifferentialOutcome::Match);
+        match harness.run_case(case_id, &source) {
+            Ok(report) if report.outcome() == ParserDifferentialOutcome::Match => {}
+            Ok(_) => failures.push(format!("parser case `{case_id}` produced differences")),
+            Err(error) => failures.push(format!("parser case `{case_id}` failed: {error}")),
+        }
     }
+    assert!(
+        failures.is_empty(),
+        "parser differential failures:\n{}",
+        failures.join("\n")
+    );
     Ok(())
 }
 
