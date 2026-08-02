@@ -1123,7 +1123,7 @@ mod tests {
         );
         assert_eq!(
             manifest.bootstrap_compiler.tree_digest,
-            "sha256:fa0073490738a48efd269577a2598a9ad4d8cb032cae2b96c2879158e10f81dd"
+            "sha256:fc654f1177071faabea6fec294ff7b768391b551102555611f6679d6e301c51b"
         );
         assert_eq!(manifest.bootstrap_compiler.lexer_snapshot_schema_version, 1);
         assert_eq!(manifest.bootstrap_compiler.differential_case_count, 11);

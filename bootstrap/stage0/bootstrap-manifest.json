@@ -35,7 +35,7 @@
     "version": "0.0.2",
     "profile": "futao-bootstrap-v1",
     "manifest": "bootstrap/compiler/bootstrap-compiler.json",
-    "treeDigest": "sha256:fa0073490738a48efd269577a2598a9ad4d8cb032cae2b96c2879158e10f81dd",
+    "treeDigest": "sha256:fc654f1177071faabea6fec294ff7b768391b551102555611f6679d6e301c51b",
     "implementedPhases": ["lexer", "parser"],
     "lexerSnapshotSchemaVersion": 1,
     "differentialCaseCount": 11,

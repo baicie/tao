@@ -1,7 +1,7 @@
 //! Lexer-only differential comparison for the first self-hosted compiler slice.
 
 use nexa_diagnostics::{LabelStyle, Severity};
-use nexa_mir::{run_with_args as run_mir_with_args, MirProgram};
+use nexa_mir::{run_with_args_and_step_limit as run_mir_with_args, MirProgram};
 use nexa_parser::lex_source;
 use nexa_span::FileId;
 use serde::Serialize;
@@ -14,9 +14,12 @@ use crate::{compile, CompileError, CompilerInput, CompilerOptions, CompilerSourc
 pub const LEXER_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
 
 const FUTAO_LEXER_SOURCE: &str = include_str!("../../../bootstrap/compiler/src/lexer.ft");
+const FUTAO_SEQUENCE_SOURCE: &str = include_str!("../../../bootstrap/compiler/src/sequence.ft");
 const FUTAO_BRIDGE_SOURCE: &str = include_str!("../../../bootstrap/compiler/src/lexer_bridge.ft");
 const FUTAO_PROFILE_ENTRY: &str = include_str!("../../../bootstrap/compiler/src/lexer_profile.ft");
 const FUTAO_DRIVER_ENTRY: &str = include_str!("../../../bootstrap/compiler/src/lexer_driver.ft");
+// This is a bounded tool budget; the Language 1.0 runtime default remains unchanged.
+const FUTAO_LEXER_STEP_LIMIT: usize = 2_000_000;
 
 /// Identifies one implementation participating in lexer differential tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -424,7 +427,7 @@ impl LexerAdapter for FutaoLexerAdapter {
 
     fn lex(&self, source: &str) -> Result<LexerSnapshot, LexerAdapterError> {
         let arguments = encoded_source_arguments(source)?;
-        let execution = run_mir_with_args(&self.program, &arguments)
+        let execution = run_mir_with_args(&self.program, &arguments, FUTAO_LEXER_STEP_LIMIT)
             .map_err(|failure| LexerAdapterError::Runtime(failure.to_string()))?;
         let snapshot = parse_futao_output(execution.output())?;
         snapshot.validate(source)?;
@@ -437,6 +440,7 @@ fn futao_sources(entry: &str, entry_source: &str) -> Vec<CompilerSource> {
         CompilerSource::new(entry, entry_source),
         CompilerSource::new("lexer.ft", FUTAO_LEXER_SOURCE),
         CompilerSource::new("lexer_bridge.ft", FUTAO_BRIDGE_SOURCE),
+        CompilerSource::new("sequence.ft", FUTAO_SEQUENCE_SOURCE),
     ]
 }
 

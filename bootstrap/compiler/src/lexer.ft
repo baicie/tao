@@ -1,3 +1,5 @@
+import { Sequence, append, toArray } from "./sequence.ft";
+
 export type LexerInput = {
   codePoints: Int[];
   byteOffsets: Int[];
@@ -43,8 +45,8 @@ type LexerMode =
 
 type LexerState = {
   mode: LexerMode;
-  tokens: LexerToken[];
-  diagnostics: LexicalDiagnostic[];
+  tokens: Sequence<LexerToken>;
+  diagnostics: Sequence<LexicalDiagnostic>;
 };
 
 function withMode(state: LexerState, mode: LexerMode): LexerState {
@@ -80,13 +82,13 @@ function emit(
     };
     return {
       mode: LexerMode.Idle(),
-      tokens: state.tokens.append(nextToken),
-      diagnostics: state.diagnostics.append(nextDiagnostic)
+      tokens: append(state.tokens, nextToken),
+      diagnostics: append(state.diagnostics, nextDiagnostic)
     };
   }
   return {
     mode: LexerMode.Idle(),
-    tokens: state.tokens.append(nextToken),
+    tokens: append(state.tokens, nextToken),
     diagnostics: state.diagnostics
   };
 }
@@ -581,13 +583,13 @@ function finish(input: LexerInput, state: LexerState): LexerState {
 export function lex(input: LexerInput): LexerResult {
   const initial: LexerState = {
     mode: LexerMode.Idle(),
-    tokens: [],
-    diagnostics: []
+    tokens: { chunks: [], tail: [], length: 0 },
+    diagnostics: { chunks: [], tail: [], length: 0 }
   };
   const scanned = scanRange(input, 0, input.codePoints.length, initial);
   const completed = finish(input, scanned);
   return {
-    tokens: completed.tokens,
-    diagnostics: completed.diagnostics
+    tokens: toArray(completed.tokens),
+    diagnostics: toArray(completed.diagnostics)
   };
 }

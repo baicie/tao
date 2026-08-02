@@ -6,6 +6,54 @@ use nexa_compiler::{
     PARSER_SNAPSHOT_SCHEMA_VERSION,
 };
 
+const FUTAO_COMPILER_MANIFEST: &str =
+    include_str!("../../../bootstrap/compiler/bootstrap-compiler.json");
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BootstrapCompilerManifest {
+    source_files: Vec<String>,
+}
+
+const FUTAO_COMPILER_SOURCES: [(&str, &str); 9] = [
+    (
+        "lexer.ft",
+        include_str!("../../../bootstrap/compiler/src/lexer.ft"),
+    ),
+    (
+        "lexer_bridge.ft",
+        include_str!("../../../bootstrap/compiler/src/lexer_bridge.ft"),
+    ),
+    (
+        "lexer_driver.ft",
+        include_str!("../../../bootstrap/compiler/src/lexer_driver.ft"),
+    ),
+    (
+        "lexer_profile.ft",
+        include_str!("../../../bootstrap/compiler/src/lexer_profile.ft"),
+    ),
+    (
+        "parser.ft",
+        include_str!("../../../bootstrap/compiler/src/parser.ft"),
+    ),
+    (
+        "parser_bridge.ft",
+        include_str!("../../../bootstrap/compiler/src/parser_bridge.ft"),
+    ),
+    (
+        "parser_driver.ft",
+        include_str!("../../../bootstrap/compiler/src/parser_driver.ft"),
+    ),
+    (
+        "parser_profile.ft",
+        include_str!("../../../bootstrap/compiler/src/parser_profile.ft"),
+    ),
+    (
+        "sequence.ft",
+        include_str!("../../../bootstrap/compiler/src/sequence.ft"),
+    ),
+];
+
 #[test]
 fn rust_snapshot_freezes_balanced_lossless_cst_events() -> Result<(), Box<dyn std::error::Error>> {
     let source = "function main(): Unit {}";
@@ -595,6 +643,42 @@ fn futao_adapter_handles_the_complete_parser_byte_budget() -> Result<(), Box<dyn
         "parser differential failures:\n{}",
         failures.join("\n")
     );
+    Ok(())
+}
+
+#[test]
+fn futao_parser_can_process_its_sorted_full_source_graph_for_the_resolver(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let futao = FutaoParserAdapter::new()?;
+    let manifest: BootstrapCompilerManifest = serde_json::from_str(FUTAO_COMPILER_MANIFEST)?;
+    let embedded_sources = FUTAO_COMPILER_SOURCES
+        .iter()
+        .map(|(identity, _)| format!("src/{identity}"))
+        .collect::<Vec<_>>();
+
+    assert_eq!(manifest.source_files, embedded_sources);
+    assert!(FUTAO_COMPILER_SOURCES
+        .windows(2)
+        .all(|pair| pair[0].0 < pair[1].0));
+
+    for (identity, source) in FUTAO_COMPILER_SOURCES {
+        let snapshot = futao.parse_self_hosting_source(source).map_err(|error| {
+            std::io::Error::other(format!("failed to parse {identity}: {error}"))
+        })?;
+        assert_eq!(
+            snapshot,
+            RustParserAdapter.parse(source)?,
+            "{identity} diverged from the Rust parser"
+        );
+        assert!(
+            snapshot.diagnostics().is_empty(),
+            "{identity} produced parser diagnostics"
+        );
+        assert!(
+            snapshot.recovery_events().is_empty(),
+            "{identity} produced parser recovery"
+        );
+    }
     Ok(())
 }
 

@@ -15,10 +15,11 @@
     "src/parser.ft",
     "src/parser_bridge.ft",
     "src/parser_driver.ft",
-    "src/parser_profile.ft"
+    "src/parser_profile.ft",
+    "src/sequence.ft"
   ],
   "treeHashAlgorithm": "sha256",
-  "treeDigest": "sha256:fa0073490738a48efd269577a2598a9ad4d8cb032cae2b96c2879158e10f81dd",
+  "treeDigest": "sha256:fc654f1177071faabea6fec294ff7b768391b551102555611f6679d6e301c51b",
   "lexerSnapshotSchemaVersion": 1,
   "differentialCorpus": {
     "accepted": 4,
