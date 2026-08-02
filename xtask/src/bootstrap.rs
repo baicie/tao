@@ -17,9 +17,17 @@ struct BootstrapManifest {
     toolchain_version: String,
     language_version: String,
     stage0: Stage0,
+    bootstrap_profile: BootstrapProfile,
     bootstrap_stdlib: BootstrapStdlib,
     bootstrap_output: BootstrapOutput,
     stable_component: StableComponent,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BootstrapProfile {
+    id: String,
+    digest: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,8 +62,10 @@ struct Stage0Build {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct BootstrapStdlib {
     status: String,
-    version: Option<String>,
-    digest: Option<String>,
+    version: String,
+    profile: String,
+    tree_digest: String,
+    build_digest: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -96,6 +106,7 @@ pub(crate) fn run(manifest_path: &Path, rebuild: bool) -> Result<()> {
     let manifest = parse_manifest(&text)
         .with_context(|| format!("failed to validate {}", manifest_path.display()))?;
     let root = workspace_root();
+    verify_bootstrap_inputs(&manifest, &root)?;
     verify_source(&manifest, &root)?;
     verify_nir_artifacts_at(&root)?;
     if rebuild {
@@ -173,18 +184,34 @@ impl BootstrapManifest {
             "source-only",
         )?;
         expect(
+            "bootstrapProfile.id",
+            &self.bootstrap_profile.id,
+            "futao-bootstrap-v1",
+        )?;
+        validate_sha256("bootstrapProfile.digest", &self.bootstrap_profile.digest)?;
+        expect(
             "bootstrapStdlib.status",
             &self.bootstrap_stdlib.status,
-            "not-defined",
+            "defined",
         )?;
-        ensure!(
-            self.bootstrap_stdlib.version.is_none(),
-            "bootstrapStdlib.version must be null while status is not-defined"
-        );
-        ensure!(
-            self.bootstrap_stdlib.digest.is_none(),
-            "bootstrapStdlib.digest must be null while status is not-defined"
-        );
+        expect(
+            "bootstrapStdlib.version",
+            &self.bootstrap_stdlib.version,
+            "0.0.1",
+        )?;
+        expect(
+            "bootstrapStdlib.profile",
+            &self.bootstrap_stdlib.profile,
+            &self.bootstrap_profile.id,
+        )?;
+        validate_sha256(
+            "bootstrapStdlib.treeDigest",
+            &self.bootstrap_stdlib.tree_digest,
+        )?;
+        validate_sha256(
+            "bootstrapStdlib.buildDigest",
+            &self.bootstrap_stdlib.build_digest,
+        )?;
 
         expect(
             "bootstrapOutput.kind",
@@ -274,6 +301,58 @@ impl BootstrapManifest {
 
         Ok(())
     }
+}
+
+fn verify_bootstrap_inputs(manifest: &BootstrapManifest, root: &Path) -> Result<()> {
+    let profile_path = root.join("bootstrap/profile/bootstrap-profile-v1.json");
+    let profile_bytes = std::fs::read(&profile_path)
+        .with_context(|| format!("failed to read {}", profile_path.display()))?;
+    verify_digest(
+        "bootstrapProfile.digest",
+        &manifest.bootstrap_profile.digest,
+        &profile_bytes,
+    )?;
+    let profile: serde_json::Value = serde_json::from_slice(&profile_bytes)
+        .with_context(|| format!("invalid JSON in {}", profile_path.display()))?;
+    expect(
+        "bootstrapProfile.id",
+        json_string(&profile, "id")?,
+        &manifest.bootstrap_profile.id,
+    )?;
+    expect(
+        "bootstrapProfile.languageVersion",
+        json_string(&profile, "languageVersion")?,
+        &manifest.language_version,
+    )?;
+
+    let stdlib_path = root.join("bootstrap/stdlib/bootstrap-stdlib.json");
+    let stdlib_bytes = std::fs::read(&stdlib_path)
+        .with_context(|| format!("failed to read {}", stdlib_path.display()))?;
+    let stdlib: serde_json::Value = serde_json::from_slice(&stdlib_bytes)
+        .with_context(|| format!("invalid JSON in {}", stdlib_path.display()))?;
+    for (field, expected) in [
+        ("version", manifest.bootstrap_stdlib.version.as_str()),
+        ("profile", manifest.bootstrap_stdlib.profile.as_str()),
+        ("treeDigest", manifest.bootstrap_stdlib.tree_digest.as_str()),
+        (
+            "buildDigest",
+            manifest.bootstrap_stdlib.build_digest.as_str(),
+        ),
+    ] {
+        expect(
+            &format!("bootstrapStdlib.{field}"),
+            json_string(&stdlib, field)?,
+            expected,
+        )?;
+    }
+    Ok(())
+}
+
+fn json_string<'a>(value: &'a serde_json::Value, field: &str) -> Result<&'a str> {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .with_context(|| format!("bootstrap input field {field:?} must be a string"))
 }
 
 pub(crate) fn verify_nir_artifacts() -> Result<()> {
@@ -521,8 +600,8 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        canonical_fixture_bytes, parse_manifest, stage0_target_dir, verify_digest, verify_source,
-        workspace_root,
+        canonical_fixture_bytes, parse_manifest, stage0_target_dir, verify_bootstrap_inputs,
+        verify_digest, verify_source, workspace_root,
     };
 
     const ACCEPTED: &str = include_str!("../../bootstrap/stage0/bootstrap-manifest.json");
@@ -536,7 +615,22 @@ mod tests {
 
         assert_eq!(manifest.schema_version, 1);
         assert_eq!(manifest.stage0.compiler_version, "0.0.1");
-        assert_eq!(manifest.bootstrap_stdlib.version, None);
+        assert_eq!(manifest.bootstrap_profile.id, "futao-bootstrap-v1");
+        assert_eq!(
+            manifest.bootstrap_profile.digest,
+            "sha256:8f906ed909566e098ee8cd5029ded3b34bfb174619d198ab68bf26e57e63a3cd"
+        );
+        assert_eq!(manifest.bootstrap_stdlib.status, "defined");
+        assert_eq!(manifest.bootstrap_stdlib.version, "0.0.1");
+        assert_eq!(manifest.bootstrap_stdlib.profile, "futao-bootstrap-v1");
+        assert_eq!(
+            manifest.bootstrap_stdlib.tree_digest,
+            "sha256:3975bf631766ee20db013310459229d99909d8ff39f540044ff0691b2c33789c"
+        );
+        assert_eq!(
+            manifest.bootstrap_stdlib.build_digest,
+            "sha256:cc65fcedbd22067b125dc26379493db00a80d28fb36e8a2f76492169dccf43fd"
+        );
         assert_eq!(manifest.bootstrap_output.kind, "internal-nir");
         assert_eq!(manifest.bootstrap_output.consumer, "rust-verifier-backend");
         assert_eq!(manifest.bootstrap_output.artifact_magic, "FUTAO-NIR");
@@ -583,6 +677,41 @@ mod tests {
         let error = parse_manifest(&invalid).err();
 
         assert!(matches!(error, Some(error) if error.to_string().contains("archiveDigest")));
+    }
+
+    #[test]
+    fn parser_rejects_an_unverifiable_bootstrap_profile_digest() {
+        let invalid = ACCEPTED.replace(
+            "sha256:8f906ed909566e098ee8cd5029ded3b34bfb174619d198ab68bf26e57e63a3cd",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        );
+        let error = parse_manifest(&invalid).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains("bootstrapProfile.digest")
+        ));
+    }
+
+    #[test]
+    fn parser_rejects_an_undefined_bootstrap_stdlib() {
+        let invalid = ACCEPTED.replace("\"status\": \"defined\"", "\"status\": \"not-defined\"");
+        let error = parse_manifest(&invalid).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains("bootstrapStdlib.status")
+        ));
+    }
+
+    #[test]
+    fn checked_in_bootstrap_inputs_match_the_top_level_contract(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let manifest = parse_manifest(ACCEPTED)?;
+
+        verify_bootstrap_inputs(&manifest, &workspace_root())?;
+
+        Ok(())
     }
 
     #[test]

@@ -19,10 +19,16 @@
     },
     "distribution": "source-only"
   },
+  "bootstrapProfile": {
+    "id": "futao-bootstrap-v1",
+    "digest": "sha256:8f906ed909566e098ee8cd5029ded3b34bfb174619d198ab68bf26e57e63a3cd"
+  },
   "bootstrapStdlib": {
-    "status": "not-defined",
-    "version": null,
-    "digest": null
+    "status": "defined",
+    "version": "0.0.1",
+    "profile": "futao-bootstrap-v1",
+    "treeDigest": "sha256:3975bf631766ee20db013310459229d99909d8ff39f540044ff0691b2c33789c",
+    "buildDigest": "sha256:cc65fcedbd22067b125dc26379493db00a80d28fb36e8a2f76492169dccf43fd"
   },
   "bootstrapOutput": {
     "kind": "internal-nir",
