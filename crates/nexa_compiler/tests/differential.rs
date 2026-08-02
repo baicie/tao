@@ -39,7 +39,7 @@ fn unavailable_futao_adapter_is_reported_instead_of_emulated(
         CompilerAdapterState::available(&rust),
         CompilerAdapterState::unavailable(
             CompilerImplementation::Futao,
-            "the first Futao compiler slice is scheduled for 0.0.7",
+            "the complete Futao compiler adapter is scheduled for 0.0.11",
         ),
     );
 

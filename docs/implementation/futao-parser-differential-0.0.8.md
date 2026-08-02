@@ -155,6 +155,15 @@ event-array indices. Wrapping an already parsed left operand inserts a
 `StartNode` at that checkpoint, preserving the Rust parser's precedence and
 postfix tree shape without a mutable tree builder.
 
+Expression, block, and type nesting use persistent `ExpressionTask` and
+`TypeTask` continuation chains instead of the MIR call stack. Their pure
+drivers apply one transition per leaf through divide-and-conquer traversal and
+stop as soon as the explicit `Done` continuation is reached. Trivia,
+lookahead, recovery scans, and pattern-binding lists use the same bounded
+traversal shape. This keeps the Futao parser within the unchanged
+64-active-call runtime contract even for the deepest forms that fit inside the
+512-byte differential boundary.
+
 The parser implements only syntax decisions. It must not resolve names, validate
 loop context, check types, infer generics, inspect modules, or lower IR.
 
@@ -173,6 +182,10 @@ confined to this Host/test driver and is not a compiler-core capability.
 
 Both adapters validate their snapshots before comparison. Invalid snapshots are
 adapter failures, not language differences.
+
+The Futao adapter uses a deterministic 2,000,000-basic-block tool budget for
+the complete 512-byte adversarial boundary. This does not change the Language
+1.0 default execution budget or the MIR call-depth limit.
 
 ## Differential Classification
 
@@ -208,6 +221,14 @@ The parser fuzz target compares both real adapters for valid UTF-8 inputs up to
 Adapter errors, invalid snapshots, or any differential mismatch are crashes.
 CI runs a bounded 256-iteration smoke; longer mutation campaigns remain a
 maintainer task.
+
+The integration suite additionally drives sources close to the 512-byte limit
+through nested parentheses, arrays, unary operators, records, calls, indexes,
+expression and block arrows, match values, function and generic types, array
+type suffixes, control-flow blocks, a 511-byte valid pattern-binding list, long
+trivia lookahead, vertical-tab recovery, and long recovery regions. These cases
+must match the Rust snapshot exactly; exhausting either the call-depth or
+parser tool-step budget is a test failure.
 
 ## Artifact Retention
 
@@ -287,10 +308,15 @@ pnpm --dir docs build
 
 `bootstrap/compiler/bootstrap-compiler.json` adds the four parser source files,
 the implemented `parser` phase, parser snapshot schema 1, and exact corpus
-counts. The compiler source-tree digest continues to cover every sorted `.ft`
-file below `bootstrap/compiler/src` with the existing length-delimited
+counts: 8 accepted, 8 rejected, and 5 fuzz seeds. The compiler source-tree
+digest continues to cover every sorted `.ft` file below
+`bootstrap/compiler/src` with the existing length-delimited
 `FUTAO-BOOTSTRAP-COMPILER` domain. The Stage 0 manifest repeats the digest and
 fails when the manifest or any source byte drifts.
+
+```text
+sha256:fa0073490738a48efd269577a2598a9ad4d8cb032cae2b96c2879158e10f81dd
+```
 
 Corpus files remain versioned gate inputs outside the compiler-source digest.
 
