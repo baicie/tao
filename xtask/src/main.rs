@@ -38,7 +38,7 @@ enum Task {
         #[arg(long, value_name = "PATH")]
         manifest: Option<PathBuf>,
     },
-    /// Replay parser robustness seeds and check the fuzz target with Rust 1.80.
+    /// Replay parser robustness seeds and check front-end fuzz targets with Rust 1.80.
     FuzzSmoke,
     /// Run release-mode reference performance workloads without timing thresholds.
     Perf,

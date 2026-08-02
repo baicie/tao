@@ -87,6 +87,21 @@ fn futao_adapter_executes_real_bootstrap_source_and_matches_reference(
 }
 
 #[test]
+fn futao_adapter_handles_the_complete_fuzz_byte_budget() -> Result<(), Box<dyn std::error::Error>> {
+    let source = "@".repeat(512);
+    let rust = RustLexerAdapter;
+    let futao = FutaoLexerAdapter::new()?;
+    let harness = LexerDifferentialHarness::new(&rust, &futao);
+
+    let report = harness.run_case("fuzz/max-byte-budget", &source)?;
+
+    assert_eq!(report.outcome(), LexerDifferentialOutcome::Match);
+    assert_eq!(report.reference_snapshot().tokens().len(), 512);
+    assert_eq!(report.reference_snapshot().diagnostics().len(), 512);
+    Ok(())
+}
+
+#[test]
 fn any_observable_difference_fails_the_gate_without_suppression(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let rust = RustLexerAdapter;

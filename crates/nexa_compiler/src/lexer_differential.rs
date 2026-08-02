@@ -768,3 +768,33 @@ const fn is_token_kind(kind: u16) -> bool {
         0..=38 | 64..=68 | 74 | 80..=84 | 92..=94 | 101
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_futao_output, LexerAdapterError};
+
+    #[test]
+    fn futao_protocol_rejects_missing_token_fields() {
+        let output = ["FUTAO-LEXER-1", "1"].map(str::to_owned);
+
+        let error = parse_futao_output(&output).err();
+
+        assert!(matches!(
+            error,
+            Some(LexerAdapterError::Protocol(message))
+                if message == "missing token kind at line 3"
+        ));
+    }
+
+    #[test]
+    fn futao_protocol_rejects_trailing_lines() {
+        let output = ["FUTAO-LEXER-1", "0", "0", "unexpected"].map(str::to_owned);
+
+        let error = parse_futao_output(&output).err();
+
+        assert!(matches!(
+            error,
+            Some(LexerAdapterError::Protocol(message)) if message == "1 trailing line(s)"
+        ));
+    }
+}
