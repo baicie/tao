@@ -5,12 +5,12 @@ start Futao self-hosting. It records the exact `nexac 0.0.1` commit, canonical
 Git archive and `Cargo.lock` SHA-256 digests, Rust 1.80 toolchain, and locked
 release build recipe.
 
-The Bootstrap Stdlib does not exist at this milestone. Its status is pinned as
-`not-defined` with null version and digest so an omitted input cannot be
-mistaken for a released library. Milestone `0.0.6` replaces that absence with a
-real versioned library contract.
+Milestone `0.0.6` binds Futao Bootstrap Profile v1 by its manifest SHA-256 and
+defines Bootstrap Stdlib `0.0.1`. The top-level contract repeats the stdlib
+profile, source-tree digest, and canonical build digest; validation reads both
+referenced manifests and rejects any mismatch.
 
-Validate the manifest, referenced Git objects, and digests:
+Validate the manifest, referenced bootstrap inputs, Git objects, and digests:
 
 ```bash
 cargo xtask bootstrap-contract
@@ -21,6 +21,13 @@ Rebuild Stage 0 from a temporary detached worktree and smoke-test its version:
 ```bash
 cargo xtask bootstrap-contract --rebuild-stage0
 ```
+
+The fixed `nexac 0.0.1` predates the Futao rename and accepts only `.nexa`
+imports. The rebuild gate therefore creates a temporary compatibility
+projection using the current lossless parser: only import-specifier suffixes
+are rewritten from `.ft` to `.nexa`, ordinary string contents are preserved,
+and the rebuilt compiler must check the complete projected stdlib. The checked
+in `.ft` files and their tree digest remain the source of truth.
 
 The contract deliberately separates two artifact classes:
 

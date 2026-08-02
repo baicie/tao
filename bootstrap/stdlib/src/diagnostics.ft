@@ -1,0 +1,26 @@
+import { Span } from "./core.ft";
+
+export type Severity =
+  | Error()
+  | Warning();
+
+export type Diagnostic = {
+  code: String;
+  severity: Severity;
+  message: String;
+  primary: Span;
+};
+
+export function diagnostic(
+  code: String,
+  severity: Severity,
+  message: String,
+  primary: Span
+): Diagnostic {
+  return {
+    code: code,
+    severity: severity,
+    message: message,
+    primary: primary
+  };
+}

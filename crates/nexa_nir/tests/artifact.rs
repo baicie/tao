@@ -59,12 +59,16 @@ fn verified_module(reverse_insertion: bool) -> nexa_nir::VerifiedModule {
 }
 
 fn metadata() -> ArtifactMetadata {
-    ArtifactMetadata::new("0.0.5", "target-neutral-v1", ["ssa-v1", "ownership-v1"])
-        .expect("metadata is canonical")
+    ArtifactMetadata::new(
+        env!("CARGO_PKG_VERSION"),
+        "target-neutral-v1",
+        ["ssa-v1", "ownership-v1"],
+    )
+    .expect("metadata is canonical")
 }
 
 fn compatibility() -> ArtifactCompatibility {
-    ArtifactCompatibility::exact("0.0.5")
+    ArtifactCompatibility::exact(env!("CARGO_PKG_VERSION"))
 }
 
 #[test]
@@ -95,7 +99,7 @@ fn canonical_artifact_contains_the_required_private_header() {
         (
             Some(NIR_ARTIFACT_MAGIC),
             Some(u64::from(NIR_SCHEMA_VERSION)),
-            Some("0.0.5"),
+            Some(env!("CARGO_PKG_VERSION")),
             Some("target-neutral-v1"),
         )
     );
@@ -130,7 +134,7 @@ fn artifact_rejects_an_incompatible_compiler_version() {
     let bytes = CanonicalArtifact::serialize(&verified_module(false), &metadata())
         .expect("verified NIR serializes");
 
-    let error = CanonicalArtifact::deserialize(&bytes, &ArtifactCompatibility::exact("0.0.4"))
+    let error = CanonicalArtifact::deserialize(&bytes, &ArtifactCompatibility::exact("0.0.5"))
         .expect_err("compiler-specific NIR must fail closed");
 
     assert_eq!(error.code(), ArtifactErrorCode::IncompatibleCompiler);

@@ -1,0 +1,89 @@
+import { Option } from "./option.ft";
+
+export type IntMap<V> =
+  | Empty()
+  | Entries(keys: Int[], values: V[]);
+
+function findIntKey(keys: Int[], key: Int, start: Int, end: Int): Int {
+  if (start >= end) {
+    return -1;
+  }
+  if (end - start === 1) {
+    if (keys[start] === key) {
+      return start;
+    }
+    return -1;
+  }
+  const middle = start + (end - start) / 2;
+  const left = findIntKey(keys, key, start, middle);
+  if (left >= 0) {
+    return left;
+  }
+  return findIntKey(keys, key, middle, end);
+}
+
+function replaceValue<V>(
+  values: V[],
+  target: Int,
+  start: Int,
+  end: Int,
+  value: V
+): V[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    if (start === target) {
+      return [value];
+    }
+    return [values[start]];
+  }
+  const middle = start + (end - start) / 2;
+  return replaceValue(values, target, start, middle, value).concat(
+    replaceValue(values, target, middle, end, value)
+  );
+}
+
+function insertEntry<V>(keys: Int[], values: V[], key: Int, value: V): IntMap<V> {
+  const index = findIntKey(keys, key, 0, keys.length);
+  if (index < 0) {
+    return IntMap.Entries(keys.append(key), values.append(value));
+  }
+  return IntMap.Entries(keys, replaceValue(values, index, 0, values.length, value));
+}
+
+function getEntry<V>(keys: Int[], values: V[], key: Int): Option<V> {
+  const index = findIntKey(keys, key, 0, keys.length);
+  if (index < 0) {
+    return Option.None();
+  }
+  return Option.Some(values[index]);
+}
+
+export function intMapInsert<V>(map: IntMap<V>, key: Int, value: V): IntMap<V> {
+  return match (map) {
+    case IntMap.Empty() => IntMap.Entries([key], [value]);
+    case IntMap.Entries(keys, values) => insertEntry(keys, values, key, value);
+  };
+}
+
+export function intMapGet<V>(map: IntMap<V>, key: Int): Option<V> {
+  return match (map) {
+    case IntMap.Empty() => Option.None();
+    case IntMap.Entries(keys, values) => getEntry(keys, values, key);
+  };
+}
+
+export function intMapContains<V>(map: IntMap<V>, key: Int): Bool {
+  return match (map) {
+    case IntMap.Empty() => false;
+    case IntMap.Entries(keys, values) => findIntKey(keys, key, 0, keys.length) >= 0;
+  };
+}
+
+export function intMapKeys<V>(map: IntMap<V>): Int[] {
+  return match (map) {
+    case IntMap.Empty() => [];
+    case IntMap.Entries(keys, values) => keys;
+  };
+}

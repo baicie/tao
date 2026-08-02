@@ -1,6 +1,7 @@
 //! Repository automation tasks for Nexa.
 
 mod bootstrap;
+mod bootstrap_profile;
 mod conformance;
 
 use std::path::{Path, PathBuf};
@@ -55,6 +56,8 @@ enum Task {
     },
     /// Validate accepted and rejected private NIR artifact fixtures.
     NirArtifact,
+    /// Validate Futao Bootstrap Profile v1 and stdlib version transitions.
+    BootstrapProfile,
 }
 
 fn main() -> Result<()> {
@@ -87,6 +90,7 @@ fn main() -> Result<()> {
             bootstrap::run(&manifest, rebuild_stage0)?;
         }
         Task::NirArtifact => bootstrap::verify_nir_artifacts()?,
+        Task::BootstrapProfile => bootstrap_profile::run()?,
     }
 
     Ok(())
@@ -97,7 +101,8 @@ fn check() -> Result<()> {
     lint()?;
     test()?;
     doc()?;
-    bootstrap::run(&bootstrap::default_manifest_path(), false)
+    bootstrap::run(&bootstrap::default_manifest_path(), false)?;
+    bootstrap_profile::run()
 }
 
 fn lint() -> Result<()> {
@@ -284,6 +289,14 @@ fn validate_canonical_dump(bytes: &[u8]) -> Result<()> {
             == Some(1),
         "canonical dump schemaVersion must be 1"
     );
+    ensure!(
+        matches!(
+            dump.get("compilationProfile")
+                .and_then(serde_json::Value::as_str),
+            Some("application" | "futao-bootstrap-v1")
+        ),
+        "canonical dump compilationProfile must be a known profile"
+    );
     let Some(artifacts) = dump.get("artifacts").and_then(serde_json::Value::as_array) else {
         bail!("canonical dump artifacts must be an array");
     };
@@ -401,6 +414,7 @@ mod tests {
         let phases = ["tokens", "cst", "diagnostics", "hir", "mir", "nir"];
         serde_json::to_vec(&json!({
             "schemaVersion": 1,
+            "compilationProfile": "application",
             "artifacts": phases.map(|phase| json!({
                 "phase": phase,
                 "artifact": {"state": if phase == "nir" { state } else { "produced" }}
@@ -420,6 +434,24 @@ mod tests {
         let error = validate_canonical_dump(&dump_with_nir_state("deferred")?).err();
 
         assert!(matches!(error, Some(error) if error.to_string().contains("must be produced")));
+        Ok(())
+    }
+
+    #[test]
+    fn release_dump_rejects_a_missing_compilation_profile() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut dump: serde_json::Value =
+            serde_json::from_slice(&dump_with_nir_state("produced")?)?;
+        let _ = dump
+            .as_object_mut()
+            .ok_or("canonical dump fixture must be an object")?
+            .remove("compilationProfile");
+        let error = validate_canonical_dump(&serde_json::to_vec(&dump)?).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains("compilationProfile")
+        ));
         Ok(())
     }
 }

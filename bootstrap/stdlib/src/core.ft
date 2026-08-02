@@ -1,0 +1,26 @@
+export type Ordering =
+  | Less()
+  | Equal()
+  | Greater();
+
+export type SourceId = {
+  value: Int;
+};
+
+export type Span = {
+  source: SourceId;
+  start: Int;
+  end: Int;
+};
+
+export function sourceId(value: Int): SourceId {
+  return { value: value };
+}
+
+export function span(source: SourceId, start: Int, end: Int): Span {
+  return {
+    source: source,
+    start: start,
+    end: end
+  };
+}

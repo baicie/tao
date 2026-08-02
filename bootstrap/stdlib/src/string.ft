@@ -1,0 +1,55 @@
+import { Option } from "./option.ft";
+
+export type StringBuilder = {
+  parts: String[];
+};
+
+export function stringBuilder(): StringBuilder {
+  return { parts: [] };
+}
+
+export function push(builder: StringBuilder, value: String): StringBuilder {
+  return { parts: builder.parts.append(value) };
+}
+
+function finishRange(parts: String[], start: Int, end: Int): String {
+  if (start >= end) {
+    return "";
+  }
+  if (end - start === 1) {
+    return parts[start];
+  }
+  const middle = start + (end - start) / 2;
+  return finishRange(parts, start, middle) + finishRange(parts, middle, end);
+}
+
+export function finish(builder: StringBuilder): String {
+  return finishRange(builder.parts, 0, builder.parts.length);
+}
+
+export type SourceText = {
+  utf8Bytes: Int[];
+  codePoints: Int[];
+  byteOffsets: Int[];
+};
+
+export function byteAt(text: SourceText, index: Int): Option<Int> {
+  if (index < 0 || index >= text.utf8Bytes.length) {
+    return Option.None();
+  }
+  return Option.Some(text.utf8Bytes[index]);
+}
+
+export function codePointAt(text: SourceText, index: Int): Option<Int> {
+  if (index < 0 || index >= text.codePoints.length) {
+    return Option.None();
+  }
+  return Option.Some(text.codePoints[index]);
+}
+
+export function byteOffsetAt(text: SourceText, index: Int): Option<Int> {
+  if (index < 0 || index >= text.byteOffsets.length) {
+    return Option.None();
+  }
+  return Option.Some(text.byteOffsets[index]);
+}

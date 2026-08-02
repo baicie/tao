@@ -1,0 +1,55 @@
+import { binarySearch, filter, fold, map, sortBy } from "../src/array.ft";
+import { Ordering } from "../src/core.ft";
+import { Option } from "../src/option.ft";
+import { finish, push, stringBuilder } from "../src/string.ft";
+
+type Item = {
+  key: Int;
+  order: Int;
+};
+
+function compare(left: Int, right: Int): Ordering {
+  if (left < right) {
+    return Ordering.Less();
+  }
+  if (left > right) {
+    return Ordering.Greater();
+  }
+  return Ordering.Equal();
+}
+
+function compareItem(left: Item, right: Item): Ordering {
+  return compare(left.key, right.key);
+}
+
+function searchResult(result: Option<Int>): Int {
+  return match (result) {
+    case Option.Some(index) => index;
+    case Option.None() => -1;
+  };
+}
+
+function main(): Unit {
+  const doubled = map([1, 2, 3], (value: Int): Int => value * 2);
+  const selected = filter(doubled, (value: Int): Bool => value >= 4);
+  const total = fold(selected, 0, (state: Int, value: Int): Int => state + value);
+  const sorted = sortBy([3, 1, 2], compare);
+  const stable = sortBy(
+    [
+      { key: 1, order: 0 },
+      { key: 0, order: 1 },
+      { key: 1, order: 2 }
+    ],
+    compareItem
+  );
+  const builder = push(push(stringBuilder(), "fu"), "tao");
+
+  print(total);
+  print(sorted[0]);
+  print(sorted[1]);
+  print(sorted[2]);
+  print(searchResult(binarySearch(sorted, 2, compare)));
+  print(stable[1].order);
+  print(stable[2].order);
+  print(finish(builder));
+}

@@ -1,5 +1,19 @@
 # Changelog
 
+## Compiler Package 0.0.6 (Bootstrap Profile and Stdlib)
+
+- Froze the `.ft`-only `futao-bootstrap-v1` capability surface and added stable
+  profile diagnostics for mutation, unbounded loop control, and ambient output.
+- Added Bootstrap Stdlib `0.0.1` with pure compiler data structures and stable
+  insertion-order behavior, plus content-addressed source and canonical build
+  manifests.
+- Added an 80-element runtime workload proving core stdlib operations do not
+  exhaust the reference interpreter's 64-active-call limit.
+- Bound compilation profiles into canonical dumps and the profile/stdlib
+  digests into the Stage 0 manifest, with forward-only version fixtures.
+- Added local, CI, release, and rebuilt `nexac 0.0.1` compatibility gates for
+  the checked-in stdlib.
+
 ## Compiler Package 0.0.5 (Typed NIR and Bootstrap Artifact)
 
 - Added target-neutral typed NIR construction and an independent verifier for

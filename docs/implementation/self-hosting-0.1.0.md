@@ -11,7 +11,7 @@ Accepted 状态解释为对应实现已经存在。
 
 ## 当前基线
 
-* 工具链版本：`0.0.5`。
+* 工具链版本：`0.0.6`。
 * Stage 0：固定为 `nexac 0.0.1` Rust 实现，覆盖 Lexer、Parser、Resolver、Type Checker、HIR、CFG MIR、
   reference interpreter、诊断、conformance 与 release gate。
 * 语言名称：新设计和源码使用 Futao / `.ft`；现有 Nexa / `.nexa` 输入在迁移策略
@@ -22,7 +22,8 @@ Accepted 状态解释为对应实现已经存在。
 * `0.0.3` 已建立 Futao 源码入口、纯 compiler core 与 differential 基础设施。
 * `0.0.4` 已建立自举 ownership/storage reference kernel 与独立验收门槛。
 * `0.0.5` 已建立 target-neutral typed NIR、独立 verifier、显式 target layout 与私有自举产物。
-* 下一里程碑：`0.0.6` Bootstrap Profile 与 Bootstrap Stdlib。
+* `0.0.6` 已冻结 `futao-bootstrap-v1` 并交付 content-addressed Bootstrap Stdlib `0.0.1`。
+* 下一里程碑：`0.0.7` Futao Lexer differential。
 
 ## 关键依赖
 
@@ -149,6 +150,24 @@ target profile、feature flags、canonical encoding 与 content hash；accepted 
 
 验收：profile lint 能拒绝越界能力；stdlib 可由 C0 确定性构建；版本升级有兼容和回滚
 fixture。
+
+交付状态：已实现。`CompilerOptions::bootstrap_v1()` 选择 `.ft`-only 的纯编译器能力面，
+以 `E6201` 至 `E6203` 拒绝可变绑定/赋值、`while`/`break`/`continue` 和 ambient `print`；
+默认 `application` profile 保持 Language 1.0 行为。canonical dump 固定
+`compilationProfile`，使相同源码在不同能力面下成为不同构建输入。
+`bootstrap/profile/bootstrap-profile-v1.json` 冻结允许的语法、值、所有权、迭代顺序和
+禁止的 Host capability，其 SHA-256 进入顶层 manifest。
+
+Bootstrap Stdlib `0.0.1` 提供 `Option`/`Result`、span/diagnostic、纯数组与文本工具、
+stable insertion-order map/set/bit set、StringBuilder 和 identity/generation-checked
+persistent Arena。manifest 固定排序源码清单、源码树 digest 与 profile-aware canonical
+build digest；正反 source insertion order 必须得到相同 dump。升级 fixture 接受
+`0.0.0 -> 0.0.1`，回滚 fixture 拒绝 `0.0.1 -> 0.0.0`。
+`cargo xtask bootstrap-profile` 验证上述合同和 observable behavior；
+`cargo xtask bootstrap-contract --rebuild-stage0` 还会重建固定 `nexac 0.0.1`，使用 lossless
+CST 只把 import suffix 从 `.ft` 临时投影为历史 `.nexa`，并要求该 C0 check 完整 stdlib。
+详细边界见
+[`bootstrap-profile-stdlib-0.0.6.md`](bootstrap-profile-stdlib-0.0.6.md)。
 
 ### `0.0.7` 至 `0.0.11`：纵向迁移编译器核心
 

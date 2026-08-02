@@ -1,0 +1,49 @@
+import {
+  Arena,
+  ArenaAccessError,
+  ArenaId,
+  arenaGeneration,
+  arenaGet,
+  arenaIdGeneration,
+  arenaIdIndex,
+  arenaInsert,
+  arenaReset
+} from "../src/arena.ft";
+import { Result } from "../src/result.ft";
+
+function stringValue(result: Result<String, ArenaAccessError>): String {
+  return match (result) {
+    case Result.Ok(value) => value;
+    case Result.Err(error) => "error";
+  };
+}
+
+function accessError(result: Result<String, ArenaAccessError>): String {
+  return match (result) {
+    case Result.Ok(value) => "ok";
+    case Result.Err(error) => match (error) {
+      case ArenaAccessError.WrongArena() => "wrong-arena";
+      case ArenaAccessError.StaleGeneration() => "stale-generation";
+      case ArenaAccessError.InvalidIndex() => "invalid-index";
+    };
+  };
+}
+
+function main(): Unit {
+  const empty: Arena<String> = Arena.Empty(7, 0);
+  const first = arenaInsert(empty, "first");
+  const second = arenaInsert(first.arena, "second");
+  const reset = arenaReset(second.arena);
+  const foreign: Arena<String> = Arena.Empty(8, 0);
+  const invalid = ArenaId.Id(7, 0, 99);
+
+  print(arenaIdIndex(first.id));
+  print(arenaIdIndex(second.id));
+  print(arenaIdGeneration(second.id));
+  print(stringValue(arenaGet(second.arena, first.id)));
+  print(stringValue(arenaGet(first.arena, first.id)));
+  print(arenaGeneration(reset));
+  print(accessError(arenaGet(reset, first.id)));
+  print(accessError(arenaGet(foreign, first.id)));
+  print(accessError(arenaGet(second.arena, invalid)));
+}

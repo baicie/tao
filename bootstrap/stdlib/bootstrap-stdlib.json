@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "name": "futao-bootstrap",
+  "version": "0.0.1",
+  "profile": "futao-bootstrap-v1",
+  "entry": "src/bootstrap.ft",
+  "sourceFiles": [
+    "src/arena.ft",
+    "src/array.ft",
+    "src/bit_set.ft",
+    "src/bootstrap.ft",
+    "src/core.ft",
+    "src/diagnostics.ft",
+    "src/int_map.ft",
+    "src/option.ft",
+    "src/result.ft",
+    "src/sets.ft",
+    "src/string.ft",
+    "src/string_map.ft"
+  ],
+  "requiredCapabilities": [],
+  "iterationPolicy": "source-order",
+  "treeHashAlgorithm": "sha256",
+  "treeDigest": "sha256:d302a92827072fdb6c9ef85ffc53cca9472f9dfe69f604132d5acd50a6f92da2",
+  "canonicalDumpSchemaVersion": 1,
+  "buildDigest": "sha256:03c183622af98e72f667443a1995f96f0314ab8cf9c7e1eaf70dbe114175538b"
+}

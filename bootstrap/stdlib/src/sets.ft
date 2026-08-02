@@ -1,0 +1,63 @@
+export type StringSet = {
+  values: String[];
+};
+
+export type IntSet = {
+  values: Int[];
+};
+
+function containsString(values: String[], value: String): Bool {
+  for (const candidate of values) {
+    if (candidate === value) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function containsInt(values: Int[], value: Int): Bool {
+  for (const candidate of values) {
+    if (candidate === value) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function stringSet(): StringSet {
+  return { values: [] };
+}
+
+export function stringSetInsert(set: StringSet, value: String): StringSet {
+  if (containsString(set.values, value)) {
+    return set;
+  }
+  return { values: set.values.append(value) };
+}
+
+export function stringSetContains(set: StringSet, value: String): Bool {
+  return containsString(set.values, value);
+}
+
+export function stringSetValues(set: StringSet): String[] {
+  return set.values;
+}
+
+export function intSet(): IntSet {
+  return { values: [] };
+}
+
+export function intSetInsert(set: IntSet, value: Int): IntSet {
+  if (containsInt(set.values, value)) {
+    return set;
+  }
+  return { values: set.values.append(value) };
+}
+
+export function intSetContains(set: IntSet, value: Int): Bool {
+  return containsInt(set.values, value);
+}
+
+export function intSetValues(set: IntSet): Int[] {
+  return set.values;
+}

@@ -1,0 +1,7 @@
+export type Option<T> =
+  | Some(value: T)
+  | None();
+
+export function some<T>(value: T): Option<T> {
+  return Option.Some(value);
+}

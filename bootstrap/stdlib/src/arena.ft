@@ -1,0 +1,114 @@
+import { Result } from "./result.ft";
+
+export type Arena<T> =
+  | Empty(identity: Int, generation: Int)
+  | Entries(identity: Int, generation: Int, values: T[]);
+
+export type ArenaId =
+  | Id(identity: Int, generation: Int, index: Int);
+
+export type ArenaInsert<T> = {
+  arena: Arena<T>;
+  id: ArenaId;
+};
+
+export type ArenaAccessError =
+  | WrongArena()
+  | StaleGeneration()
+  | InvalidIndex();
+
+function insertEmpty<T>(identity: Int, generation: Int, value: T): ArenaInsert<T> {
+  return {
+    arena: Arena.Entries(identity, generation, [value]),
+    id: ArenaId.Id(identity, generation, 0)
+  };
+}
+
+function insertEntry<T>(
+  identity: Int,
+  generation: Int,
+  values: T[],
+  value: T
+): ArenaInsert<T> {
+  return {
+    arena: Arena.Entries(identity, generation, values.append(value)),
+    id: ArenaId.Id(identity, generation, values.length)
+  };
+}
+
+function getAt<T>(
+  identity: Int,
+  generation: Int,
+  values: T[],
+  idIdentity: Int,
+  idGeneration: Int,
+  index: Int
+): Result<T, ArenaAccessError> {
+  if (!(identity === idIdentity)) {
+    return Result.Err(ArenaAccessError.WrongArena());
+  }
+  if (!(generation === idGeneration)) {
+    return Result.Err(ArenaAccessError.StaleGeneration());
+  }
+  if (index < 0 || index >= values.length) {
+    return Result.Err(ArenaAccessError.InvalidIndex());
+  }
+  return Result.Ok(values[index]);
+}
+
+function getById<T>(
+  identity: Int,
+  generation: Int,
+  values: T[],
+  id: ArenaId
+): Result<T, ArenaAccessError> {
+  return match (id) {
+    case ArenaId.Id(idIdentity, idGeneration, index) =>
+      getAt(identity, generation, values, idIdentity, idGeneration, index);
+  };
+}
+
+export function arenaInsert<T>(arena: Arena<T>, value: T): ArenaInsert<T> {
+  return match (arena) {
+    case Arena.Empty(identity, generation) => insertEmpty(identity, generation, value);
+    case Arena.Entries(identity, generation, values) =>
+      insertEntry(identity, generation, values, value);
+  };
+}
+
+export function arenaGet<T>(
+  arena: Arena<T>,
+  id: ArenaId
+): Result<T, ArenaAccessError> {
+  return match (arena) {
+    case Arena.Empty(identity, generation) => getById(identity, generation, [], id);
+    case Arena.Entries(identity, generation, values) =>
+      getById(identity, generation, values, id);
+  };
+}
+
+export function arenaReset<T>(arena: Arena<T>): Arena<T> {
+  return match (arena) {
+    case Arena.Empty(identity, generation) => Arena.Empty(identity, generation + 1);
+    case Arena.Entries(identity, generation, values) => Arena.Empty(identity, generation + 1);
+  };
+}
+
+export function arenaGeneration<T>(arena: Arena<T>): Int {
+  return match (arena) {
+    case Arena.Empty(identity, generation) => generation;
+    case Arena.Entries(identity, generation, values) => generation;
+  };
+}
+
+export function arenaIdGeneration(id: ArenaId): Int {
+  return match (id) {
+    case ArenaId.Id(identity, generation, index) => generation;
+  };
+}
+
+export function arenaIdIndex(id: ArenaId): Int {
+  return match (id) {
+    case ArenaId.Id(identity, generation, index) => index;
+  };
+}
