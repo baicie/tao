@@ -1,0 +1,592 @@
+export type LexerInput = {
+  codePoints: Int[];
+  byteOffsets: Int[];
+  byteLength: Int;
+};
+
+export type LexerToken = {
+  kind: Int;
+  start: Int;
+  end: Int;
+  trivia: Bool;
+};
+
+export type LexicalDiagnostic = {
+  code: String;
+  severity: String;
+  labelStyle: String;
+  start: Int;
+  end: Int;
+};
+
+export type LexerResult = {
+  tokens: LexerToken[];
+  diagnostics: LexicalDiagnostic[];
+};
+
+type LexerMode =
+  | Idle()
+  | Whitespace(start: Int)
+  | Identifier(start: Int)
+  | Integer(start: Int)
+  | Slash(start: Int)
+  | LineComment(start: Int)
+  | Equal(start: Int)
+  | EqualPair(start: Int)
+  | Bang(start: Int)
+  | BangEqual(start: Int)
+  | Ampersand(start: Int)
+  | Pipe(start: Int)
+  | Less(start: Int)
+  | Greater(start: Int)
+  | StringBody(start: Int, valid: Bool, escaped: Bool);
+
+type LexerState = {
+  mode: LexerMode;
+  tokens: LexerToken[];
+  diagnostics: LexicalDiagnostic[];
+};
+
+function withMode(state: LexerState, mode: LexerMode): LexerState {
+  return {
+    mode: mode,
+    tokens: state.tokens,
+    diagnostics: state.diagnostics
+  };
+}
+
+function emit(
+  input: LexerInput,
+  state: LexerState,
+  kind: Int,
+  startIndex: Int,
+  endIndex: Int
+): LexerState {
+  const start = input.byteOffsets[startIndex];
+  const end = input.byteOffsets[endIndex];
+  const nextToken: LexerToken = {
+    kind: kind,
+    start: start,
+    end: end,
+    trivia: kind === 2 || kind === 3
+  };
+  if (kind === 11) {
+    const nextDiagnostic: LexicalDiagnostic = {
+      code: "E1001",
+      severity: "error",
+      labelStyle: "primary",
+      start: start,
+      end: end
+    };
+    return {
+      mode: LexerMode.Idle(),
+      tokens: state.tokens.append(nextToken),
+      diagnostics: state.diagnostics.append(nextDiagnostic)
+    };
+  }
+  return {
+    mode: LexerMode.Idle(),
+    tokens: state.tokens.append(nextToken),
+    diagnostics: state.diagnostics
+  };
+}
+
+function isAsciiWhitespace(codePoint: Int): Bool {
+  return (codePoint >= 9 && codePoint <= 13) || codePoint === 32;
+}
+
+function isAsciiLetter(codePoint: Int): Bool {
+  return (codePoint >= 65 && codePoint <= 90) ||
+    (codePoint >= 97 && codePoint <= 122);
+}
+
+function isAsciiDigit(codePoint: Int): Bool {
+  return codePoint >= 48 && codePoint <= 57;
+}
+
+function isIdentifierStart(codePoint: Int): Bool {
+  return isAsciiLetter(codePoint) || codePoint === 95;
+}
+
+function isIdentifierContinue(codePoint: Int): Bool {
+  return isIdentifierStart(codePoint) || isAsciiDigit(codePoint);
+}
+
+function sameAsciiAt(
+  codePoints: Int[],
+  start: Int,
+  expected: Int[],
+  index: Int
+): Bool {
+  if (index >= expected.length) {
+    return true;
+  }
+  if (!(codePoints[start + index] === expected[index])) {
+    return false;
+  }
+  return sameAsciiAt(codePoints, start, expected, index + 1);
+}
+
+function sameAscii(
+  codePoints: Int[],
+  start: Int,
+  end: Int,
+  expected: Int[]
+): Bool {
+  if (!(end - start === expected.length)) {
+    return false;
+  }
+  return sameAsciiAt(codePoints, start, expected, 0);
+}
+
+function keywordKind(codePoints: Int[], start: Int, end: Int): Int {
+  if (sameAscii(codePoints, start, end, [102, 117, 110, 99, 116, 105, 111, 110])) {
+    return 12;
+  }
+  if (sameAscii(codePoints, start, end, [99, 111, 110, 115, 116])) {
+    return 13;
+  }
+  if (sameAscii(codePoints, start, end, [108, 101, 116])) {
+    return 14;
+  }
+  if (sameAscii(codePoints, start, end, [105, 102])) {
+    return 15;
+  }
+  if (sameAscii(codePoints, start, end, [101, 108, 115, 101])) {
+    return 16;
+  }
+  if (sameAscii(codePoints, start, end, [119, 104, 105, 108, 101])) {
+    return 17;
+  }
+  if (sameAscii(codePoints, start, end, [98, 114, 101, 97, 107])) {
+    return 18;
+  }
+  if (sameAscii(codePoints, start, end, [99, 111, 110, 116, 105, 110, 117, 101])) {
+    return 19;
+  }
+  if (sameAscii(codePoints, start, end, [114, 101, 116, 117, 114, 110])) {
+    return 20;
+  }
+  if (sameAscii(codePoints, start, end, [116, 114, 117, 101])) {
+    return 21;
+  }
+  if (sameAscii(codePoints, start, end, [102, 97, 108, 115, 101])) {
+    return 22;
+  }
+  if (sameAscii(codePoints, start, end, [73, 110, 116])) {
+    return 23;
+  }
+  if (sameAscii(codePoints, start, end, [66, 111, 111, 108])) {
+    return 24;
+  }
+  if (sameAscii(codePoints, start, end, [85, 110, 105, 116])) {
+    return 25;
+  }
+  if (sameAscii(codePoints, start, end, [83, 116, 114, 105, 110, 103])) {
+    return 65;
+  }
+  if (sameAscii(codePoints, start, end, [116, 121, 112, 101])) {
+    return 74;
+  }
+  if (sameAscii(codePoints, start, end, [109, 97, 116, 99, 104])) {
+    return 80;
+  }
+  if (sameAscii(codePoints, start, end, [99, 97, 115, 101])) {
+    return 81;
+  }
+  if (sameAscii(codePoints, start, end, [100, 101, 102, 97, 117, 108, 116])) {
+    return 82;
+  }
+  if (sameAscii(codePoints, start, end, [105, 109, 112, 111, 114, 116])) {
+    return 92;
+  }
+  if (sameAscii(codePoints, start, end, [101, 120, 112, 111, 114, 116])) {
+    return 93;
+  }
+  if (sameAscii(codePoints, start, end, [102, 114, 111, 109])) {
+    return 94;
+  }
+  if (sameAscii(codePoints, start, end, [102, 111, 114])) {
+    return 101;
+  }
+  return 0;
+}
+
+function stepIdle(
+  input: LexerInput,
+  state: LexerState,
+  index: Int,
+  codePoint: Int
+): LexerState {
+  if (isAsciiWhitespace(codePoint)) {
+    return withMode(state, LexerMode.Whitespace(index));
+  }
+  if (isIdentifierStart(codePoint)) {
+    return withMode(state, LexerMode.Identifier(index));
+  }
+  if (isAsciiDigit(codePoint)) {
+    return withMode(state, LexerMode.Integer(index));
+  }
+  if (codePoint === 34) {
+    return withMode(state, LexerMode.StringBody(index, true, false));
+  }
+  if (codePoint === 47) {
+    return withMode(state, LexerMode.Slash(index));
+  }
+  if (codePoint === 61) {
+    return withMode(state, LexerMode.Equal(index));
+  }
+  if (codePoint === 33) {
+    return withMode(state, LexerMode.Bang(index));
+  }
+  if (codePoint === 38) {
+    return withMode(state, LexerMode.Ampersand(index));
+  }
+  if (codePoint === 124) {
+    return withMode(state, LexerMode.Pipe(index));
+  }
+  if (codePoint === 60) {
+    return withMode(state, LexerMode.Less(index));
+  }
+  if (codePoint === 62) {
+    return withMode(state, LexerMode.Greater(index));
+  }
+  if (codePoint === 40) {
+    return emit(input, state, 4, index, index + 1);
+  }
+  if (codePoint === 41) {
+    return emit(input, state, 5, index, index + 1);
+  }
+  if (codePoint === 123) {
+    return emit(input, state, 6, index, index + 1);
+  }
+  if (codePoint === 125) {
+    return emit(input, state, 7, index, index + 1);
+  }
+  if (codePoint === 44) {
+    return emit(input, state, 8, index, index + 1);
+  }
+  if (codePoint === 59) {
+    return emit(input, state, 9, index, index + 1);
+  }
+  if (codePoint === 58) {
+    return emit(input, state, 26, index, index + 1);
+  }
+  if (codePoint === 43) {
+    return emit(input, state, 27, index, index + 1);
+  }
+  if (codePoint === 45) {
+    return emit(input, state, 28, index, index + 1);
+  }
+  if (codePoint === 42) {
+    return emit(input, state, 29, index, index + 1);
+  }
+  if (codePoint === 91) {
+    return emit(input, state, 66, index, index + 1);
+  }
+  if (codePoint === 93) {
+    return emit(input, state, 67, index, index + 1);
+  }
+  if (codePoint === 46) {
+    return emit(input, state, 68, index, index + 1);
+  }
+  return emit(input, state, 11, index, index + 1);
+}
+
+function stepString(
+  input: LexerInput,
+  state: LexerState,
+  index: Int,
+  codePoint: Int,
+  start: Int,
+  valid: Bool,
+  escaped: Bool
+): LexerState {
+  if (escaped) {
+    if (codePoint === 10 || codePoint === 13) {
+      return step(input, emit(input, state, 11, start, index), index);
+    }
+    if (
+      codePoint === 34 || codePoint === 92 || codePoint === 110 ||
+      codePoint === 114 || codePoint === 116
+    ) {
+      return withMode(state, LexerMode.StringBody(start, valid, false));
+    }
+    return withMode(state, LexerMode.StringBody(start, false, false));
+  }
+  if (codePoint === 34) {
+    if (valid) {
+      return emit(input, state, 64, start, index + 1);
+    }
+    return emit(input, state, 11, start, index + 1);
+  }
+  if (codePoint === 10 || codePoint === 13) {
+    return step(input, emit(input, state, 11, start, index), index);
+  }
+  if (codePoint === 92) {
+    return withMode(state, LexerMode.StringBody(start, valid, true));
+  }
+  return state;
+}
+
+function stepWhitespace(
+  input: LexerInput,
+  state: LexerState,
+  index: Int,
+  codePoint: Int,
+  start: Int
+): LexerState {
+  if (isAsciiWhitespace(codePoint)) {
+    return state;
+  }
+  return step(input, emit(input, state, 2, start, index), index);
+}
+
+function stepIdentifier(
+  input: LexerInput,
+  state: LexerState,
+  index: Int,
+  codePoint: Int,
+  start: Int
+): LexerState {
+  if (isIdentifierContinue(codePoint)) {
+    return state;
+  }
+  const kind = keywordKind(input.codePoints, start, index);
+  return step(input, emit(input, state, kind, start, index), index);
+}
+
+function stepInteger(
+  input: LexerInput,
+  state: LexerState,
+  index: Int,
+  codePoint: Int,
+  start: Int
+): LexerState {
+  if (isAsciiDigit(codePoint)) {
+    return state;
+  }
+  return step(input, emit(input, state, 1, start, index), index);
+}
+
+function stepSlash(
+  input: LexerInput,
+  state: LexerState,
+  index: Int,
+  codePoint: Int,
+  start: Int
+): LexerState {
+  if (codePoint === 47) {
+    return withMode(state, LexerMode.LineComment(start));
+  }
+  return step(input, emit(input, state, 30, start, index), index);
+}
+
+function stepLineComment(
+  input: LexerInput,
+  state: LexerState,
+  index: Int,
+  codePoint: Int,
+  start: Int
+): LexerState {
+  if (codePoint === 10) {
+    return step(input, emit(input, state, 3, start, index), index);
+  }
+  return state;
+}
+
+function stepEqual(
+  input: LexerInput,
+  state: LexerState,
+  index: Int,
+  codePoint: Int,
+  start: Int
+): LexerState {
+  if (codePoint === 62) {
+    return emit(input, state, 84, start, index + 1);
+  }
+  if (codePoint === 61) {
+    return withMode(state, LexerMode.EqualPair(start));
+  }
+  return step(input, emit(input, state, 10, start, index), index);
+}
+
+function stepEqualPair(
+  input: LexerInput,
+  state: LexerState,
+  index: Int,
+  codePoint: Int,
+  start: Int
+): LexerState {
+  if (codePoint === 61) {
+    return emit(input, state, 34, start, index + 1);
+  }
+  return step(input, emit(input, state, 11, start, index), index);
+}
+
+function stepBang(
+  input: LexerInput,
+  state: LexerState,
+  index: Int,
+  codePoint: Int,
+  start: Int
+): LexerState {
+  if (codePoint === 61) {
+    return withMode(state, LexerMode.BangEqual(start));
+  }
+  return step(input, emit(input, state, 31, start, index), index);
+}
+
+function stepBangEqual(
+  input: LexerInput,
+  state: LexerState,
+  index: Int,
+  codePoint: Int,
+  start: Int
+): LexerState {
+  if (codePoint === 61) {
+    return emit(input, state, 11, start, index + 1);
+  }
+  return step(input, emit(input, state, 11, start, index), index);
+}
+
+function stepAmpersand(
+  input: LexerInput,
+  state: LexerState,
+  index: Int,
+  codePoint: Int,
+  start: Int
+): LexerState {
+  if (codePoint === 38) {
+    return emit(input, state, 32, start, index + 1);
+  }
+  return step(input, emit(input, state, 11, start, index), index);
+}
+
+function stepPipe(
+  input: LexerInput,
+  state: LexerState,
+  index: Int,
+  codePoint: Int,
+  start: Int
+): LexerState {
+  if (codePoint === 124) {
+    return emit(input, state, 33, start, index + 1);
+  }
+  return step(input, emit(input, state, 83, start, index), index);
+}
+
+function stepLess(
+  input: LexerInput,
+  state: LexerState,
+  index: Int,
+  codePoint: Int,
+  start: Int
+): LexerState {
+  if (codePoint === 61) {
+    return emit(input, state, 36, start, index + 1);
+  }
+  return step(input, emit(input, state, 35, start, index), index);
+}
+
+function stepGreater(
+  input: LexerInput,
+  state: LexerState,
+  index: Int,
+  codePoint: Int,
+  start: Int
+): LexerState {
+  if (codePoint === 61) {
+    return emit(input, state, 38, start, index + 1);
+  }
+  return step(input, emit(input, state, 37, start, index), index);
+}
+
+function step(input: LexerInput, state: LexerState, index: Int): LexerState {
+  const codePoint = input.codePoints[index];
+  return match (state.mode) {
+    case LexerMode.Idle() => stepIdle(input, state, index, codePoint);
+    case LexerMode.Whitespace(start) =>
+      stepWhitespace(input, state, index, codePoint, start);
+    case LexerMode.Identifier(start) =>
+      stepIdentifier(input, state, index, codePoint, start);
+    case LexerMode.Integer(start) => stepInteger(input, state, index, codePoint, start);
+    case LexerMode.Slash(start) => stepSlash(input, state, index, codePoint, start);
+    case LexerMode.LineComment(start) =>
+      stepLineComment(input, state, index, codePoint, start);
+    case LexerMode.Equal(start) => stepEqual(input, state, index, codePoint, start);
+    case LexerMode.EqualPair(start) => stepEqualPair(input, state, index, codePoint, start);
+    case LexerMode.Bang(start) => stepBang(input, state, index, codePoint, start);
+    case LexerMode.BangEqual(start) => stepBangEqual(input, state, index, codePoint, start);
+    case LexerMode.Ampersand(start) =>
+      stepAmpersand(input, state, index, codePoint, start);
+    case LexerMode.Pipe(start) => stepPipe(input, state, index, codePoint, start);
+    case LexerMode.Less(start) => stepLess(input, state, index, codePoint, start);
+    case LexerMode.Greater(start) => stepGreater(input, state, index, codePoint, start);
+    case LexerMode.StringBody(start, valid, escaped) =>
+      stepString(input, state, index, codePoint, start, valid, escaped);
+  };
+}
+
+function scanSmall(
+  input: LexerInput,
+  start: Int,
+  end: Int,
+  state: LexerState
+): LexerState {
+  if (start >= end) {
+    return state;
+  }
+  const next = step(input, state, start);
+  return scanSmall(input, start + 1, end, next);
+}
+
+function scanRange(
+  input: LexerInput,
+  start: Int,
+  end: Int,
+  state: LexerState
+): LexerState {
+  if (end - start <= 16) {
+    return scanSmall(input, start, end, state);
+  }
+  const middle = start + (end - start) / 2;
+  const left = scanRange(input, start, middle, state);
+  return scanRange(input, middle, end, left);
+}
+
+function finish(input: LexerInput, state: LexerState): LexerState {
+  const end = input.codePoints.length;
+  return match (state.mode) {
+    case LexerMode.Idle() => state;
+    case LexerMode.Whitespace(start) => emit(input, state, 2, start, end);
+    case LexerMode.Identifier(start) =>
+      emit(input, state, keywordKind(input.codePoints, start, end), start, end);
+    case LexerMode.Integer(start) => emit(input, state, 1, start, end);
+    case LexerMode.Slash(start) => emit(input, state, 30, start, end);
+    case LexerMode.LineComment(start) => emit(input, state, 3, start, end);
+    case LexerMode.Equal(start) => emit(input, state, 10, start, end);
+    case LexerMode.EqualPair(start) => emit(input, state, 11, start, end);
+    case LexerMode.Bang(start) => emit(input, state, 31, start, end);
+    case LexerMode.BangEqual(start) => emit(input, state, 11, start, end);
+    case LexerMode.Ampersand(start) => emit(input, state, 11, start, end);
+    case LexerMode.Pipe(start) => emit(input, state, 83, start, end);
+    case LexerMode.Less(start) => emit(input, state, 35, start, end);
+    case LexerMode.Greater(start) => emit(input, state, 37, start, end);
+    case LexerMode.StringBody(start, valid, escaped) => emit(input, state, 11, start, end);
+  };
+}
+
+export function lex(input: LexerInput): LexerResult {
+  const initial: LexerState = {
+    mode: LexerMode.Idle(),
+    tokens: [],
+    diagnostics: []
+  };
+  const scanned = scanRange(input, 0, input.codePoints.length, initial);
+  const completed = finish(input, scanned);
+  return {
+    tokens: completed.tokens,
+    diagnostics: completed.diagnostics
+  };
+}

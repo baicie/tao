@@ -1,0 +1,5 @@
+import { lexEncoded } from "./lexer_bridge.ft";
+
+function main(arguments: String[]): Unit {
+  const result = lexEncoded(arguments);
+}

@@ -1,0 +1,21 @@
+import { lexEncoded } from "./lexer_bridge.ft";
+
+function main(arguments: String[]): Unit {
+  const result = lexEncoded(arguments);
+  print("FUTAO-LEXER-1");
+  print(result.tokens.length);
+  for (const token of result.tokens) {
+    print(token.kind);
+    print(token.start);
+    print(token.end);
+    print(token.trivia);
+  }
+  print(result.diagnostics.length);
+  for (const diagnostic of result.diagnostics) {
+    print(diagnostic.code);
+    print(diagnostic.severity);
+    print(diagnostic.labelStyle);
+    print(diagnostic.start);
+    print(diagnostic.end);
+  }
+}
