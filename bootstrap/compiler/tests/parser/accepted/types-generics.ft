@@ -1,0 +1,7 @@
+function apply<T>(value: T, transform: (input: T) => T): T {
+  return transform(value);
+}
+
+type Handlers<T> = {
+  values: ((value: T) => T)[];
+};

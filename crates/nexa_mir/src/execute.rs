@@ -233,6 +233,23 @@ pub fn run_with_args(
     program: &MirProgram,
     arguments: &[String],
 ) -> Result<Execution, RuntimeFailure> {
+    run_with_args_and_step_limit(program, arguments, MAX_EXECUTION_STEPS)
+}
+
+/// Executes `main` with arguments and an explicit basic-block step limit.
+///
+/// This keeps execution bounded while allowing internal tools with larger
+/// deterministic output to select a budget above the language runtime default.
+///
+/// # Errors
+///
+/// Returns [`RuntimeFailure`] under the same conditions as [`run_with_args`],
+/// including when execution reaches `step_limit` basic blocks.
+pub fn run_with_args_and_step_limit(
+    program: &MirProgram,
+    arguments: &[String],
+    step_limit: usize,
+) -> Result<Execution, RuntimeFailure> {
     validate_program(program).map_err(RuntimeFailure::from)?;
     let main = program
         .entry
@@ -268,6 +285,7 @@ pub fn run_with_args(
         output: Vec::new(),
         call_depth: 0,
         steps: 0,
+        step_limit,
     };
     match interpreter.call(program, main, main_arguments, program.span) {
         Ok(value) => Ok(Execution {
@@ -634,6 +652,7 @@ struct Interpreter {
     output: Vec<String>,
     call_depth: usize,
     steps: usize,
+    step_limit: usize,
 }
 
 impl Interpreter {
@@ -828,10 +847,10 @@ impl Interpreter {
     }
 
     fn consume_step(&mut self, span: SourceSpan) -> Result<(), RuntimeError> {
-        if self.steps >= MAX_EXECUTION_STEPS {
+        if self.steps >= self.step_limit {
             return Err(RuntimeError::new(
                 span,
-                format!("execution step limit of {MAX_EXECUTION_STEPS} exceeded"),
+                format!("execution step limit of {} exceeded", self.step_limit),
             ));
         }
         self.steps += 1;

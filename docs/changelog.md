@@ -1,5 +1,18 @@
 # Changelog
 
+## Compiler Package 0.0.8 (Futao Parser Differential)
+
+- Added the pure Futao parser as the second executable compiler phase, consuming
+  the verified Futao lexer under Bootstrap Profile v1.
+- Froze parser snapshot schema 1 for balanced lossless CST events, concrete
+  recovery regions, and parser-only structured diagnostics.
+- Compared 8 accepted cases, 8 rejected cases, and 5 fuzz seeds through both real
+  adapters with no accepted differences or suppression list.
+- Bound all eight Futao compiler source files, the lexer/parser phase boundary,
+  both snapshot schemas, and exact corpus counts into Stage 0 provenance.
+- Kept the Rust parser as the production path until the remaining compiler
+  phases and ADR-011 fixed-point gate are complete.
+
 ## Compiler Package 0.0.7 (Futao Lexer Differential)
 
 - Added the first real Futao-written compiler phase under

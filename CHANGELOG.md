@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.0.8 - 2026-08-02
+
+- Add the second executable Futao-written compiler phase: a pure parser that
+  consumes the verified Futao lexer under `futao-bootstrap-v1`.
+- Freeze parser snapshot schema 1 for the complete balanced lossless CST event
+  stream, ordered `Error`-node recovery regions, and parser-only structured
+  diagnostics with UTF-8 byte ranges.
+- Gate 8 accepted cases, 8 rejected cases, and 5 fuzz seeds through the real
+  Rust and Futao parser adapters with no suppression or expected-divergence list.
+- Extend the content-addressed bootstrap compiler manifest with the four parser
+  sources, both implemented phases, parser corpus counts, and the parser schema.
+- Add parser differential validation to local, CI, fuzz, bootstrap, and release
+  gates while keeping the Rust parser as the production default.
+
 ## 0.0.7 - 2026-08-02
 
 - Add the first executable Futao-written compiler phase: a pure, bounded lexer

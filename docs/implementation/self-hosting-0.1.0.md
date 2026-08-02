@@ -11,7 +11,7 @@ Accepted 状态解释为对应实现已经存在。
 
 ## 当前基线
 
-* 工具链版本：`0.0.7`。
+* 工具链版本：`0.0.8`。
 * Stage 0：固定为 `nexac 0.0.1` Rust 实现，覆盖 Lexer、Parser、Resolver、Type Checker、HIR、CFG MIR、
   reference interpreter、诊断、conformance 与 release gate。
 * 语言名称：新设计和源码使用 Futao / `.ft`；现有 Nexa / `.nexa` 输入在迁移策略
@@ -24,7 +24,8 @@ Accepted 状态解释为对应实现已经存在。
 * `0.0.5` 已建立 target-neutral typed NIR、独立 verifier、显式 target layout 与私有自举产物。
 * `0.0.6` 已冻结 `futao-bootstrap-v1` 并交付 content-addressed Bootstrap Stdlib `0.0.1`。
 * `0.0.7` 已交付真实 Futao Lexer、UTF-8 snapshot schema 与无差异 corpus/fuzz gate。
-* 下一里程碑：`0.0.8` Futao Parser differential。
+* `0.0.8` 已交付真实 Futao Parser、lossless CST/recovery snapshot schema 与无差异 corpus/fuzz gate。
+* 下一里程碑：`0.0.9` Futao Resolver differential。
 
 ## 关键依赖
 
@@ -193,6 +194,15 @@ adapter，token kind/range/trivia 与 lexical diagnostic 零差异。差异失�
 保留双侧 canonical snapshot；不存在 suppression list。Rust Lexer 仍为默认路径，
 直到后续 parser 与 driver slice 验证完成。详细合同见
 [`futao-lexer-differential-0.0.7.md`](futao-lexer-differential-0.0.7.md)。
+
+`0.0.8` 交付状态：已实现。`Parse::parser_diagnostics` 将 parser-only diagnostics
+从既有组合诊断中稳定分离；Rust/Futao adapter 以 schema 1 比较完整 balanced
+lossless CST event stream、具体 `Error` node recovery range，以及 diagnostic code、
+severity、label style 和 UTF-8 byte range。纯 Futao parser 直接调用已验证 lexer，
+并在 `futao-bootstrap-v1` 下拒绝 ambient Host capability。8 个 accepted、8 个
+rejected 与 5 个 fuzz seed 均以真实 adapter 运行且无分类差异；512-byte bounded
+mutation gate 继续 fail closed。Rust Parser 仍为默认路径。详细合同见
+[`futao-parser-differential-0.0.8.md`](futao-parser-differential-0.0.8.md)。
 
 ### `0.0.12` 至 `0.0.14`：建立自举链
 

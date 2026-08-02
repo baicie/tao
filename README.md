@@ -19,7 +19,7 @@ and the completed integration evidence is retained in the
 
 The language compatibility version and compiler package version are separate.
 The complete Language 1.0 reference core currently ships as the self-use
-`nexac 0.0.7`; Rust crate APIs and distribution remain intentionally unstable.
+`nexac 0.0.8`; Rust crate APIs and distribution remain intentionally unstable.
 
 ## Layout
 
@@ -66,6 +66,7 @@ cargo xtask check
 cargo xtask bootstrap-contract
 cargo xtask bootstrap-profile
 cargo xtask lexer-differential
+cargo xtask parser-differential
 cargo xtask storage-kernel
 cargo xtask nir-artifact
 cargo run -p nexac -- check examples/practical-core/main.nexa
@@ -89,6 +90,9 @@ Stage 0 compatibility proof are documented in
 The `0.0.7` executable Futao lexer, UTF-8 snapshot contract, and zero-difference
 corpus gate are documented in
 [docs/implementation/futao-lexer-differential-0.0.7.md](docs/implementation/futao-lexer-differential-0.0.7.md).
+The `0.0.8` executable Futao parser, lossless CST/recovery snapshot contract,
+and zero-difference accepted/rejected/fuzz gate are documented in
+[docs/implementation/futao-parser-differential-0.0.8.md](docs/implementation/futao-parser-differential-0.0.8.md).
 
 Install the self-use CLI from a local checkout with:
 
@@ -101,11 +105,11 @@ Version tags publish checked Linux, macOS, and Windows archives with SHA-256
 files through [GitHub Releases](https://github.com/baicie/nexa/releases). The
 compiler remains a prerelease and is not published to crates.io.
 
-After `v0.0.7` is published, the same version can be installed reproducibly
+After `v0.0.8` is published, the same version can be installed reproducibly
 from its tag:
 
 ```bash
-cargo install --locked --git https://github.com/baicie/nexa --tag v0.0.7 nexac
+cargo install --locked --git https://github.com/baicie/nexa --tag v0.0.8 nexac
 ```
 
 Nexa intentionally borrows familiar TypeScript surface syntax without

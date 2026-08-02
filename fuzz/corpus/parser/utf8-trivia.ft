@@ -1,0 +1,5 @@
+// Unicode trivia: 你好, мир, 🙂
+function text(): String {
+  const greeting = "你好, мир 🙂";
+  return greeting;
+}

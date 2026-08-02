@@ -1,0 +1,5 @@
+function expressions(): Int {
+  const callback = (value: Int): Int => value + 1;
+  const records = [{ value: callback(1) }];
+  return records[0].value;
+}

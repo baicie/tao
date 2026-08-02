@@ -1,12 +1,26 @@
 #![no_main]
 
+use std::cell::RefCell;
+
 use libfuzzer_sys::fuzz_target;
+use nexa_compiler::{
+    FutaoParserAdapter, ParserDifferentialHarness, ParserDifferentialOutcome, RustParserAdapter,
+};
 use nexa_parser::parse_source;
 use nexa_span::FileId;
 
+const MAX_SOURCE_BYTES: usize = 512;
 const TEST_FILE: FileId = FileId::new(0);
 
+thread_local! {
+    static FUTAO: RefCell<Option<FutaoParserAdapter>> =
+        RefCell::new(FutaoParserAdapter::new().ok());
+}
+
 fuzz_target!(|bytes: &[u8]| {
+    if bytes.len() > MAX_SOURCE_BYTES {
+        return;
+    }
     let Ok(source) = std::str::from_utf8(bytes) else {
         return;
     };
@@ -50,4 +64,17 @@ fuzz_target!(|bytes: &[u8]| {
             previous_label_range = Some(range_key);
         }
     }
+
+    FUTAO.with(|slot| {
+        let adapter = slot.borrow();
+        let Some(futao) = adapter.as_ref() else {
+            panic!("Futao parser adapter failed to initialize");
+        };
+        let rust = RustParserAdapter;
+        let harness = ParserDifferentialHarness::new(&rust, futao);
+        let report = harness
+            .run_case("fuzz/generated", source)
+            .unwrap_or_else(|error| panic!("parser adapter failed: {error}"));
+        assert_eq!(report.outcome(), ParserDifferentialOutcome::Match);
+    });
 });

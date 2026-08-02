@@ -63,7 +63,7 @@ Lexical classification follows the Rust reference over Unicode scalar values
 with UTF-8 byte offsets:
 
 * identifiers and decimal integers are ASCII-only;
-* ASCII whitespace is `U+0009` through `U+000D` or `U+0020`;
+* ASCII whitespace is `U+0009`, `U+000A`, `U+000C`, `U+000D`, or `U+0020`;
 * line comments begin with `//` and stop before line feed;
 * strings preserve their complete spelling and allow only `\"`, `\\`, `\n`,
   `\r`, and `\t` escapes;

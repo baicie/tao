@@ -1,0 +1,5 @@
+function broken(value: Int): Unit {
+  const values = [1, 2;
+}
+
+function after(): Unit {}

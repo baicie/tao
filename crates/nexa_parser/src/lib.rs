@@ -43,6 +43,7 @@ pub struct Parse {
     tokens: Vec<Token>,
     green: GreenNode,
     diagnostics: Vec<Diagnostic>,
+    parser_diagnostics: Vec<Diagnostic>,
 }
 
 impl Parse {
@@ -101,6 +102,12 @@ impl Parse {
         &self.diagnostics
     }
 
+    /// Returns only diagnostics produced by parser grammar and recovery logic.
+    #[must_use]
+    pub fn parser_diagnostics(&self) -> &[Diagnostic] {
+        &self.parser_diagnostics
+    }
+
     /// Returns true when no error diagnostics were produced.
     #[must_use]
     pub fn is_ok(&self) -> bool {
@@ -122,12 +129,23 @@ impl Parse {
 #[must_use]
 pub fn parse_source(file: FileId, source: &str) -> Parse {
     let (tokens, lexical_diagnostics) = lex_source(file, source).into_parts();
-    let (green, diagnostics) = parse_tokens(file, source.len(), &tokens, lexical_diagnostics);
+    let (green, parser_diagnostics) = parse_tokens(file, source.len(), &tokens);
+    let mut diagnostics = lexical_diagnostics;
+    diagnostics.extend(parser_diagnostics.iter().cloned());
+    diagnostics.sort_by_key(|diagnostic| {
+        diagnostic
+            .labels()
+            .first()
+            .map_or((usize::MAX, usize::MAX), |label| {
+                (label.span().range().start(), label.span().range().end())
+            })
+    });
 
     Parse {
         tokens,
         green,
         diagnostics,
+        parser_diagnostics,
     }
 }
 

@@ -86,6 +86,7 @@ export default defineConfig({
             { text: "0.0.5 Typed NIR", link: "/implementation/nir-artifact-0.0.5" },
             { text: "0.0.6 Bootstrap Profile", link: "/implementation/bootstrap-profile-stdlib-0.0.6" },
             { text: "0.0.7 Lexer Differential", link: "/implementation/futao-lexer-differential-0.0.7" },
+            { text: "0.0.8 Parser Differential", link: "/implementation/futao-parser-differential-0.0.8" },
           ],
         },
         {

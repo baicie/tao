@@ -1,0 +1,5 @@
+import { parseEncoded } from "./parser_bridge.ft";
+
+function main(arguments: String[]): Unit {
+  const result = parseEncoded(arguments);
+}

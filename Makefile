@@ -1,4 +1,4 @@
-.PHONY: check fmt lint test doc conformance fuzz-smoke perf storage-kernel nir-artifact release-check security bootstrap-contract bootstrap-profile lexer-differential
+.PHONY: check fmt lint test doc conformance fuzz-smoke perf storage-kernel nir-artifact release-check security bootstrap-contract bootstrap-profile lexer-differential parser-differential
 
 check:
 	cargo xtask check
@@ -44,3 +44,6 @@ bootstrap-profile:
 
 lexer-differential:
 	cargo xtask lexer-differential
+
+parser-differential:
+	cargo xtask parser-differential

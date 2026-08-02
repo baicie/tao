@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{bail, ensure, Context, Result};
-use nexa_compiler::LEXER_SNAPSHOT_SCHEMA_VERSION;
+use nexa_compiler::{LEXER_SNAPSHOT_SCHEMA_VERSION, PARSER_SNAPSHOT_SCHEMA_VERSION};
 use nexa_nir::{
     ArtifactCompatibility, ArtifactErrorCode, CanonicalArtifact, NIR_ARTIFACT_MAGIC,
     NIR_SCHEMA_VERSION,
@@ -84,6 +84,8 @@ struct BootstrapCompiler {
     implemented_phases: Vec<String>,
     lexer_snapshot_schema_version: u32,
     differential_case_count: usize,
+    parser_snapshot_schema_version: u32,
+    parser_differential_case_count: usize,
     default_implementation: String,
 }
 
@@ -102,13 +104,15 @@ struct BootstrapCompilerManifest {
     tree_hash_algorithm: String,
     tree_digest: String,
     lexer_snapshot_schema_version: u32,
-    differential_corpus: LexerDifferentialCorpus,
+    differential_corpus: DifferentialCorpus,
+    parser_snapshot_schema_version: u32,
+    parser_differential_corpus: DifferentialCorpus,
     default_implementation: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct LexerDifferentialCorpus {
+struct DifferentialCorpus {
     accepted: usize,
     rejected: usize,
     fuzz_seeds: usize,
@@ -269,12 +273,12 @@ impl BootstrapManifest {
         expect(
             "bootstrapCompiler.status",
             &self.bootstrap_compiler.status,
-            "lexer-differential",
+            "parser-differential",
         )?;
         expect(
             "bootstrapCompiler.version",
             &self.bootstrap_compiler.version,
-            "0.0.1",
+            "0.0.2",
         )?;
         expect(
             "bootstrapCompiler.profile",
@@ -291,8 +295,8 @@ impl BootstrapManifest {
             &self.bootstrap_compiler.tree_digest,
         )?;
         ensure!(
-            self.bootstrap_compiler.implemented_phases == ["lexer"],
-            "bootstrapCompiler.implementedPhases must contain only lexer"
+            self.bootstrap_compiler.implemented_phases == ["lexer", "parser"],
+            "bootstrapCompiler.implementedPhases must contain lexer then parser"
         );
         ensure!(
             self.bootstrap_compiler.lexer_snapshot_schema_version == LEXER_SNAPSHOT_SCHEMA_VERSION,
@@ -301,6 +305,15 @@ impl BootstrapManifest {
         ensure!(
             self.bootstrap_compiler.differential_case_count == 11,
             "bootstrapCompiler.differentialCaseCount must be 11"
+        );
+        ensure!(
+            self.bootstrap_compiler.parser_snapshot_schema_version
+                == PARSER_SNAPSHOT_SCHEMA_VERSION,
+            "bootstrapCompiler.parserSnapshotSchemaVersion must be {PARSER_SNAPSHOT_SCHEMA_VERSION}"
+        );
+        ensure!(
+            self.bootstrap_compiler.parser_differential_case_count == 21,
+            "bootstrapCompiler.parserDifferentialCaseCount must be 21"
         );
         expect(
             "bootstrapCompiler.defaultImplementation",
@@ -474,12 +487,12 @@ fn verify_bootstrap_compiler(manifest: &BootstrapManifest, root: &Path) -> Resul
     expect(
         "compiler.profileEntry",
         &compiler.profile_entry,
-        "src/lexer_profile.ft",
+        "src/parser_profile.ft",
     )?;
     expect(
         "compiler.driverEntry",
         &compiler.driver_entry,
-        "src/lexer_driver.ft",
+        "src/parser_driver.ft",
     )?;
     ensure!(
         compiler.implemented_phases == manifest.bootstrap_compiler.implemented_phases,
@@ -507,6 +520,11 @@ fn verify_bootstrap_compiler(manifest: &BootstrapManifest, root: &Path) -> Resul
             && compiler.differential_corpus.total
                 == manifest.bootstrap_compiler.differential_case_count,
         "compiler differentialCorpus must describe 4 accepted, 3 rejected, and 4 fuzz cases"
+    );
+    ensure!(
+        compiler.parser_snapshot_schema_version
+            == manifest.bootstrap_compiler.parser_snapshot_schema_version,
+        "compiler parserSnapshotSchemaVersion does not match the top-level contract"
     );
     expect(
         "compiler.defaultImplementation",
@@ -544,6 +562,11 @@ fn verify_bootstrap_compiler(manifest: &BootstrapManifest, root: &Path) -> Resul
         "bootstrap compiler tree digest mismatch: expected {}, found {actual}",
         compiler.tree_digest
     );
+    validate_parser_corpus(
+        &compiler.parser_differential_corpus,
+        manifest.bootstrap_compiler.parser_differential_case_count,
+        root,
+    )?;
     Ok(())
 }
 
@@ -569,6 +592,67 @@ fn discover_compiler_sources(root: &Path) -> Result<Vec<String>> {
     }
     sources.sort();
     Ok(sources)
+}
+
+fn validate_parser_corpus(
+    declared: &DifferentialCorpus,
+    expected_total: usize,
+    root: &Path,
+) -> Result<()> {
+    let accepted = count_parser_cases(
+        &root.join("bootstrap/compiler/tests/parser/accepted"),
+        Some("ft"),
+    )?;
+    let rejected = count_parser_cases(
+        &root.join("bootstrap/compiler/tests/parser/rejected"),
+        Some("ft"),
+    )?;
+    let fuzz_seeds = count_parser_cases(&root.join("fuzz/corpus/parser"), Some("ft"))?;
+    let actual_total = accepted
+        .checked_add(rejected)
+        .and_then(|count| count.checked_add(fuzz_seeds))
+        .context("parser differential corpus count overflow")?;
+
+    ensure!(
+        accepted > 0 && rejected > 0 && fuzz_seeds > 0,
+        "parser differential corpus categories must not be empty"
+    );
+    ensure!(
+        declared.accepted == accepted
+            && declared.rejected == rejected
+            && declared.fuzz_seeds == fuzz_seeds
+            && declared.total == actual_total
+            && declared.total == expected_total,
+        "compiler parserDifferentialCorpus counts do not match the checked-in parser corpus"
+    );
+    Ok(())
+}
+
+fn count_parser_cases(directory: &Path, extension: Option<&str>) -> Result<usize> {
+    let entries = std::fs::read_dir(directory)
+        .with_context(|| format!("failed to read parser corpus {}", directory.display()))?;
+    let mut count = 0usize;
+    for entry in entries {
+        let entry = entry
+            .with_context(|| format!("failed to inspect parser corpus {}", directory.display()))?;
+        let path = entry.path();
+        ensure!(
+            entry.file_type()?.is_file(),
+            "parser corpus entry must be a file: {}",
+            path.display()
+        );
+        if let Some(expected) = extension {
+            ensure!(
+                path.extension().and_then(|value| value.to_str()) == Some(expected),
+                "parser corpus entry must use .{expected}: {}",
+                path.display()
+            );
+        }
+        count = count
+            .checked_add(1)
+            .context("parser differential corpus count overflow")?;
+    }
+    Ok(count)
 }
 
 fn validate_compiler_source_path(value: &str) -> Result<()> {
@@ -1030,16 +1114,27 @@ mod tests {
             manifest.bootstrap_stdlib.build_digest,
             "sha256:03c183622af98e72f667443a1995f96f0314ab8cf9c7e1eaf70dbe114175538b"
         );
-        assert_eq!(manifest.bootstrap_compiler.status, "lexer-differential");
-        assert_eq!(manifest.bootstrap_compiler.version, "0.0.1");
+        assert_eq!(manifest.bootstrap_compiler.status, "parser-differential");
+        assert_eq!(manifest.bootstrap_compiler.version, "0.0.2");
         assert_eq!(manifest.bootstrap_compiler.profile, "futao-bootstrap-v1");
-        assert_eq!(manifest.bootstrap_compiler.implemented_phases, ["lexer"]);
+        assert_eq!(
+            manifest.bootstrap_compiler.implemented_phases,
+            ["lexer", "parser"]
+        );
         assert_eq!(
             manifest.bootstrap_compiler.tree_digest,
-            "sha256:565a901ae34c25251aad8db4761f4d8207561d28652f93c28841ea29deec5717"
+            "sha256:fa0073490738a48efd269577a2598a9ad4d8cb032cae2b96c2879158e10f81dd"
         );
         assert_eq!(manifest.bootstrap_compiler.lexer_snapshot_schema_version, 1);
         assert_eq!(manifest.bootstrap_compiler.differential_case_count, 11);
+        assert_eq!(
+            manifest.bootstrap_compiler.parser_snapshot_schema_version,
+            1
+        );
+        assert_eq!(
+            manifest.bootstrap_compiler.parser_differential_case_count,
+            21
+        );
         assert_eq!(
             manifest.bootstrap_compiler.default_implementation,
             "rust-reference"
@@ -1049,7 +1144,7 @@ mod tests {
         assert_eq!(manifest.bootstrap_output.artifact_magic, "FUTAO-NIR");
         assert_eq!(manifest.bootstrap_output.nir_schema_version, 1);
         assert_eq!(manifest.bootstrap_output.verifier_crate, "nexa_nir");
-        assert_eq!(manifest.bootstrap_output.verifier_version, "0.0.7");
+        assert_eq!(manifest.bootstrap_output.verifier_version, "0.0.8");
         assert_eq!(
             manifest.bootstrap_output.target_profile,
             "target-neutral-v1"
@@ -1114,6 +1209,20 @@ mod tests {
         assert!(matches!(
             error,
             Some(error) if error.to_string().contains("bootstrapStdlib.status")
+        ));
+    }
+
+    #[test]
+    fn parser_rejects_an_incorrect_parser_differential_case_count() {
+        let invalid = ACCEPTED.replace(
+            "\"parserDifferentialCaseCount\": 21",
+            "\"parserDifferentialCaseCount\": 20",
+        );
+        let error = parse_manifest(&invalid).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains("parserDifferentialCaseCount")
         ));
     }
 

@@ -1,26 +1,37 @@
 {
   "schemaVersion": 1,
   "name": "futao-bootstrap-compiler",
-  "version": "0.0.1",
-  "toolchainVersion": "0.0.7",
+  "version": "0.0.2",
+  "toolchainVersion": "0.0.8",
   "profile": "futao-bootstrap-v1",
-  "profileEntry": "src/lexer_profile.ft",
-  "driverEntry": "src/lexer_driver.ft",
-  "implementedPhases": ["lexer"],
+  "profileEntry": "src/parser_profile.ft",
+  "driverEntry": "src/parser_driver.ft",
+  "implementedPhases": ["lexer", "parser"],
   "sourceFiles": [
     "src/lexer.ft",
     "src/lexer_bridge.ft",
     "src/lexer_driver.ft",
-    "src/lexer_profile.ft"
+    "src/lexer_profile.ft",
+    "src/parser.ft",
+    "src/parser_bridge.ft",
+    "src/parser_driver.ft",
+    "src/parser_profile.ft"
   ],
   "treeHashAlgorithm": "sha256",
-  "treeDigest": "sha256:565a901ae34c25251aad8db4761f4d8207561d28652f93c28841ea29deec5717",
+  "treeDigest": "sha256:fa0073490738a48efd269577a2598a9ad4d8cb032cae2b96c2879158e10f81dd",
   "lexerSnapshotSchemaVersion": 1,
   "differentialCorpus": {
     "accepted": 4,
     "rejected": 3,
     "fuzzSeeds": 4,
     "total": 11
+  },
+  "parserSnapshotSchemaVersion": 1,
+  "parserDifferentialCorpus": {
+    "accepted": 8,
+    "rejected": 8,
+    "fuzzSeeds": 5,
+    "total": 21
   },
   "defaultImplementation": "rust-reference"
 }

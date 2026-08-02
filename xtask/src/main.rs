@@ -4,6 +4,7 @@ mod bootstrap;
 mod bootstrap_profile;
 mod conformance;
 mod lexer_differential;
+mod parser_differential;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -61,6 +62,8 @@ enum Task {
     BootstrapProfile,
     /// Compare the Rust and Futao lexers over the checked-in corpus.
     LexerDifferential,
+    /// Compare the Rust and Futao parsers over the checked-in corpus.
+    ParserDifferential,
 }
 
 fn main() -> Result<()> {
@@ -95,6 +98,7 @@ fn main() -> Result<()> {
         Task::NirArtifact => bootstrap::verify_nir_artifacts()?,
         Task::BootstrapProfile => bootstrap_profile::run()?,
         Task::LexerDifferential => lexer_differential::run()?,
+        Task::ParserDifferential => parser_differential::run()?,
     }
 
     Ok(())
@@ -107,7 +111,8 @@ fn check() -> Result<()> {
     doc()?;
     bootstrap::run(&bootstrap::default_manifest_path(), false)?;
     bootstrap_profile::run()?;
-    lexer_differential::run()
+    lexer_differential::run()?;
+    parser_differential::run()
 }
 
 fn lint() -> Result<()> {
@@ -413,7 +418,8 @@ fn run_optional(cmd: &str, args: &[&str]) -> Result<()> {
 mod tests {
     use serde_json::json;
 
-    use super::validate_canonical_dump;
+    use super::{validate_canonical_dump, Cli, Task};
+    use clap::Parser;
 
     fn dump_with_nir_state(state: &str) -> Result<Vec<u8>, serde_json::Error> {
         let phases = ["tokens", "cst", "diagnostics", "hir", "mir", "nir"];
@@ -457,6 +463,14 @@ mod tests {
             error,
             Some(error) if error.to_string().contains("compilationProfile")
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn cli_exposes_the_parser_differential_gate() -> Result<(), Box<dyn std::error::Error>> {
+        let cli = Cli::try_parse_from(["cargo xtask", "parser-differential"])?;
+
+        assert!(matches!(cli.command, Task::ParserDifferential));
         Ok(())
     }
 }

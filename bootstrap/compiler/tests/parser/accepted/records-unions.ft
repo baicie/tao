@@ -1,0 +1,8 @@
+type Pair<T> = {
+  left: T;
+  right: T;
+};
+
+type Choice<T> =
+  | Some(value: T)
+  | None;

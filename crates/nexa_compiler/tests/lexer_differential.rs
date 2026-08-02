@@ -87,6 +87,19 @@ fn futao_adapter_executes_real_bootstrap_source_and_matches_reference(
 }
 
 #[test]
+fn futao_adapter_rejects_vertical_tab_like_the_rust_lexer() -> Result<(), Box<dyn std::error::Error>>
+{
+    let rust = RustLexerAdapter;
+    let futao = FutaoLexerAdapter::new()?;
+    let harness = LexerDifferentialHarness::new(&rust, &futao);
+
+    let report = harness.run_case("rejected/vertical-tab", "\u{000b}")?;
+
+    assert_eq!(report.outcome(), LexerDifferentialOutcome::Match);
+    Ok(())
+}
+
+#[test]
 fn futao_adapter_handles_the_complete_fuzz_byte_budget() -> Result<(), Box<dyn std::error::Error>> {
     let source = "@".repeat(512);
     let rust = RustLexerAdapter;

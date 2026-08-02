@@ -7,6 +7,7 @@ mod core;
 mod differential;
 mod lexer_differential;
 mod nir_lower;
+mod parser_differential;
 mod session;
 
 use std::collections::{HashMap, HashSet};
@@ -38,6 +39,13 @@ pub use lexer_differential::{
     LexerTokenSnapshot, RustLexerAdapter, LEXER_SNAPSHOT_SCHEMA_VERSION,
 };
 pub use nexa_mir::{MirProgram, RuntimeError};
+pub use parser_differential::{
+    FutaoParserAdapter, ParserAdapter, ParserAdapterError, ParserCstEvent,
+    ParserDiagnosticSnapshot, ParserDifference, ParserDifferentialHarness,
+    ParserDifferentialOutcome, ParserDifferentialReport, ParserImplementation, ParserLabelStyle,
+    ParserObservable, ParserRecoverySnapshot, ParserSeverity, ParserSnapshot, RustParserAdapter,
+    PARSER_SNAPSHOT_SCHEMA_VERSION,
+};
 pub use session::{CompilerSession, ImportEdge, SessionBuildError, SessionModule};
 
 /// The result of checking one Nexa source file.

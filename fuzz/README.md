@@ -1,11 +1,15 @@
 # Front-End Fuzzing
 
-The `parser` target checks four invariants for every valid UTF-8 input:
+The `parser` target checks five invariants for every valid UTF-8 input up to
+512 bytes:
 
 - parsing does not fail internally;
 - the CST reproduces the complete source text;
 - tokens and diagnostics are deterministic; and
-- the line-oriented CST dump is deterministic.
+- the line-oriented CST dump is deterministic; and
+- the real Rust and Futao parser snapshots match exactly.
+
+Parser adapter, protocol, or snapshot-validation failures are crashes.
 
 The `lexer` target compares the real Rust and Futao lexer adapters over valid
 UTF-8 inputs up to 512 bytes. Every token, trivia bit, byte range, and lexical

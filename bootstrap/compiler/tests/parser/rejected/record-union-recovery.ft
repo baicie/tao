@@ -1,0 +1,10 @@
+type Broken = {
+  first Int;
+  @ second: Int;
+};
+
+type Choice =
+  | Good(value Int)
+  | | Bad;
+
+function after(): Unit {}

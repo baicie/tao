@@ -1,0 +1,8 @@
+function broken(value: Int): Int {
+  return match (value) {
+    case Choice.Bad(,) value;
+    default => 0;
+  };
+}
+
+function after(): Unit {}
