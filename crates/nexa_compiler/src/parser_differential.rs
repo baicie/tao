@@ -1,7 +1,7 @@
 //! Parser-only differential comparison for the second self-hosted compiler slice.
 
 use nexa_diagnostics::{LabelStyle, Severity};
-use nexa_mir::{run_with_args as run_mir_with_args, MirProgram};
+use nexa_mir::{run_with_args_and_step_limit as run_mir_with_args, MirProgram};
 use nexa_parser::parse_source;
 use nexa_span::FileId;
 use nexa_syntax::SyntaxKind;
@@ -20,6 +20,7 @@ const FUTAO_PARSER_SOURCE: &str = include_str!("../../../bootstrap/compiler/src/
 const FUTAO_BRIDGE_SOURCE: &str = include_str!("../../../bootstrap/compiler/src/parser_bridge.ft");
 const FUTAO_PROFILE_ENTRY: &str = include_str!("../../../bootstrap/compiler/src/parser_profile.ft");
 const FUTAO_DRIVER_ENTRY: &str = include_str!("../../../bootstrap/compiler/src/parser_driver.ft");
+const FUTAO_PARSER_STEP_LIMIT: usize = 500_000;
 
 /// Identifies one implementation participating in parser differential tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -556,7 +557,7 @@ impl ParserAdapter for FutaoParserAdapter {
 
     fn parse(&self, source: &str) -> Result<ParserSnapshot, ParserAdapterError> {
         let arguments = encoded_source_arguments(source)?;
-        let execution = run_mir_with_args(&self.program, &arguments)
+        let execution = run_mir_with_args(&self.program, &arguments, FUTAO_PARSER_STEP_LIMIT)
             .map_err(|failure| ParserAdapterError::Runtime(failure.to_string()))?;
         let snapshot = parse_futao_output(execution.output())?;
         snapshot.validate(source)?;

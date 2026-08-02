@@ -5,7 +5,8 @@ use nexa_hir::{
     VariantId,
 };
 use nexa_mir::{
-    lower as lower_mir, run, run_with_args, MirExpression, MirProgram, MirStatement, MirTerminator,
+    lower as lower_mir, run, run_with_args, run_with_args_and_step_limit, MirExpression,
+    MirProgram, MirStatement, MirTerminator,
 };
 use nexa_parser::parse_source;
 use nexa_span::{FileId, SourceSpan, TextRange};
@@ -1850,6 +1851,21 @@ fn interpreter_allows_100000_steps_and_rejects_step_100001(
     assert_eq!(failure.error().span(), expected_span);
     assert_eq!(failure.output(), ["1"]);
 
+    Ok(())
+}
+
+#[test]
+fn interpreter_honors_an_explicit_tool_step_limit() -> Result<(), Box<dyn std::error::Error>> {
+    let program = compile("function main(): Unit { while (true) {} }")?;
+
+    let failure = run_with_args_and_step_limit(&program, &[], 10)
+        .err()
+        .ok_or_else(|| std::io::Error::other("expected an execution step error"))?;
+
+    assert_eq!(
+        failure.error().message(),
+        "execution step limit of 10 exceeded"
+    );
     Ok(())
 }
 

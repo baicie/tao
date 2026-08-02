@@ -10,7 +10,8 @@ mod lower;
 mod mir;
 
 pub use execute::{
-    run, run_with_args, CallableValue, Execution, RuntimeError, RuntimeFailure, Value,
+    run, run_with_args, run_with_args_and_step_limit, CallableValue, Execution, RuntimeError,
+    RuntimeFailure, Value,
 };
 pub use lower::{lower, MirLoweringError};
 pub use mir::{
