@@ -234,7 +234,6 @@ pub(super) fn parse_tokens(
     file: FileId,
     source_len: usize,
     tokens: &[Token],
-    lexical_diagnostics: Vec<Diagnostic>,
 ) -> (GreenNode, Vec<Diagnostic>) {
     Parser {
         file,
@@ -243,7 +242,7 @@ pub(super) fn parse_tokens(
         position: 0,
         pending_split_eq: false,
         builder: GreenNodeBuilder::new(),
-        diagnostics: lexical_diagnostics,
+        diagnostics: Vec::new(),
     }
     .parse()
 }
