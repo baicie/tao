@@ -1,0 +1,51 @@
+import { LexerInput } from "./lexer.ft";
+import { ParserResult, parse } from "./parser.ft";
+
+function parseRange(values: String[], start: Int, end: Int): Int[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [parseInt(values[start])];
+  }
+  const middle = start + (end - start) / 2;
+  return parseRange(values, start, middle).concat(parseRange(values, middle, end));
+}
+
+function codePointRange(values: Int[], start: Int, end: Int): Int[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [values[1 + start * 2]];
+  }
+  const middle = start + (end - start) / 2;
+  return codePointRange(values, start, middle).concat(
+    codePointRange(values, middle, end)
+  );
+}
+
+function byteOffsetRange(values: Int[], start: Int, end: Int): Int[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [values[2 + start * 2]];
+  }
+  const middle = start + (end - start) / 2;
+  return byteOffsetRange(values, start, middle).concat(
+    byteOffsetRange(values, middle, end)
+  );
+}
+
+export function parseEncoded(arguments: String[]): ParserResult {
+  const values = parseRange(arguments, 0, arguments.length);
+  const byteLength = values[0];
+  const pairCount = (values.length - 1) / 2;
+  const input: LexerInput = {
+    codePoints: codePointRange(values, 0, pairCount),
+    byteOffsets: byteOffsetRange(values, 0, pairCount).append(byteLength),
+    byteLength: byteLength
+  };
+  return parse(input);
+}

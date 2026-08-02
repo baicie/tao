@@ -40,10 +40,11 @@ pub use lexer_differential::{
 };
 pub use nexa_mir::{MirProgram, RuntimeError};
 pub use parser_differential::{
-    ParserAdapter, ParserAdapterError, ParserCstEvent, ParserDiagnosticSnapshot, ParserDifference,
-    ParserDifferentialHarness, ParserDifferentialOutcome, ParserDifferentialReport,
-    ParserImplementation, ParserLabelStyle, ParserObservable, ParserRecoverySnapshot,
-    ParserSeverity, ParserSnapshot, RustParserAdapter, PARSER_SNAPSHOT_SCHEMA_VERSION,
+    FutaoParserAdapter, ParserAdapter, ParserAdapterError, ParserCstEvent,
+    ParserDiagnosticSnapshot, ParserDifference, ParserDifferentialHarness,
+    ParserDifferentialOutcome, ParserDifferentialReport, ParserImplementation, ParserLabelStyle,
+    ParserObservable, ParserRecoverySnapshot, ParserSeverity, ParserSnapshot, RustParserAdapter,
+    PARSER_SNAPSHOT_SCHEMA_VERSION,
 };
 pub use session::{CompilerSession, ImportEdge, SessionBuildError, SessionModule};
 

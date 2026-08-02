@@ -1,6 +1,7 @@
 //! Parser-only differential comparison for the second self-hosted compiler slice.
 
 use nexa_diagnostics::{LabelStyle, Severity};
+use nexa_mir::{run_with_args as run_mir_with_args, MirProgram};
 use nexa_parser::parse_source;
 use nexa_span::FileId;
 use nexa_syntax::SyntaxKind;
@@ -9,10 +10,16 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::CompileError;
+use crate::{compile, CompileError, CompilerInput, CompilerOptions, CompilerSource};
 
 /// Canonical schema used by parser-only differential snapshots.
 pub const PARSER_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
+
+const FUTAO_LEXER_SOURCE: &str = include_str!("../../../bootstrap/compiler/src/lexer.ft");
+const FUTAO_PARSER_SOURCE: &str = include_str!("../../../bootstrap/compiler/src/parser.ft");
+const FUTAO_BRIDGE_SOURCE: &str = include_str!("../../../bootstrap/compiler/src/parser_bridge.ft");
+const FUTAO_PROFILE_ENTRY: &str = include_str!("../../../bootstrap/compiler/src/parser_profile.ft");
+const FUTAO_DRIVER_ENTRY: &str = include_str!("../../../bootstrap/compiler/src/parser_driver.ft");
 
 /// Identifies one implementation participating in parser differential tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -53,6 +60,16 @@ impl ParserSeverity {
             Self::Warning => "warning",
         }
     }
+
+    fn parse(value: &str) -> Result<Self, ParserAdapterError> {
+        match value {
+            "error" => Ok(Self::Error),
+            "warning" => Ok(Self::Warning),
+            _ => Err(ParserAdapterError::Protocol(format!(
+                "unknown diagnostic severity `{value}`"
+            ))),
+        }
+    }
 }
 
 /// Canonical source-label role at the parser boundary.
@@ -72,6 +89,16 @@ impl ParserLabelStyle {
         match self {
             Self::Primary => "primary",
             Self::Secondary => "secondary",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self, ParserAdapterError> {
+        match value {
+            "primary" => Ok(Self::Primary),
+            "secondary" => Ok(Self::Secondary),
+            _ => Err(ParserAdapterError::Protocol(format!(
+                "unknown diagnostic label style `{value}`"
+            ))),
         }
     }
 }
@@ -485,6 +512,211 @@ impl ParserAdapter for RustParserAdapter {
         };
         snapshot.validate(source)?;
         Ok(snapshot)
+    }
+}
+
+/// Adapter that executes the real Futao-written lexer and parser through verified MIR.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FutaoParserAdapter {
+    program: MirProgram,
+}
+
+impl FutaoParserAdapter {
+    /// Compiles the pure parser under Bootstrap Profile v1 and its private Host driver.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when either source graph is rejected or produces no executable MIR.
+    pub fn new() -> Result<Self, ParserAdapterError> {
+        let profile_output = compile(&CompilerInput::with_options(
+            "parser_profile.ft",
+            futao_sources("parser_profile.ft", FUTAO_PROFILE_ENTRY),
+            CompilerOptions::bootstrap_v1(),
+        ))?;
+        ensure_compiled("Bootstrap Profile entry", &profile_output)?;
+
+        let driver_output = compile(&CompilerInput::new(
+            "parser_driver.ft",
+            futao_sources("parser_driver.ft", FUTAO_DRIVER_ENTRY),
+        ))?;
+        ensure_compiled("application driver", &driver_output)?;
+        let program = driver_output.mir().cloned().ok_or_else(|| {
+            ParserAdapterError::FutaoSource(
+                "application driver produced no executable MIR".to_owned(),
+            )
+        })?;
+        Ok(Self { program })
+    }
+}
+
+impl ParserAdapter for FutaoParserAdapter {
+    fn implementation(&self) -> ParserImplementation {
+        ParserImplementation::Futao
+    }
+
+    fn parse(&self, source: &str) -> Result<ParserSnapshot, ParserAdapterError> {
+        let arguments = encoded_source_arguments(source)?;
+        let execution = run_mir_with_args(&self.program, &arguments)
+            .map_err(|failure| ParserAdapterError::Runtime(failure.to_string()))?;
+        let snapshot = parse_futao_output(execution.output())?;
+        snapshot.validate(source)?;
+        Ok(snapshot)
+    }
+}
+
+fn futao_sources(entry: &str, entry_source: &str) -> Vec<CompilerSource> {
+    vec![
+        CompilerSource::new(entry, entry_source),
+        CompilerSource::new("lexer.ft", FUTAO_LEXER_SOURCE),
+        CompilerSource::new("parser.ft", FUTAO_PARSER_SOURCE),
+        CompilerSource::new("parser_bridge.ft", FUTAO_BRIDGE_SOURCE),
+    ]
+}
+
+fn ensure_compiled(role: &str, output: &crate::CompilerOutput) -> Result<(), ParserAdapterError> {
+    if output.is_ok() && output.diagnostics().is_empty() {
+        return Ok(());
+    }
+    let summary = output
+        .diagnostics()
+        .iter()
+        .map(|diagnostic| format!("{}: {}", diagnostic.code(), diagnostic.message()))
+        .collect::<Vec<_>>()
+        .join("; ");
+    Err(ParserAdapterError::FutaoSource(format!(
+        "{role} failed: {summary}"
+    )))
+}
+
+fn encoded_source_arguments(source: &str) -> Result<Vec<String>, ParserAdapterError> {
+    let _ = u32::try_from(source.len()).map_err(|_| ParserAdapterError::InputTooLarge)?;
+    let mut arguments = Vec::with_capacity(source.chars().count().saturating_mul(2) + 1);
+    arguments.push(source.len().to_string());
+    for (offset, character) in source.char_indices() {
+        arguments.push(u32::from(character).to_string());
+        arguments.push(offset.to_string());
+    }
+    Ok(arguments)
+}
+
+fn parse_futao_output(output: &[String]) -> Result<ParserSnapshot, ParserAdapterError> {
+    let mut reader = ProtocolReader::new(output);
+    reader.expect("header", "FUTAO-PARSER-1")?;
+    let event_count = reader.usize("CST event count")?;
+    let mut cst_events = Vec::with_capacity(event_count);
+    for _ in 0..event_count {
+        let tag = reader.next("CST event tag")?;
+        let event = match tag {
+            "start" => ParserCstEvent::StartNode {
+                kind_id: reader.u16("node kind")?,
+                offset: reader.u32("node offset")?,
+            },
+            "token" => ParserCstEvent::Token {
+                kind_id: reader.u16("token kind")?,
+                start: reader.u32("token start")?,
+                end: reader.u32("token end")?,
+            },
+            "finish" => ParserCstEvent::FinishNode {
+                offset: reader.u32("node offset")?,
+            },
+            _ => {
+                return Err(ParserAdapterError::Protocol(format!(
+                    "unknown CST event tag `{tag}`"
+                )))
+            }
+        };
+        cst_events.push(event);
+    }
+
+    let recovery_count = reader.usize("recovery event count")?;
+    let mut recovery_events = Vec::with_capacity(recovery_count);
+    for _ in 0..recovery_count {
+        recovery_events.push(ParserRecoverySnapshot {
+            start: reader.u32("recovery start")?,
+            end: reader.u32("recovery end")?,
+        });
+    }
+
+    let diagnostic_count = reader.usize("diagnostic count")?;
+    let mut diagnostics = Vec::with_capacity(diagnostic_count);
+    for _ in 0..diagnostic_count {
+        diagnostics.push(ParserDiagnosticSnapshot {
+            code: reader.next("diagnostic code")?.to_owned(),
+            severity: ParserSeverity::parse(reader.next("diagnostic severity")?)?,
+            label_style: ParserLabelStyle::parse(reader.next("diagnostic label style")?)?,
+            start: reader.u32("diagnostic start")?,
+            end: reader.u32("diagnostic end")?,
+        });
+    }
+    reader.finish()?;
+
+    Ok(ParserSnapshot {
+        schema_version: PARSER_SNAPSHOT_SCHEMA_VERSION,
+        cst_events,
+        recovery_events,
+        diagnostics,
+    })
+}
+
+struct ProtocolReader<'output> {
+    output: &'output [String],
+    position: usize,
+}
+
+impl<'output> ProtocolReader<'output> {
+    const fn new(output: &'output [String]) -> Self {
+        Self {
+            output,
+            position: 0,
+        }
+    }
+
+    fn next(&mut self, field: &str) -> Result<&'output str, ParserAdapterError> {
+        let value = self.output.get(self.position).ok_or_else(|| {
+            ParserAdapterError::Protocol(format!("missing {field} at line {}", self.position + 1))
+        })?;
+        self.position += 1;
+        Ok(value)
+    }
+
+    fn expect(&mut self, field: &str, expected: &str) -> Result<(), ParserAdapterError> {
+        let value = self.next(field)?;
+        if value == expected {
+            Ok(())
+        } else {
+            Err(ParserAdapterError::Protocol(format!(
+                "{field} must be `{expected}`, found `{value}`"
+            )))
+        }
+    }
+
+    fn usize(&mut self, field: &str) -> Result<usize, ParserAdapterError> {
+        self.next(field)?.parse::<usize>().map_err(|_| {
+            ParserAdapterError::Protocol(format!("{field} is not an unsigned integer"))
+        })
+    }
+
+    fn u16(&mut self, field: &str) -> Result<u16, ParserAdapterError> {
+        self.next(field)?
+            .parse::<u16>()
+            .map_err(|_| ParserAdapterError::Protocol(format!("{field} is not a u16 integer")))
+    }
+
+    fn u32(&mut self, field: &str) -> Result<u32, ParserAdapterError> {
+        self.next(field)?
+            .parse::<u32>()
+            .map_err(|_| ParserAdapterError::Protocol(format!("{field} is not a u32 integer")))
+    }
+
+    fn finish(self) -> Result<(), ParserAdapterError> {
+        if self.position == self.output.len() {
+            Ok(())
+        } else {
+            Err(ParserAdapterError::Protocol(format!(
+                "{} trailing line(s)",
+                self.output.len() - self.position
+            )))
+        }
     }
 }
 

@@ -1,0 +1,50 @@
+import { ParserCstEvent } from "./parser.ft";
+import { parseEncoded } from "./parser_bridge.ft";
+
+function emitStartNode(kind: Int, offset: Int): Unit {
+  print("start");
+  print(kind);
+  print(offset);
+}
+
+function emitToken(kind: Int, start: Int, end: Int): Unit {
+  print("token");
+  print(kind);
+  print(start);
+  print(end);
+}
+
+function emitFinishNode(offset: Int): Unit {
+  print("finish");
+  print(offset);
+}
+
+function emitEvent(event: ParserCstEvent): Unit {
+  match (event) {
+    case ParserCstEvent.StartNode(kind, offset) => emitStartNode(kind, offset);
+    case ParserCstEvent.Token(kind, start, end) => emitToken(kind, start, end);
+    case ParserCstEvent.FinishNode(offset) => emitFinishNode(offset);
+  };
+}
+
+function main(arguments: String[]): Unit {
+  const result = parseEncoded(arguments);
+  print("FUTAO-PARSER-1");
+  print(result.cstEvents.length);
+  for (const event of result.cstEvents) {
+    emitEvent(event);
+  }
+  print(result.recoveryEvents.length);
+  for (const recovery of result.recoveryEvents) {
+    print(recovery.start);
+    print(recovery.end);
+  }
+  print(result.diagnostics.length);
+  for (const diagnostic of result.diagnostics) {
+    print(diagnostic.code);
+    print(diagnostic.severity);
+    print(diagnostic.labelStyle);
+    print(diagnostic.start);
+    print(diagnostic.end);
+  }
+}

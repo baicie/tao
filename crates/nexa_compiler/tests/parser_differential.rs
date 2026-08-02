@@ -1,8 +1,9 @@
 //! Rust/Futao parser differential contract for toolchain 0.0.8.
 
 use nexa_compiler::{
-    ParserAdapter, ParserCstEvent, ParserDifferentialHarness, ParserDifferentialOutcome,
-    ParserImplementation, ParserObservable, RustParserAdapter, PARSER_SNAPSHOT_SCHEMA_VERSION,
+    FutaoParserAdapter, ParserAdapter, ParserCstEvent, ParserDifferentialHarness,
+    ParserDifferentialOutcome, ParserImplementation, ParserObservable, RustParserAdapter,
+    PARSER_SNAPSHOT_SCHEMA_VERSION,
 };
 
 #[test]
@@ -87,6 +88,22 @@ fn rust_snapshot_preserves_generic_close_token_splitting() -> Result<(), Box<dyn
             && pair[0].1 == 10
             && pair[1].2 == 12
     }));
+    Ok(())
+}
+
+#[test]
+fn futao_adapter_executes_the_real_parser_and_matches_empty_source(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let rust = RustParserAdapter;
+    let futao = FutaoParserAdapter::new()?;
+    let harness = ParserDifferentialHarness::new(&rust, &futao);
+
+    let report = harness.run_case("accepted/empty", "")?;
+
+    assert_eq!(report.reference(), ParserImplementation::RustReference);
+    assert_eq!(report.candidate(), ParserImplementation::Futao);
+    assert_eq!(report.outcome(), ParserDifferentialOutcome::Match);
+    assert!(report.passes_gate());
     Ok(())
 }
 

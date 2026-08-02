@@ -1,0 +1,1844 @@
+import { lex, LexerInput, LexerToken } from "./lexer.ft";
+
+export type ParserCstEvent =
+  | StartNode(kind: Int, offset: Int)
+  | Token(kind: Int, start: Int, end: Int)
+  | FinishNode(offset: Int);
+
+export type ParserRecoveryEvent = {
+  start: Int;
+  end: Int;
+};
+
+export type ParserDiagnostic = {
+  code: String;
+  severity: String;
+  labelStyle: String;
+  start: Int;
+  end: Int;
+};
+
+export type ParserResult = {
+  cstEvents: ParserCstEvent[];
+  recoveryEvents: ParserRecoveryEvent[];
+  diagnostics: ParserDiagnostic[];
+};
+
+type OpenNode = {
+  kind: Int;
+  start: Int;
+};
+
+type Checkpoint = {
+  eventIndex: Int;
+  offset: Int;
+};
+
+type ParserState = {
+  input: LexerInput;
+  tokens: LexerToken[];
+  position: Int;
+  pendingSplitEq: Bool;
+  events: ParserCstEvent[];
+  openNodes: OpenNode[];
+  recoveryEvents: ParserRecoveryEvent[];
+  diagnostics: ParserDiagnostic[];
+};
+
+type ParseAttempt = {
+  state: ParserState;
+  parsed: Bool;
+};
+
+type StateFlag = {
+  state: ParserState;
+  value: Bool;
+};
+
+function topLevelRecovery(): Int[] {
+  return [92, 93, 12, 74];
+}
+
+function statementRecovery(): Int[] {
+  return [9, 7, 16, 12, 13, 14, 15, 17, 101, 18, 19, 20, 80, 92, 93, 74];
+}
+
+function arrayRecovery(): Int[] {
+  return [8, 67, 5, 9, 7, 16, 12, 13, 14, 15, 17, 101, 18, 19, 20, 80, 81, 82, 92, 93, 74];
+}
+
+function recordBodyRecovery(): Int[] {
+  return [0, 9, 7, 92, 93, 12, 74];
+}
+
+function recordExpressionRecovery(): Int[] {
+  return [8, 7, 67, 5, 9, 12, 13, 14, 15, 17, 101, 18, 19, 20, 80, 81, 82, 92, 93, 74];
+}
+
+function unionDeclarationRecovery(): Int[] {
+  return [0, 83, 9, 92, 93, 12, 74];
+}
+
+function variantPayloadRecovery(): Int[] {
+  return [0, 8, 5, 83, 9, 92, 93, 12, 74];
+}
+
+function matchBodyRecovery(): Int[] {
+  return [81, 82, 7, 9, 13, 14, 15, 17, 101, 18, 19, 20, 80, 92, 93, 12, 74];
+}
+
+function matchArmRecovery(): Int[] {
+  return [9, 81, 82, 7, 13, 14, 15, 17, 101, 18, 19, 20, 80, 92, 93, 12, 74];
+}
+
+function patternBindingRecovery(): Int[] {
+  return [0, 8, 5, 84, 81, 82, 7];
+}
+
+function importListRecovery(): Int[] {
+  return [0, 8, 7, 94, 64, 9, 92, 93, 12, 74];
+}
+
+function typeParameterRecovery(): Int[] {
+  return [0, 8, 37, 38, 4, 6, 7, 26, 10, 9, 92, 93, 12, 74];
+}
+
+function typeArgumentRecovery(): Int[] {
+  return [0, 23, 24, 65, 25, 4, 8, 37, 38, 67, 5, 6, 7, 26, 10, 9, 83, 84, 92, 93, 12, 74];
+}
+
+function parameterListRecovery(): Int[] {
+  return [8, 5, 26, 84, 6, 7, 10, 9, 92, 93, 12, 74];
+}
+
+function forHeaderRecovery(): Int[] {
+  return [5, 6, 7, 9, 13, 14, 15, 17, 101, 18, 19, 20];
+}
+
+function containsKind(values: Int[], kind: Int, index: Int): Bool {
+  if (index >= values.length) {
+    return false;
+  }
+  if (values[index] === kind) {
+    return true;
+  }
+  return containsKind(values, kind, index + 1);
+}
+
+function eventRange(
+  values: ParserCstEvent[],
+  start: Int,
+  end: Int
+): ParserCstEvent[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [values[start]];
+  }
+  const middle = start + (end - start) / 2;
+  return eventRange(values, start, middle).concat(eventRange(values, middle, end));
+}
+
+function openNodeRange(values: OpenNode[], start: Int, end: Int): OpenNode[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [values[start]];
+  }
+  const middle = start + (end - start) / 2;
+  return openNodeRange(values, start, middle).concat(openNodeRange(values, middle, end));
+}
+
+function withPosition(
+  state: ParserState,
+  position: Int,
+  pendingSplitEq: Bool,
+  events: ParserCstEvent[]
+): ParserState {
+  return {
+    input: state.input,
+    tokens: state.tokens,
+    position: position,
+    pendingSplitEq: pendingSplitEq,
+    events: events,
+    openNodes: state.openNodes,
+    recoveryEvents: state.recoveryEvents,
+    diagnostics: state.diagnostics
+  };
+}
+
+function currentKind(state: ParserState): Int {
+  if (state.pendingSplitEq) {
+    return 10;
+  }
+  if (state.position >= state.tokens.length) {
+    return -1;
+  }
+  return state.tokens[state.position].kind;
+}
+
+function currentStart(state: ParserState): Int {
+  if (state.position >= state.tokens.length) {
+    return state.input.byteLength;
+  }
+  const token = state.tokens[state.position];
+  if (state.pendingSplitEq) {
+    return token.start + 1;
+  }
+  return token.start;
+}
+
+function currentEnd(state: ParserState): Int {
+  if (state.position >= state.tokens.length) {
+    return state.input.byteLength;
+  }
+  return state.tokens[state.position].end;
+}
+
+function checkpoint(state: ParserState): Checkpoint {
+  return {
+    eventIndex: state.events.length,
+    offset: currentStart(state)
+  };
+}
+
+function startNode(state: ParserState, kind: Int): ParserState {
+  const offset = currentStart(state);
+  return {
+    input: state.input,
+    tokens: state.tokens,
+    position: state.position,
+    pendingSplitEq: state.pendingSplitEq,
+    events: state.events.append(ParserCstEvent.StartNode(kind, offset)),
+    openNodes: state.openNodes.append({ kind: kind, start: offset }),
+    recoveryEvents: state.recoveryEvents,
+    diagnostics: state.diagnostics
+  };
+}
+
+function startNodeAt(
+  state: ParserState,
+  point: Checkpoint,
+  kind: Int
+): ParserState {
+  const prefix = eventRange(state.events, 0, point.eventIndex);
+  const suffix = eventRange(state.events, point.eventIndex, state.events.length);
+  const events = prefix
+    .append(ParserCstEvent.StartNode(kind, point.offset))
+    .concat(suffix);
+  return {
+    input: state.input,
+    tokens: state.tokens,
+    position: state.position,
+    pendingSplitEq: state.pendingSplitEq,
+    events: events,
+    openNodes: state.openNodes.append({ kind: kind, start: point.offset }),
+    recoveryEvents: state.recoveryEvents,
+    diagnostics: state.diagnostics
+  };
+}
+
+function finishNode(state: ParserState): ParserState {
+  const offset = currentStart(state);
+  const open = state.openNodes[state.openNodes.length - 1];
+  const remaining = openNodeRange(state.openNodes, 0, state.openNodes.length - 1);
+  if (open.kind === 63) {
+    return {
+      input: state.input,
+      tokens: state.tokens,
+      position: state.position,
+      pendingSplitEq: state.pendingSplitEq,
+      events: state.events.append(ParserCstEvent.FinishNode(offset)),
+      openNodes: remaining,
+      recoveryEvents: state.recoveryEvents.append({ start: open.start, end: offset }),
+      diagnostics: state.diagnostics
+    };
+  }
+  return {
+    input: state.input,
+    tokens: state.tokens,
+    position: state.position,
+    pendingSplitEq: state.pendingSplitEq,
+    events: state.events.append(ParserCstEvent.FinishNode(offset)),
+    openNodes: remaining,
+    recoveryEvents: state.recoveryEvents,
+    diagnostics: state.diagnostics
+  };
+}
+
+function bump(state: ParserState): ParserState {
+  const token = state.tokens[state.position];
+  if (state.pendingSplitEq) {
+    return withPosition(
+      state,
+      state.position + 1,
+      false,
+      state.events.append(ParserCstEvent.Token(10, token.start + 1, token.end))
+    );
+  }
+  return withPosition(
+    state,
+    state.position + 1,
+    false,
+    state.events.append(ParserCstEvent.Token(token.kind, token.start, token.end))
+  );
+}
+
+function skipTrivia(state: ParserState): ParserState {
+  const kind = currentKind(state);
+  if (kind === 2 || kind === 3) {
+    return skipTrivia(bump(state));
+  }
+  return state;
+}
+
+function errorAtCurrent(state: ParserState): ParserState {
+  const diagnostic: ParserDiagnostic = {
+    code: "E1001",
+    severity: "error",
+    labelStyle: "primary",
+    start: currentStart(state),
+    end: currentEnd(state)
+  };
+  return {
+    input: state.input,
+    tokens: state.tokens,
+    position: state.position,
+    pendingSplitEq: state.pendingSplitEq,
+    events: state.events,
+    openNodes: state.openNodes,
+    recoveryEvents: state.recoveryEvents,
+    diagnostics: state.diagnostics.append(diagnostic)
+  };
+}
+
+function expect(state: ParserState, kind: Int): StateFlag {
+  const skipped = skipTrivia(state);
+  if (currentKind(skipped) === kind) {
+    return { state: bump(skipped), value: true };
+  }
+  return { state: errorAtCurrent(skipped), value: false };
+}
+
+function atTypeListClose(state: ParserState): Bool {
+  const kind = currentKind(state);
+  return kind === 37 || kind === 38;
+}
+
+function bumpTypeListClose(state: ParserState): ParserState {
+  if (currentKind(state) === 38) {
+    const token = state.tokens[state.position];
+    return withPosition(
+      state,
+      state.position,
+      true,
+      state.events.append(ParserCstEvent.Token(37, token.start, token.start + 1))
+    );
+  }
+  return bump(state);
+}
+
+function expectTypeListClose(state: ParserState): StateFlag {
+  const skipped = skipTrivia(state);
+  if (atTypeListClose(skipped)) {
+    return { state: bumpTypeListClose(skipped), value: true };
+  }
+  return { state: errorAtCurrent(skipped), value: false };
+}
+
+function recoverConsume(state: ParserState, recovery: Int[]): ParserState {
+  const kind = currentKind(state);
+  if (kind === -1 || containsKind(recovery, kind, 0)) {
+    return state;
+  }
+  return recoverConsume(bump(state), recovery);
+}
+
+function recoverTo(state: ParserState, recovery: Int[]): ParserState {
+  const kind = currentKind(state);
+  if (kind === -1 || containsKind(recovery, kind, 0)) {
+    return state;
+  }
+  const opened = startNode(state, 63);
+  return finishNode(recoverConsume(opened, recovery));
+}
+
+function recoverStatement(state: ParserState): ParserState {
+  const recovered = recoverTo(state, statementRecovery());
+  if (currentKind(recovered) === 9) {
+    return bump(recovered);
+  }
+  return recovered;
+}
+
+function recoverRecordBody(state: ParserState): ParserState {
+  const recovered = recoverTo(state, recordBodyRecovery());
+  if (currentKind(recovered) === 9) {
+    return bump(recovered);
+  }
+  return recovered;
+}
+
+function nthNonTriviaFrom(
+  tokens: LexerToken[],
+  index: Int,
+  remaining: Int
+): Int {
+  if (index >= tokens.length) {
+    return -1;
+  }
+  const kind = tokens[index].kind;
+  if (kind === 2 || kind === 3) {
+    return nthNonTriviaFrom(tokens, index + 1, remaining);
+  }
+  if (remaining === 0) {
+    return kind;
+  }
+  return nthNonTriviaFrom(tokens, index + 1, remaining - 1);
+}
+
+function nthNonTrivia(state: ParserState, offset: Int): Int {
+  if (state.pendingSplitEq) {
+    if (offset === 0) {
+      return 10;
+    }
+    return nthNonTriviaFrom(state.tokens, state.position + 1, offset - 1);
+  }
+  return nthNonTriviaFrom(state.tokens, state.position, offset);
+}
+
+function findByteOffset(
+  offsets: Int[],
+  target: Int,
+  start: Int,
+  end: Int
+): Int {
+  if (start >= end) {
+    return -1;
+  }
+  if (end - start === 1) {
+    if (offsets[start] === target) {
+      return start;
+    }
+    return -1;
+  }
+  const middle = start + (end - start) / 2;
+  if (offsets[middle] <= target) {
+    return findByteOffset(offsets, target, middle, end);
+  }
+  return findByteOffset(offsets, target, start, middle);
+}
+
+function atContextualOf(state: ParserState): Bool {
+  if (state.pendingSplitEq || !(currentKind(state) === 0)) {
+    return false;
+  }
+  const token = state.tokens[state.position];
+  if (!(token.end - token.start === 2)) {
+    return false;
+  }
+  const index = findByteOffset(
+    state.input.byteOffsets,
+    token.start,
+    0,
+    state.input.byteOffsets.length
+  );
+  if (index < 0 || index + 2 >= state.input.byteOffsets.length) {
+    return false;
+  }
+  return state.input.codePoints[index] === 111 &&
+    state.input.codePoints[index + 1] === 102 &&
+    state.input.byteOffsets[index + 2] === token.end;
+}
+
+function expectContextualOf(state: ParserState): StateFlag {
+  const skipped = skipTrivia(state);
+  if (atContextualOf(skipped)) {
+    return { state: bump(skipped), value: true };
+  }
+  return { state: errorAtCurrent(skipped), value: false };
+}
+
+function isTypeStart(kind: Int): Bool {
+  return kind === 23 || kind === 24 || kind === 65 || kind === 25 ||
+    kind === 4 || kind === 0;
+}
+
+function atAssignmentStatement(state: ParserState): Bool {
+  return nthNonTrivia(state, 0) === 0 && nthNonTrivia(state, 1) === 10;
+}
+
+function scanArrow(state: ParserState, offset: Int, depth: Int): Bool {
+  const kind = nthNonTrivia(state, offset);
+  if (kind === -1) {
+    return false;
+  }
+  if (kind === 4) {
+    return scanArrow(state, offset + 1, depth + 1);
+  }
+  if (kind === 5) {
+    if (depth === 1) {
+      const next = nthNonTrivia(state, offset + 1);
+      return next === 26 || next === 84;
+    }
+    return scanArrow(state, offset + 1, depth - 1);
+  }
+  return scanArrow(state, offset + 1, depth);
+}
+
+function atArrowExpression(state: ParserState): Bool {
+  if (!(currentKind(state) === 4)) {
+    return false;
+  }
+  return scanArrow(state, 0, 0);
+}
+
+function importListIsFinished(state: ParserState): Bool {
+  const kind = currentKind(state);
+  return kind === -1 || kind === 7 || kind === 94 || kind === 64 ||
+    kind === 9 || kind === 92 || kind === 93 || kind === 12 || kind === 74;
+}
+
+function typeParameterListIsFinished(state: ParserState): Bool {
+  const kind = currentKind(state);
+  return kind === -1 || kind === 37 || kind === 38 || kind === 4 ||
+    kind === 6 || kind === 7 || kind === 26 || kind === 10 || kind === 9 ||
+    kind === 92 || kind === 93 || kind === 12 || kind === 74;
+}
+
+function atReservedParameterName(state: ParserState): Bool {
+  const kind = currentKind(state);
+  return (kind === 92 || kind === 93 || kind === 12 || kind === 74) &&
+    nthNonTrivia(state, 1) === 26;
+}
+
+function parameterListIsFinished(
+  state: ParserState,
+  canRecoverMissingName: Bool
+): Bool {
+  if (atReservedParameterName(state)) {
+    return false;
+  }
+  if (canRecoverMissingName && currentKind(state) === 26) {
+    return false;
+  }
+  const kind = currentKind(state);
+  return kind === -1 || kind === 5 || kind === 26 || kind === 84 ||
+    kind === 6 || kind === 7 || kind === 10 || kind === 9 || kind === 92 ||
+    kind === 93 || kind === 12 || kind === 74;
+}
+
+function typeArgumentListIsFinished(state: ParserState): Bool {
+  const kind = currentKind(state);
+  return kind === -1 || kind === 37 || kind === 38 || kind === 67 ||
+    kind === 5 || kind === 6 || kind === 7 || kind === 26 || kind === 10 ||
+    kind === 9 || kind === 83 || kind === 84 || kind === 92 || kind === 93 ||
+    kind === 12 || kind === 74;
+}
+
+function scanTypeDeclaration(
+  state: ParserState,
+  offset: Int,
+  closeIncludesEquals: Bool
+): Bool {
+  const kind = nthNonTrivia(state, offset);
+  if (kind === 37) {
+    return typeDeclarationAfterParameters(state, offset + 1, false);
+  }
+  if (kind === 38) {
+    return typeDeclarationAfterParameters(state, offset + 1, true);
+  }
+  if (
+    kind === -1 || kind === 10 || kind === 9 || kind === 92 || kind === 93 ||
+    kind === 12 || kind === 74
+  ) {
+    return typeDeclarationAfterParameters(state, offset, closeIncludesEquals);
+  }
+  return scanTypeDeclaration(state, offset + 1, closeIncludesEquals);
+}
+
+function typeDeclarationAfterParameters(
+  state: ParserState,
+  offset: Int,
+  closeIncludesEquals: Bool
+): Bool {
+  const nextOffset = ifOffsetHasEquals(state, offset, closeIncludesEquals);
+  const kind = nthNonTrivia(state, nextOffset);
+  return kind === 0 || kind === 83;
+}
+
+function ifOffsetHasEquals(
+  state: ParserState,
+  offset: Int,
+  closeIncludesEquals: Bool
+): Int {
+  if (!closeIncludesEquals && nthNonTrivia(state, offset) === 10) {
+    return offset + 1;
+  }
+  return offset;
+}
+
+function typeDeclarationIsUnion(state: ParserState): Bool {
+  const afterName = ifAfterTypeName(state, 1);
+  if (nthNonTrivia(state, afterName) === 35) {
+    return scanTypeDeclaration(state, afterName + 1, false);
+  }
+  return typeDeclarationAfterParameters(state, afterName, false);
+}
+
+function ifAfterTypeName(state: ParserState, offset: Int): Int {
+  if (nthNonTrivia(state, offset) === 0) {
+    return offset + 1;
+  }
+  return offset;
+}
+
+function binaryPrecedence(state: ParserState): Int {
+  const kind = currentKind(state);
+  if (kind === 33) {
+    return 1;
+  }
+  if (kind === 32) {
+    return 2;
+  }
+  if (kind === 34) {
+    return 3;
+  }
+  if (kind === 35 || kind === 36 || kind === 37 || kind === 38) {
+    return 4;
+  }
+  if (kind === 27 || kind === 28) {
+    return 5;
+  }
+  if (kind === 29 || kind === 30) {
+    return 6;
+  }
+  return 0;
+}
+
+function parseSourceItems(state: ParserState): ParserState {
+  const skipped = skipTrivia(state);
+  const kind = currentKind(skipped);
+  if (kind === -1) {
+    return skipped;
+  }
+  if (kind === 92) {
+    return parseSourceItems(parseImportDeclaration(skipped));
+  }
+  if (kind === 93) {
+    return parseSourceItems(parseExportedDeclaration(skipped));
+  }
+  if (kind === 12) {
+    return parseSourceItems(parseFunctionDeclaration(skipped));
+  }
+  if (kind === 74) {
+    return parseSourceItems(parseTypeDeclaration(skipped));
+  }
+  return parseSourceItems(parseUnexpectedTopLevelItem(skipped));
+}
+
+function parseTypeDeclaration(state: ParserState): ParserState {
+  if (typeDeclarationIsUnion(state)) {
+    return parseUnionDeclaration(state);
+  }
+  return parseRecordDeclaration(state);
+}
+
+function parseImportDeclaration(state: ParserState): ParserState {
+  const opened = startNode(state, 95);
+  const keyword = expect(opened, 92).state;
+  const left = expect(keyword, 6).state;
+  const names = parseImportList(left);
+  const right = expect(names, 7).state;
+  const fromKeyword = expect(right, 94).state;
+  const path = expect(fromKeyword, 64).state;
+  const semicolon = expect(path, 9);
+  if (!semicolon.value) {
+    return finishNode(recoverTo(semicolon.state, topLevelRecovery()));
+  }
+  return finishNode(semicolon.state);
+}
+
+function parseImportList(state: ParserState): ParserState {
+  const opened = startNode(state, 96);
+  const skipped = skipTrivia(opened);
+  if (importListIsFinished(skipped)) {
+    return finishNode(errorAtCurrent(skipped));
+  }
+  return finishNode(parseImportListItems(skipped));
+}
+
+function parseImportListItems(state: ParserState): ParserState {
+  const named = parseImportedName(state);
+  const skipped = skipTrivia(named);
+  if (currentKind(skipped) === 8) {
+    const comma = skipTrivia(bump(skipped));
+    if (importListIsFinished(comma)) {
+      return errorAtCurrent(comma);
+    }
+    return parseImportListItems(comma);
+  }
+  if (currentKind(skipped) === 0) {
+    return parseImportListItems(errorAtCurrent(skipped));
+  }
+  return skipped;
+}
+
+function parseImportedName(state: ParserState): ParserState {
+  if (currentKind(state) === 0) {
+    return bump(state);
+  }
+  const reported = errorAtCurrent(state);
+  const recovered = recoverTo(reported, importListRecovery());
+  if (currentKind(recovered) === 8) {
+    const comma = skipTrivia(bump(recovered));
+    if (importListIsFinished(comma)) {
+      return comma;
+    }
+    if (currentKind(comma) === 0) {
+      return bump(comma);
+    }
+    return comma;
+  }
+  if (importListIsFinished(recovered)) {
+    return recovered;
+  }
+  if (currentKind(recovered) === 0) {
+    return bump(recovered);
+  }
+  return recovered;
+}
+
+function parseExportedDeclaration(state: ParserState): ParserState {
+  const opened = startNode(state, 97);
+  const exported = expect(opened, 93).state;
+  const skipped = skipTrivia(exported);
+  const kind = currentKind(skipped);
+  if (kind === 12) {
+    return finishNode(parseFunctionDeclaration(skipped));
+  }
+  if (kind === 74) {
+    return finishNode(parseTypeDeclaration(skipped));
+  }
+  const reported = errorAtCurrent(skipped);
+  return finishNode(recoverTo(reported, topLevelRecovery()));
+}
+
+function parseFunctionDeclaration(state: ParserState): ParserState {
+  const opened = startNode(state, 40);
+  const keyword = expect(opened, 12).state;
+  const name = expect(keyword, 0).state;
+  const typeParameters = parseTypeParameterList(name);
+  const left = expect(typeParameters, 4).state;
+  const parameters = parseParameterList(left);
+  const right = expect(parameters, 5).state;
+  const colon = expect(right, 26).state;
+  const resultType = parseType(colon);
+  return finishNode(parseBlock(resultType));
+}
+
+function parseRecordDeclaration(state: ParserState): ParserState {
+  const opened = startNode(state, 75);
+  const keyword = expect(opened, 74).state;
+  const name = expect(keyword, 0).state;
+  const typeParameters = parseTypeParameterList(name);
+  const equals = expect(typeParameters, 10).state;
+  const body = parseRecordBody(equals);
+  const semicolon = expect(body, 9);
+  if (!semicolon.value) {
+    return finishNode(recoverTo(semicolon.state, topLevelRecovery()));
+  }
+  return finishNode(semicolon.state);
+}
+
+function parseRecordBody(state: ParserState): ParserState {
+  const opened = startNode(state, 76);
+  const left = expect(opened, 6);
+  if (!left.value) {
+    return finishNode(left.state);
+  }
+  return finishNode(parseRecordBodyItems(left.state));
+}
+
+function parseRecordBodyItems(state: ParserState): ParserState {
+  const skipped = skipTrivia(state);
+  const kind = currentKind(skipped);
+  if (kind === 7) {
+    return bump(skipped);
+  }
+  if (kind === 0) {
+    return parseRecordBodyItems(parseRecordFieldDeclaration(skipped));
+  }
+  if (kind === 92 || kind === 93 || kind === 12 || kind === 74) {
+    return errorAtCurrent(skipped);
+  }
+  if (kind === -1) {
+    return errorAtCurrent(skipped);
+  }
+  const reported = errorAtCurrent(skipped);
+  return parseRecordBodyItems(recoverRecordBody(reported));
+}
+
+function parseRecordFieldDeclaration(state: ParserState): ParserState {
+  const opened = startNode(state, 77);
+  const name = expect(opened, 0).state;
+  const colon = expect(name, 26).state;
+  const fieldType = parseType(colon);
+  const semicolon = expect(fieldType, 9);
+  if (!semicolon.value) {
+    return finishNode(recoverRecordBody(semicolon.state));
+  }
+  return finishNode(semicolon.state);
+}
+
+function parseUnionDeclaration(state: ParserState): ParserState {
+  const opened = startNode(state, 85);
+  const keyword = expect(opened, 74).state;
+  const name = expect(keyword, 0).state;
+  const typeParameters = parseTypeParameterList(name);
+  const equals = expect(typeParameters, 10).state;
+  const skipped = skipTrivia(equals);
+  const afterLeadingPipe = consumeLeadingPipe(skipped);
+  const variants = parseUnionVariants(afterLeadingPipe, false);
+  const semicolon = expect(variants, 9);
+  if (!semicolon.value) {
+    return finishNode(recoverTo(semicolon.state, topLevelRecovery()));
+  }
+  return finishNode(semicolon.state);
+}
+
+function consumeLeadingPipe(state: ParserState): ParserState {
+  if (currentKind(state) === 83) {
+    return skipTrivia(bump(state));
+  }
+  return state;
+}
+
+function parseUnionVariants(state: ParserState, parsedVariant: Bool): ParserState {
+  const skipped = skipTrivia(state);
+  const kind = currentKind(skipped);
+  if (kind === 0) {
+    return parseUnionVariantSeparator(parseUnionVariant(skipped));
+  }
+  if (
+    kind === -1 || kind === 9 || kind === 92 || kind === 93 || kind === 12 ||
+    kind === 74
+  ) {
+    if (parsedVariant) {
+      return skipped;
+    }
+    return errorAtCurrent(skipped);
+  }
+  const reported = errorAtCurrent(skipped);
+  const recovered = recoverTo(reported, unionDeclarationRecovery());
+  if (currentKind(recovered) === 0) {
+    return parseUnionVariants(recovered, parsedVariant);
+  }
+  if (currentKind(recovered) === 83) {
+    return parseUnionVariants(bump(recovered), parsedVariant);
+  }
+  return recovered;
+}
+
+function parseUnionVariantSeparator(state: ParserState): ParserState {
+  const skipped = skipTrivia(state);
+  if (currentKind(skipped) === 83) {
+    const pipe = skipTrivia(bump(skipped));
+    const kind = currentKind(pipe);
+    if (
+      kind === -1 || kind === 9 || kind === 92 || kind === 93 || kind === 12 ||
+      kind === 74
+    ) {
+      return errorAtCurrent(pipe);
+    }
+    return parseUnionVariants(pipe, true);
+  }
+  if (currentKind(skipped) === 0) {
+    return parseUnionVariants(errorAtCurrent(skipped), true);
+  }
+  return skipped;
+}
+
+function parseUnionVariant(state: ParserState): ParserState {
+  const opened = startNode(state, 86);
+  const name = expect(opened, 0).state;
+  return finishNode(parseVariantPayload(name));
+}
+
+function parseVariantPayload(state: ParserState): ParserState {
+  const opened = startNode(state, 87);
+  const left = expect(opened, 4);
+  if (!left.value) {
+    return finishNode(left.state);
+  }
+  const skipped = skipTrivia(left.state);
+  if (currentKind(skipped) === 5) {
+    return finishNode(bump(skipped));
+  }
+  const fields = parseVariantPayloadFields(skipped);
+  return finishNode(expect(fields, 5).state);
+}
+
+function parseVariantPayloadFields(state: ParserState): ParserState {
+  const position = state.position;
+  const name = expect(state, 0).state;
+  const colon = expect(name, 26).state;
+  const fieldType = parseType(colon);
+  const progressed = recoverVariantField(fieldType, position);
+  const skipped = skipTrivia(progressed);
+  if (currentKind(skipped) === 8) {
+    const comma = skipTrivia(bump(skipped));
+    if (currentKind(comma) === 5) {
+      return errorAtCurrent(comma);
+    }
+    return parseVariantPayloadFields(comma);
+  }
+  if (currentKind(skipped) === 5) {
+    return skipped;
+  }
+  if (currentKind(skipped) === 0) {
+    return parseVariantPayloadFields(errorAtCurrent(skipped));
+  }
+  const reported = errorAtCurrent(skipped);
+  const recovered = recoverTo(reported, variantPayloadRecovery());
+  if (currentKind(recovered) === 8) {
+    const comma = skipTrivia(bump(recovered));
+    if (currentKind(comma) === 5) {
+      return errorAtCurrent(comma);
+    }
+    return parseVariantPayloadFields(comma);
+  }
+  return recovered;
+}
+
+function recoverVariantField(state: ParserState, position: Int): ParserState {
+  if (state.position === position) {
+    return recoverTo(state, variantPayloadRecovery());
+  }
+  return state;
+}
+
+function parseParameterList(state: ParserState): ParserState {
+  const opened = startNode(state, 41);
+  const skipped = skipTrivia(opened);
+  return finishNode(parseParameters(skipped, true));
+}
+
+function parseParameters(
+  state: ParserState,
+  canRecoverMissingName: Bool
+): ParserState {
+  if (currentKind(state) === -1 || parameterListIsFinished(state, canRecoverMissingName)) {
+    return state;
+  }
+  const position = state.position;
+  const parameter = parseParameter(state);
+  const progressed = recoverParameter(parameter, position);
+  const skipped = skipTrivia(progressed);
+  if (currentKind(skipped) === 8) {
+    const comma = skipTrivia(bump(skipped));
+    if (currentKind(comma) === 5) {
+      return errorAtCurrent(comma);
+    }
+    return parseParameters(comma, true);
+  }
+  if (!parameterListIsFinished(skipped, false)) {
+    const reported = errorAtCurrent(skipped);
+    const recovered = recoverTo(reported, parameterListRecovery());
+    if (currentKind(recovered) === 8) {
+      return parseParameters(skipTrivia(bump(recovered)), true);
+    }
+    return parseParameters(recovered, false);
+  }
+  return skipped;
+}
+
+function recoverParameter(state: ParserState, position: Int): ParserState {
+  if (state.position === position) {
+    return recoverTo(state, parameterListRecovery());
+  }
+  return state;
+}
+
+function parseParameter(state: ParserState): ParserState {
+  const opened = startNode(state, 42);
+  const name = expect(opened, 0);
+  const recoveredName = consumeReservedParameterName(name);
+  const colon = expect(recoveredName, 26).state;
+  return finishNode(parseType(colon));
+}
+
+function consumeReservedParameterName(result: StateFlag): ParserState {
+  if (!result.value && atReservedParameterName(result.state)) {
+    return bump(result.state);
+  }
+  return result.state;
+}
+
+function parseTypeParameterList(state: ParserState): ParserState {
+  const skipped = skipTrivia(state);
+  if (!(currentKind(skipped) === 35)) {
+    return skipped;
+  }
+  const opened = startNode(skipped, 98);
+  const left = skipTrivia(bump(opened));
+  if (atTypeListClose(left)) {
+    const reported = errorAtCurrent(left);
+    return finishNode(bumpTypeListClose(reported));
+  }
+  const parameters = parseTypeParameters(left);
+  return finishNode(expectTypeListClose(parameters).state);
+}
+
+function parseTypeParameters(state: ParserState): ParserState {
+  const position = state.position;
+  const opened = startNode(state, 99);
+  const parameter = finishNode(expect(opened, 0).state);
+  const progressed = recoverTypeParameter(parameter, position);
+  const skipped = skipTrivia(progressed);
+  if (currentKind(skipped) === 8) {
+    const comma = skipTrivia(bump(skipped));
+    if (atTypeListClose(comma) || typeParameterListIsFinished(comma)) {
+      return errorAtCurrent(comma);
+    }
+    return parseTypeParameters(comma);
+  }
+  if (atTypeListClose(skipped) || typeParameterListIsFinished(skipped)) {
+    return skipped;
+  }
+  if (currentKind(skipped) === 0) {
+    return parseTypeParameters(errorAtCurrent(skipped));
+  }
+  const reported = errorAtCurrent(skipped);
+  const recovered = recoverTo(reported, typeParameterRecovery());
+  if (currentKind(recovered) === 8) {
+    const comma = skipTrivia(bump(recovered));
+    if (atTypeListClose(comma)) {
+      return errorAtCurrent(comma);
+    }
+    return parseTypeParameters(comma);
+  }
+  if (currentKind(recovered) === 0) {
+    return parseTypeParameters(recovered);
+  }
+  return recovered;
+}
+
+function recoverTypeParameter(state: ParserState, position: Int): ParserState {
+  if (state.position === position) {
+    return recoverTo(state, typeParameterRecovery());
+  }
+  return state;
+}
+
+function parseType(state: ParserState): ParserState {
+  const skipped = skipTrivia(state);
+  const point = checkpoint(skipped);
+  const opened = startNode(skipped, 43);
+  const current = currentKind(opened);
+  const parsed = parseTypeAtom(opened, current);
+  const withArguments = parseNamedTypeArguments(parsed, current);
+  const closed = finishNode(withArguments.state);
+  return parseArrayTypeSuffixes(closed, point, parsed.parsed);
+}
+
+function parseTypeAtom(state: ParserState, current: Int): ParseAttempt {
+  if (
+    current === 23 || current === 24 || current === 65 || current === 25 ||
+    current === 0
+  ) {
+    return { state: bump(state), parsed: true };
+  }
+  if (current === 4) {
+    if (nthNonTrivia(state, 1) === 4) {
+      return { state: parseParenthesizedFunctionType(state), parsed: true };
+    }
+    return { state: parseFunctionType(state), parsed: true };
+  }
+  return { state: errorAtCurrent(state), parsed: false };
+}
+
+function parseNamedTypeArguments(
+  attempt: ParseAttempt,
+  originalKind: Int
+): ParseAttempt {
+  if (
+    attempt.parsed && originalKind === 0 &&
+    nthNonTrivia(attempt.state, 0) === 35
+  ) {
+    return { state: parseTypeArgumentList(attempt.state), parsed: true };
+  }
+  return attempt;
+}
+
+function parseArrayTypeSuffixes(
+  state: ParserState,
+  point: Checkpoint,
+  parsed: Bool
+): ParserState {
+  if (parsed && nthNonTrivia(state, 0) === 66) {
+    const wrapped = startNodeAt(state, point, 70);
+    const left = expect(wrapped, 66).state;
+    const right = expect(left, 67).state;
+    return parseArrayTypeSuffixes(finishNode(right), point, parsed);
+  }
+  return state;
+}
+
+function parseFunctionType(state: ParserState): ParserState {
+  const opened = startNode(state, 102);
+  const left = expect(opened, 4).state;
+  const parameters = parseParameterList(left);
+  const right = expect(parameters, 5).state;
+  const arrow = expect(right, 84).state;
+  return finishNode(parseType(arrow));
+}
+
+function parseParenthesizedFunctionType(state: ParserState): ParserState {
+  const left = expect(state, 4).state;
+  const functionType = parseFunctionType(left);
+  return expect(functionType, 5).state;
+}
+
+function parseTypeArgumentList(state: ParserState): ParserState {
+  const skipped = skipTrivia(state);
+  const opened = startNode(skipped, 100);
+  const left = expect(opened, 35).state;
+  const afterLeft = skipTrivia(left);
+  if (atTypeListClose(afterLeft)) {
+    const reported = errorAtCurrent(afterLeft);
+    return finishNode(bumpTypeListClose(reported));
+  }
+  const arguments = parseTypeArguments(afterLeft);
+  return finishNode(expectTypeListClose(arguments).state);
+}
+
+function parseTypeArguments(state: ParserState): ParserState {
+  const position = state.position;
+  const argument = parseType(state);
+  const progressed = recoverTypeArgument(argument, position);
+  const skipped = skipTrivia(progressed);
+  if (currentKind(skipped) === 8) {
+    const comma = skipTrivia(bump(skipped));
+    if (atTypeListClose(comma) || typeArgumentListIsFinished(comma)) {
+      return errorAtCurrent(comma);
+    }
+    return parseTypeArguments(comma);
+  }
+  if (atTypeListClose(skipped) || typeArgumentListIsFinished(skipped)) {
+    return skipped;
+  }
+  if (isTypeStart(currentKind(skipped))) {
+    return parseTypeArguments(errorAtCurrent(skipped));
+  }
+  const reported = errorAtCurrent(skipped);
+  const recovered = recoverTo(reported, typeArgumentRecovery());
+  if (currentKind(recovered) === 8) {
+    const comma = skipTrivia(bump(recovered));
+    if (atTypeListClose(comma)) {
+      return errorAtCurrent(comma);
+    }
+    return parseTypeArguments(comma);
+  }
+  if (isTypeStart(currentKind(recovered))) {
+    return parseTypeArguments(recovered);
+  }
+  return recovered;
+}
+
+function recoverTypeArgument(state: ParserState, position: Int): ParserState {
+  if (state.position === position) {
+    return recoverTo(state, typeArgumentRecovery());
+  }
+  return state;
+}
+
+function parseBlock(state: ParserState): ParserState {
+  const opened = startNode(state, 44);
+  const left = expect(opened, 6);
+  if (!left.value) {
+    return finishNode(left.state);
+  }
+  return finishNode(parseBlockItems(left.state));
+}
+
+function parseBlockItems(state: ParserState): ParserState {
+  const skipped = skipTrivia(state);
+  const kind = currentKind(skipped);
+  if (kind === 7) {
+    return bump(skipped);
+  }
+  if (kind === 13) {
+    return parseBlockItems(parseConstDeclaration(skipped));
+  }
+  if (kind === 14) {
+    return parseBlockItems(parseLetDeclaration(skipped));
+  }
+  if (kind === 15) {
+    return parseBlockItems(parseIfStatement(skipped));
+  }
+  if (kind === 17) {
+    return parseBlockItems(parseWhileStatement(skipped));
+  }
+  if (kind === 101) {
+    return parseBlockItems(parseForStatement(skipped));
+  }
+  if (kind === 18) {
+    return parseBlockItems(parseBreakStatement(skipped));
+  }
+  if (kind === 19) {
+    return parseBlockItems(parseContinueStatement(skipped));
+  }
+  if (kind === 20) {
+    return parseBlockItems(parseReturnStatement(skipped));
+  }
+  if (kind === 16) {
+    return parseBlockItems(bump(errorAtCurrent(skipped)));
+  }
+  if (kind === 92 || kind === 93 || kind === 12 || kind === 74) {
+    return errorAtCurrent(skipped);
+  }
+  if (kind === -1) {
+    return errorAtCurrent(skipped);
+  }
+  if (kind === 0 && atAssignmentStatement(skipped)) {
+    return parseBlockItems(parseAssignmentStatement(skipped));
+  }
+  const position = skipped.position;
+  const expression = parseExpressionStatement(skipped);
+  if (expression.position === position) {
+    return parseBlockItems(bump(errorAtCurrent(expression)));
+  }
+  return parseBlockItems(expression);
+}
+
+function parseConstDeclaration(state: ParserState): ParserState {
+  return parseBindingDeclaration(state, 45, 13);
+}
+
+function parseLetDeclaration(state: ParserState): ParserState {
+  return parseBindingDeclaration(state, 46, 14);
+}
+
+function parseBindingDeclaration(
+  state: ParserState,
+  declarationKind: Int,
+  keywordKind: Int
+): ParserState {
+  const opened = startNode(state, declarationKind);
+  const keyword = expect(opened, keywordKind).state;
+  const name = expect(keyword, 0).state;
+  const skipped = skipTrivia(name);
+  const annotated = parseOptionalBindingType(skipped);
+  const equals = expect(annotated, 10).state;
+  const expression = parseExpression(equals);
+  if (!expression.parsed) {
+    return finishNode(recoverStatement(expression.state));
+  }
+  const semicolon = expect(expression.state, 9);
+  if (!semicolon.value) {
+    return finishNode(recoverStatement(semicolon.state));
+  }
+  return finishNode(semicolon.state);
+}
+
+function parseOptionalBindingType(state: ParserState): ParserState {
+  if (currentKind(state) === 26) {
+    return parseType(bump(state));
+  }
+  return state;
+}
+
+function parseAssignmentStatement(state: ParserState): ParserState {
+  const opened = startNode(state, 47);
+  const name = expect(opened, 0).state;
+  const equals = expect(name, 10).state;
+  const expression = parseExpression(equals);
+  if (!expression.parsed) {
+    return finishNode(recoverStatement(expression.state));
+  }
+  const semicolon = expect(expression.state, 9);
+  if (!semicolon.value) {
+    return finishNode(recoverStatement(semicolon.state));
+  }
+  return finishNode(semicolon.state);
+}
+
+function parseIfStatement(state: ParserState): ParserState {
+  const opened = startNode(state, 48);
+  const keyword = expect(opened, 15).state;
+  const left = expect(keyword, 4);
+  const condition = parseConditionalExpression(left);
+  const right = expect(condition, 5).state;
+  const thenBlock = parseBlock(right);
+  const skipped = skipTrivia(thenBlock);
+  if (currentKind(skipped) === 16) {
+    const elseNode = startNode(skipped, 49);
+    const elseKeyword = bump(elseNode);
+    return finishNode(finishNode(parseBlock(elseKeyword)));
+  }
+  return finishNode(skipped);
+}
+
+function parseConditionalExpression(left: StateFlag): ParserState {
+  if (left.value || !(currentKind(left.state) === 6)) {
+    return parseExpression(left.state).state;
+  }
+  return errorAtCurrent(left.state);
+}
+
+function parseWhileStatement(state: ParserState): ParserState {
+  const opened = startNode(state, 50);
+  const keyword = expect(opened, 17).state;
+  const left = expect(keyword, 4);
+  const condition = parseConditionalExpression(left);
+  const right = expect(condition, 5).state;
+  return finishNode(parseBlock(right));
+}
+
+function parseForStatement(state: ParserState): ParserState {
+  const opened = startNode(state, 105);
+  const keyword = expect(opened, 101).state;
+  const left = expect(keyword, 4).state;
+  const bindingNode = startNode(left, 106);
+  const bindingKeyword = expect(bindingNode, 13);
+  const acceptedKeyword = consumeLetForBinding(bindingKeyword);
+  const bindingName = expect(acceptedKeyword, 0).state;
+  const binding = finishNode(bindingName);
+  const ofKeyword = expectContextualOf(binding).state;
+  const iterable = parseExpression(ofKeyword);
+  const recovered = recoverForIterable(iterable);
+  const right = expect(recovered, 5).state;
+  return finishNode(parseBlock(right));
+}
+
+function consumeLetForBinding(result: StateFlag): ParserState {
+  if (!result.value && currentKind(result.state) === 14) {
+    return bump(result.state);
+  }
+  return result.state;
+}
+
+function recoverForIterable(attempt: ParseAttempt): ParserState {
+  if (!attempt.parsed) {
+    return recoverTo(attempt.state, forHeaderRecovery());
+  }
+  return attempt.state;
+}
+
+function parseBreakStatement(state: ParserState): ParserState {
+  return parseTerminatedKeywordStatement(state, 51, 18);
+}
+
+function parseContinueStatement(state: ParserState): ParserState {
+  return parseTerminatedKeywordStatement(state, 52, 19);
+}
+
+function parseTerminatedKeywordStatement(
+  state: ParserState,
+  statementKind: Int,
+  keywordKind: Int
+): ParserState {
+  const opened = startNode(state, statementKind);
+  const keyword = expect(opened, keywordKind).state;
+  const semicolon = expect(keyword, 9);
+  if (!semicolon.value) {
+    return finishNode(recoverStatement(semicolon.state));
+  }
+  return finishNode(semicolon.state);
+}
+
+function parseReturnStatement(state: ParserState): ParserState {
+  const opened = startNode(state, 53);
+  const keyword = expect(opened, 20).state;
+  const skipped = skipTrivia(keyword);
+  const value = parseOptionalReturnValue(skipped);
+  const semicolon = expect(value, 9);
+  if (!semicolon.value) {
+    return finishNode(recoverStatement(semicolon.state));
+  }
+  return finishNode(semicolon.state);
+}
+
+function parseOptionalReturnValue(state: ParserState): ParserState {
+  if (!(currentKind(state) === 9) && !(currentKind(state) === -1)) {
+    return parseExpression(state).state;
+  }
+  return state;
+}
+
+function parseExpressionStatement(state: ParserState): ParserState {
+  const opened = startNode(state, 54);
+  const expression = parseExpression(opened);
+  if (!expression.parsed) {
+    return finishNode(recoverStatement(expression.state));
+  }
+  const semicolon = expect(expression.state, 9);
+  if (!semicolon.value) {
+    return finishNode(recoverStatement(semicolon.state));
+  }
+  return finishNode(semicolon.state);
+}
+
+function parseExpression(state: ParserState): ParseAttempt {
+  return parseBinaryExpression(state, 1);
+}
+
+function parseBinaryExpression(
+  state: ParserState,
+  minimumPrecedence: Int
+): ParseAttempt {
+  const skipped = skipTrivia(state);
+  const point = checkpoint(skipped);
+  const left = parseUnaryExpression(skipped);
+  if (!left.parsed) {
+    return left;
+  }
+  return {
+    state: parseBinaryTail(left.state, point, minimumPrecedence),
+    parsed: true
+  };
+}
+
+function parseBinaryTail(
+  state: ParserState,
+  point: Checkpoint,
+  minimumPrecedence: Int
+): ParserState {
+  const skipped = skipTrivia(state);
+  const precedence = binaryPrecedence(skipped);
+  if (precedence === 0 || precedence < minimumPrecedence) {
+    return skipped;
+  }
+  const opened = startNodeAt(skipped, point, 55);
+  const operator = bump(opened);
+  const right = parseBinaryExpression(operator, precedence + 1);
+  const completed = ifMissingBinaryOperand(right);
+  return parseBinaryTail(finishNode(completed), point, minimumPrecedence);
+}
+
+function ifMissingBinaryOperand(attempt: ParseAttempt): ParserState {
+  if (!attempt.parsed) {
+    return errorAtCurrent(attempt.state);
+  }
+  return attempt.state;
+}
+
+function parseUnaryExpression(state: ParserState): ParseAttempt {
+  const skipped = skipTrivia(state);
+  const kind = currentKind(skipped);
+  if (kind === 31 || kind === 28) {
+    const opened = startNode(skipped, 56);
+    const operator = bump(opened);
+    const operand = parseUnaryExpression(operator);
+    const completed = ifMissingUnaryOperand(operand);
+    return { state: finishNode(completed), parsed: true };
+  }
+  return parsePostfixExpression(skipped);
+}
+
+function ifMissingUnaryOperand(attempt: ParseAttempt): ParserState {
+  if (!attempt.parsed) {
+    return errorAtCurrent(attempt.state);
+  }
+  return attempt.state;
+}
+
+function parsePostfixExpression(state: ParserState): ParseAttempt {
+  const skipped = skipTrivia(state);
+  const point = checkpoint(skipped);
+  const primary = parsePrimaryExpression(skipped);
+  if (!primary.parsed) {
+    return primary;
+  }
+  return { state: parsePostfixTail(primary.state, point), parsed: true };
+}
+
+function parsePostfixTail(state: ParserState, point: Checkpoint): ParserState {
+  const skipped = skipTrivia(state);
+  const kind = currentKind(skipped);
+  if (kind === 4) {
+    const opened = startNodeAt(skipped, point, 57);
+    const left = bump(opened);
+    const arguments = parseArgumentList(left);
+    const right = expect(arguments, 5).state;
+    return parsePostfixTail(finishNode(right), point);
+  }
+  if (kind === 66) {
+    const opened = startNodeAt(skipped, point, 72);
+    const left = bump(opened);
+    const index = parseExpression(left).state;
+    const right = expect(index, 67).state;
+    return parsePostfixTail(finishNode(right), point);
+  }
+  if (kind === 68) {
+    const opened = startNodeAt(skipped, point, 73);
+    const dot = bump(opened);
+    const member = expect(dot, 0).state;
+    return parsePostfixTail(finishNode(member), point);
+  }
+  return skipped;
+}
+
+function parseArgumentList(state: ParserState): ParserState {
+  const skipped = skipTrivia(state);
+  if (currentKind(skipped) === 5) {
+    return skipped;
+  }
+  return finishNode(parseArguments(startNode(skipped, 62)));
+}
+
+function parseArguments(state: ParserState): ParserState {
+  const expression = parseExpression(state);
+  const recovered = recoverArgument(expression);
+  const skipped = skipTrivia(recovered);
+  if (currentKind(skipped) === 8) {
+    return parseArguments(skipTrivia(bump(skipped)));
+  }
+  return skipped;
+}
+
+function recoverArgument(attempt: ParseAttempt): ParserState {
+  if (!attempt.parsed) {
+    return recoverTo(attempt.state, [8, 5]);
+  }
+  return attempt.state;
+}
+
+function parsePrimaryExpression(state: ParserState): ParseAttempt {
+  const skipped = skipTrivia(state);
+  const kind = currentKind(skipped);
+  if (kind === 0) {
+    return {
+      state: finishNode(bump(startNode(skipped, 58))),
+      parsed: true
+    };
+  }
+  if (kind === 1) {
+    return {
+      state: finishNode(bump(startNode(skipped, 59))),
+      parsed: true
+    };
+  }
+  if (kind === 21 || kind === 22) {
+    return {
+      state: finishNode(bump(startNode(skipped, 60))),
+      parsed: true
+    };
+  }
+  if (kind === 64) {
+    return {
+      state: finishNode(bump(startNode(skipped, 69))),
+      parsed: true
+    };
+  }
+  if (kind === 66) {
+    return { state: parseArrayExpression(skipped), parsed: true };
+  }
+  if (kind === 6) {
+    return { state: parseRecordExpression(skipped), parsed: true };
+  }
+  if (kind === 80) {
+    return { state: parseMatchExpression(skipped), parsed: true };
+  }
+  if (kind === 4) {
+    if (atArrowExpression(skipped)) {
+      return { state: parseArrowExpression(skipped), parsed: true };
+    }
+    const opened = startNode(skipped, 61);
+    const left = bump(opened);
+    const expression = parseExpression(left).state;
+    const right = expect(expression, 5).state;
+    return { state: finishNode(right), parsed: true };
+  }
+  return { state: errorAtCurrent(skipped), parsed: false };
+}
+
+function parseArrowExpression(state: ParserState): ParserState {
+  const opened = startNode(state, 103);
+  const left = expect(opened, 4).state;
+  const parameters = parseParameterList(left);
+  const right = expect(parameters, 5).state;
+  const colon = expect(right, 26).state;
+  const resultType = parseType(colon);
+  const arrow = expect(resultType, 84).state;
+  const skipped = skipTrivia(arrow);
+  const bodyNode = startNode(skipped, 104);
+  const body = parseArrowBody(bodyNode);
+  return finishNode(finishNode(body));
+}
+
+function parseArrowBody(state: ParserState): ParserState {
+  if (currentKind(state) === 6) {
+    return parseBlock(state);
+  }
+  return parseExpression(state).state;
+}
+
+function parseArrayExpression(state: ParserState): ParserState {
+  const opened = startNode(state, 71);
+  const left = expect(opened, 66).state;
+  const skipped = skipTrivia(left);
+  if (currentKind(skipped) === 67) {
+    return finishNode(bump(skipped));
+  }
+  const elements = parseArrayElements(skipped);
+  const right = expect(elements, 67).state;
+  return finishNode(right);
+}
+
+function parseArrayElements(state: ParserState): ParserState {
+  const element = parseExpression(state);
+  const recovered = recoverArrayElement(element);
+  const skipped = skipTrivia(recovered);
+  if (currentKind(skipped) === 8) {
+    const comma = skipTrivia(bump(skipped));
+    if (currentKind(comma) === 67) {
+      return errorAtCurrent(comma);
+    }
+    return parseArrayElements(comma);
+  }
+  if (currentKind(skipped) === 67) {
+    return skipped;
+  }
+  const reported = errorAtCurrent(skipped);
+  const afterRecovery = recoverTo(reported, arrayRecovery());
+  if (currentKind(afterRecovery) === 8) {
+    const comma = skipTrivia(bump(afterRecovery));
+    if (currentKind(comma) === 67) {
+      return errorAtCurrent(comma);
+    }
+    return parseArrayElements(comma);
+  }
+  return afterRecovery;
+}
+
+function recoverArrayElement(attempt: ParseAttempt): ParserState {
+  if (!attempt.parsed) {
+    return recoverTo(attempt.state, arrayRecovery());
+  }
+  return attempt.state;
+}
+
+function parseRecordExpression(state: ParserState): ParserState {
+  const opened = startNode(state, 78);
+  const left = expect(opened, 6).state;
+  const skipped = skipTrivia(left);
+  if (currentKind(skipped) === 7) {
+    return finishNode(bump(skipped));
+  }
+  const fields = parseRecordInitializers(skipped);
+  const right = expect(fields, 7).state;
+  return finishNode(right);
+}
+
+function parseRecordInitializers(state: ParserState): ParserState {
+  const field = parseRecordFieldInitializer(state);
+  const skipped = skipTrivia(field);
+  if (currentKind(skipped) === 8) {
+    const comma = skipTrivia(bump(skipped));
+    if (currentKind(comma) === 7) {
+      return errorAtCurrent(comma);
+    }
+    return parseRecordInitializers(comma);
+  }
+  if (currentKind(skipped) === 7) {
+    return skipped;
+  }
+  if (currentKind(skipped) === 0) {
+    return parseRecordInitializers(errorAtCurrent(skipped));
+  }
+  const reported = errorAtCurrent(skipped);
+  const recovered = recoverTo(reported, recordExpressionRecovery());
+  if (currentKind(recovered) === 8) {
+    const comma = skipTrivia(bump(recovered));
+    if (currentKind(comma) === 7) {
+      return errorAtCurrent(comma);
+    }
+    return parseRecordInitializers(comma);
+  }
+  return recovered;
+}
+
+function parseRecordFieldInitializer(state: ParserState): ParserState {
+  const opened = startNode(state, 79);
+  const name = expect(opened, 0).state;
+  const colon = expect(name, 26).state;
+  const value = parseExpression(colon);
+  if (!value.parsed) {
+    return finishNode(recoverTo(value.state, recordExpressionRecovery()));
+  }
+  return finishNode(value.state);
+}
+
+function parseMatchExpression(state: ParserState): ParserState {
+  const opened = startNode(state, 88);
+  const keyword = expect(opened, 80).state;
+  const left = expect(keyword, 4);
+  const scrutinee = parseMatchScrutinee(left);
+  const right = expect(scrutinee, 5).state;
+  const brace = expect(right, 6);
+  if (!brace.value) {
+    return finishNode(brace.state);
+  }
+  return finishNode(parseMatchBody(brace.state));
+}
+
+function parseMatchScrutinee(left: StateFlag): ParserState {
+  if (left.value || !(currentKind(left.state) === 6)) {
+    return parseExpression(left.state).state;
+  }
+  return errorAtCurrent(left.state);
+}
+
+function parseMatchBody(state: ParserState): ParserState {
+  const skipped = skipTrivia(state);
+  const kind = currentKind(skipped);
+  if (kind === 81 || kind === 82) {
+    return parseMatchBody(parseMatchArm(skipped));
+  }
+  if (kind === 7) {
+    return bump(skipped);
+  }
+  if (
+    kind === 9 || kind === 13 || kind === 14 || kind === 15 || kind === 17 ||
+    kind === 101 || kind === 18 || kind === 19 || kind === 20 || kind === 80 ||
+    kind === 92 || kind === 93 || kind === 12 || kind === 74 || kind === -1
+  ) {
+    return errorAtCurrent(skipped);
+  }
+  const position = skipped.position;
+  const reported = errorAtCurrent(skipped);
+  const recovered = recoverTo(reported, matchBodyRecovery());
+  if (recovered.position === position) {
+    return parseMatchBody(bump(recovered));
+  }
+  return parseMatchBody(recovered);
+}
+
+function parseMatchArm(state: ParserState): ParserState {
+  const opened = startNode(state, 89);
+  const pattern = parseMatchPattern(opened);
+  const arrow = expect(pattern, 84).state;
+  const value = parseExpression(arrow);
+  const recoveredValue = recoverMatchArmValue(value);
+  const semicolon = expect(recoveredValue, 9);
+  if (!semicolon.value) {
+    const recovered = recoverTo(semicolon.state, matchArmRecovery());
+    if (currentKind(recovered) === 9) {
+      return finishNode(bump(recovered));
+    }
+    return finishNode(recovered);
+  }
+  return finishNode(semicolon.state);
+}
+
+function parseMatchPattern(state: ParserState): ParserState {
+  if (currentKind(state) === 81) {
+    return parseVariantPattern(bump(state));
+  }
+  return expect(state, 82).state;
+}
+
+function recoverMatchArmValue(attempt: ParseAttempt): ParserState {
+  if (!attempt.parsed) {
+    return recoverTo(attempt.state, matchArmRecovery());
+  }
+  return attempt.state;
+}
+
+function parseVariantPattern(state: ParserState): ParserState {
+  const opened = startNode(state, 90);
+  const unionName = expect(opened, 0).state;
+  const dot = expect(unionName, 68).state;
+  const variantName = expect(dot, 0).state;
+  return finishNode(parsePatternBindingList(variantName));
+}
+
+function parsePatternBindingList(state: ParserState): ParserState {
+  const opened = startNode(state, 91);
+  const left = expect(opened, 4);
+  if (!left.value) {
+    return finishNode(left.state);
+  }
+  const skipped = skipTrivia(left.state);
+  if (currentKind(skipped) === 5) {
+    return finishNode(bump(skipped));
+  }
+  const bindings = parsePatternBindings(skipped);
+  const right = expect(bindings, 5).state;
+  return finishNode(right);
+}
+
+function parsePatternBindings(state: ParserState): ParserState {
+  const binding = expect(state, 0);
+  const recoveredBinding = recoverPatternBinding(binding);
+  const skipped = skipTrivia(recoveredBinding);
+  if (currentKind(skipped) === 8) {
+    const comma = skipTrivia(bump(skipped));
+    if (currentKind(comma) === 5) {
+      return errorAtCurrent(comma);
+    }
+    return parsePatternBindings(comma);
+  }
+  if (currentKind(skipped) === 5) {
+    return skipped;
+  }
+  if (currentKind(skipped) === 0) {
+    return parsePatternBindings(errorAtCurrent(skipped));
+  }
+  const reported = errorAtCurrent(skipped);
+  const recovered = recoverTo(reported, patternBindingRecovery());
+  if (currentKind(recovered) === 8) {
+    const comma = skipTrivia(bump(recovered));
+    if (currentKind(comma) === 5) {
+      return errorAtCurrent(comma);
+    }
+    return parsePatternBindings(comma);
+  }
+  return recovered;
+}
+
+function recoverPatternBinding(result: StateFlag): ParserState {
+  if (!result.value) {
+    return recoverTo(result.state, patternBindingRecovery());
+  }
+  return result.state;
+}
+
+function parseUnexpectedTopLevelItem(state: ParserState): ParserState {
+  const opened = startNode(state, 63);
+  const reported = reportUnexpectedTopLevel(opened);
+  return finishNode(recoverConsume(reported, topLevelRecovery()));
+}
+
+function reportUnexpectedTopLevel(state: ParserState): ParserState {
+  if (!(currentKind(state) === 11)) {
+    return errorAtCurrent(state);
+  }
+  return state;
+}
+
+export function parse(input: LexerInput): ParserResult {
+  const tokenized = lex(input);
+  const initial: ParserState = {
+    input: input,
+    tokens: tokenized.tokens,
+    position: 0,
+    pendingSplitEq: false,
+    events: [],
+    openNodes: [],
+    recoveryEvents: [],
+    diagnostics: []
+  };
+  const opened = startNode(initial, 39);
+  const parsed = parseSourceItems(opened);
+  const completed = finishNode(parsed);
+  return {
+    cstEvents: completed.events,
+    recoveryEvents: completed.recoveryEvents,
+    diagnostics: completed.diagnostics
+  };
+}
