@@ -1,4 +1,4 @@
-.PHONY: check fmt lint test doc conformance fuzz-smoke perf storage-kernel nir-artifact release-check security bootstrap-contract
+.PHONY: check fmt lint test doc conformance fuzz-smoke perf storage-kernel nir-artifact release-check security bootstrap-contract bootstrap-profile
 
 check:
 	cargo xtask check
@@ -38,3 +38,6 @@ security:
 
 bootstrap-contract:
 	cargo xtask bootstrap-contract
+
+bootstrap-profile:
+	cargo xtask bootstrap-profile

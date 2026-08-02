@@ -101,7 +101,8 @@ fn check() -> Result<()> {
     lint()?;
     test()?;
     doc()?;
-    bootstrap::run(&bootstrap::default_manifest_path(), false)
+    bootstrap::run(&bootstrap::default_manifest_path(), false)?;
+    bootstrap_profile::run()
 }
 
 fn lint() -> Result<()> {
