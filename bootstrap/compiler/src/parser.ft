@@ -34,12 +34,18 @@ type Checkpoint = {
   offset: Int;
 };
 
+type DeferredStartGroup = {
+  eventIndex: Int;
+  events: ParserCstEvent[];
+};
+
 type ParserState = {
   input: LexerInput;
   tokens: LexerToken[];
   position: Int;
   pendingSplitEq: Bool;
   events: ParserCstEvent[];
+  deferredStarts: DeferredStartGroup[];
   openNodes: OpenNode[];
   recoveryEvents: ParserRecoveryEvent[];
   diagnostics: ParserDiagnostic[];
@@ -53,6 +59,26 @@ type ParseAttempt = {
 type StateFlag = {
   state: ParserState;
   value: Bool;
+};
+
+type ParameterChunk = {
+  state: ParserState;
+  finished: Bool;
+  canRecoverMissingName: Bool;
+};
+
+type LookaheadChunk = {
+  index: Int;
+  remaining: Int;
+  kind: Int;
+  finished: Bool;
+};
+
+type ArrowScanChunk = {
+  index: Int;
+  depth: Int;
+  found: Bool;
+  finished: Bool;
 };
 
 function topLevelRecovery(): Int[] {
@@ -116,13 +142,24 @@ function forHeaderRecovery(): Int[] {
 }
 
 function containsKind(values: Int[], kind: Int, index: Int): Bool {
-  if (index >= values.length) {
+  return containsKindRange(values, kind, index, values.length);
+}
+
+function containsKindRange(
+  values: Int[],
+  kind: Int,
+  start: Int,
+  end: Int
+): Bool {
+  if (start >= end) {
     return false;
   }
-  if (values[index] === kind) {
-    return true;
+  if (end - start === 1) {
+    return values[start] === kind;
   }
-  return containsKind(values, kind, index + 1);
+  const middle = start + (end - start) / 2;
+  return containsKindRange(values, kind, start, middle) ||
+    containsKindRange(values, kind, middle, end);
 }
 
 function eventRange(
@@ -138,6 +175,167 @@ function eventRange(
   }
   const middle = start + (end - start) / 2;
   return eventRange(values, start, middle).concat(eventRange(values, middle, end));
+}
+
+function reverseEventRange(
+  values: ParserCstEvent[],
+  start: Int,
+  end: Int
+): ParserCstEvent[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [values[start]];
+  }
+  const middle = start + (end - start) / 2;
+  return reverseEventRange(values, middle, end).concat(
+    reverseEventRange(values, start, middle)
+  );
+}
+
+function deferredStartGroupRange(
+  values: DeferredStartGroup[],
+  start: Int,
+  end: Int
+): DeferredStartGroup[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [values[start]];
+  }
+  const middle = start + (end - start) / 2;
+  return deferredStartGroupRange(values, start, middle).concat(
+    deferredStartGroupRange(values, middle, end)
+  );
+}
+
+function findDeferredStartGroup(
+  groups: DeferredStartGroup[],
+  eventIndex: Int,
+  start: Int,
+  end: Int
+): Int {
+  if (start >= end) {
+    return -1;
+  }
+  const middle = start + (end - start) / 2;
+  const candidate = groups[middle].eventIndex;
+  if (candidate === eventIndex) {
+    return middle;
+  }
+  if (candidate < eventIndex) {
+    return findDeferredStartGroup(groups, eventIndex, middle + 1, end);
+  }
+  return findDeferredStartGroup(groups, eventIndex, start, middle);
+}
+
+function deferredStartInsertionIndex(
+  groups: DeferredStartGroup[],
+  eventIndex: Int,
+  start: Int,
+  end: Int
+): Int {
+  if (start >= end) {
+    return start;
+  }
+  const middle = start + (end - start) / 2;
+  if (groups[middle].eventIndex < eventIndex) {
+    return deferredStartInsertionIndex(groups, eventIndex, middle + 1, end);
+  }
+  return deferredStartInsertionIndex(groups, eventIndex, start, middle);
+}
+
+function addDeferredStart(
+  groups: DeferredStartGroup[],
+  eventIndex: Int,
+  event: ParserCstEvent
+): DeferredStartGroup[] {
+  const existing = findDeferredStartGroup(groups, eventIndex, 0, groups.length);
+  if (existing >= 0) {
+    const updated: DeferredStartGroup = {
+      eventIndex: eventIndex,
+      events: groups[existing].events.append(event)
+    };
+    return deferredStartGroupRange(groups, 0, existing)
+      .append(updated)
+      .concat(deferredStartGroupRange(groups, existing + 1, groups.length));
+  }
+  const insertion = deferredStartInsertionIndex(
+    groups,
+    eventIndex,
+    0,
+    groups.length
+  );
+  const created: DeferredStartGroup = {
+    eventIndex: eventIndex,
+    events: [event]
+  };
+  return deferredStartGroupRange(groups, 0, insertion)
+    .append(created)
+    .concat(deferredStartGroupRange(groups, insertion, groups.length));
+}
+
+function materializeEventRange(
+  events: ParserCstEvent[],
+  groups: DeferredStartGroup[],
+  start: Int,
+  end: Int,
+  groupStart: Int,
+  groupEnd: Int
+): ParserCstEvent[] {
+  if (start >= end) {
+    return [];
+  }
+  if (groupStart >= groupEnd) {
+    return eventRange(events, start, end);
+  }
+  if (end - start === 1) {
+    return reverseEventRange(
+      groups[groupStart].events,
+      0,
+      groups[groupStart].events.length
+    ).append(events[start]);
+  }
+  const middle = start + (end - start) / 2;
+  const groupMiddle = deferredStartInsertionIndex(
+    groups,
+    middle,
+    groupStart,
+    groupEnd
+  );
+  return materializeEventRange(
+    events,
+    groups,
+    start,
+    middle,
+    groupStart,
+    groupMiddle
+  ).concat(
+    materializeEventRange(
+      events,
+      groups,
+      middle,
+      end,
+      groupMiddle,
+      groupEnd
+    )
+  );
+}
+
+function materializeEvents(state: ParserState): ParserCstEvent[] {
+  if (state.deferredStarts.length === 0) {
+    return state.events;
+  }
+  return materializeEventRange(
+    state.events,
+    state.deferredStarts,
+    0,
+    state.events.length,
+    0,
+    state.deferredStarts.length
+  );
 }
 
 function openNodeRange(values: OpenNode[], start: Int, end: Int): OpenNode[] {
@@ -163,6 +361,7 @@ function withPosition(
     position: position,
     pendingSplitEq: pendingSplitEq,
     events: events,
+    deferredStarts: state.deferredStarts,
     openNodes: state.openNodes,
     recoveryEvents: state.recoveryEvents,
     diagnostics: state.diagnostics
@@ -212,6 +411,7 @@ function startNode(state: ParserState, kind: Int): ParserState {
     position: state.position,
     pendingSplitEq: state.pendingSplitEq,
     events: state.events.append(ParserCstEvent.StartNode(kind, offset)),
+    deferredStarts: state.deferredStarts,
     openNodes: state.openNodes.append({ kind: kind, start: offset }),
     recoveryEvents: state.recoveryEvents,
     diagnostics: state.diagnostics
@@ -223,17 +423,40 @@ function startNodeAt(
   point: Checkpoint,
   kind: Int
 ): ParserState {
-  const prefix = eventRange(state.events, 0, point.eventIndex);
-  const suffix = eventRange(state.events, point.eventIndex, state.events.length);
-  const events = prefix
-    .append(ParserCstEvent.StartNode(kind, point.offset))
-    .concat(suffix);
+  const event = ParserCstEvent.StartNode(kind, point.offset);
+  if (
+    state.deferredStarts.length === 0 &&
+    state.events.length - point.eventIndex <= 16
+  ) {
+    const prefix = eventRange(state.events, 0, point.eventIndex);
+    const suffix = eventRange(
+      state.events,
+      point.eventIndex,
+      state.events.length
+    );
+    return {
+      input: state.input,
+      tokens: state.tokens,
+      position: state.position,
+      pendingSplitEq: state.pendingSplitEq,
+      events: prefix.append(event).concat(suffix),
+      deferredStarts: state.deferredStarts,
+      openNodes: state.openNodes.append({ kind: kind, start: point.offset }),
+      recoveryEvents: state.recoveryEvents,
+      diagnostics: state.diagnostics
+    };
+  }
   return {
     input: state.input,
     tokens: state.tokens,
     position: state.position,
     pendingSplitEq: state.pendingSplitEq,
-    events: events,
+    events: state.events,
+    deferredStarts: addDeferredStart(
+      state.deferredStarts,
+      point.eventIndex,
+      event
+    ),
     openNodes: state.openNodes.append({ kind: kind, start: point.offset }),
     recoveryEvents: state.recoveryEvents,
     diagnostics: state.diagnostics
@@ -251,6 +474,7 @@ function finishNode(state: ParserState): ParserState {
       position: state.position,
       pendingSplitEq: state.pendingSplitEq,
       events: state.events.append(ParserCstEvent.FinishNode(offset)),
+      deferredStarts: state.deferredStarts,
       openNodes: remaining,
       recoveryEvents: state.recoveryEvents.append({ start: open.start, end: offset }),
       diagnostics: state.diagnostics
@@ -262,6 +486,7 @@ function finishNode(state: ParserState): ParserState {
     position: state.position,
     pendingSplitEq: state.pendingSplitEq,
     events: state.events.append(ParserCstEvent.FinishNode(offset)),
+    deferredStarts: state.deferredStarts,
     openNodes: remaining,
     recoveryEvents: state.recoveryEvents,
     diagnostics: state.diagnostics
@@ -287,11 +512,22 @@ function bump(state: ParserState): ParserState {
 }
 
 function skipTrivia(state: ParserState): ParserState {
-  const kind = currentKind(state);
-  if (kind === 2 || kind === 3) {
-    return skipTrivia(bump(state));
+  const chunk = skipTriviaSmall(state, 16);
+  if (chunk.value) {
+    return chunk.state;
   }
-  return state;
+  return skipTrivia(chunk.state);
+}
+
+function skipTriviaSmall(state: ParserState, remaining: Int): StateFlag {
+  const kind = currentKind(state);
+  if (!(kind === 2 || kind === 3)) {
+    return { state: state, value: true };
+  }
+  if (remaining === 0) {
+    return { state: state, value: false };
+  }
+  return skipTriviaSmall(bump(state), remaining - 1);
 }
 
 function errorAtCurrent(state: ParserState): ParserState {
@@ -308,6 +544,7 @@ function errorAtCurrent(state: ParserState): ParserState {
     position: state.position,
     pendingSplitEq: state.pendingSplitEq,
     events: state.events,
+    deferredStarts: state.deferredStarts,
     openNodes: state.openNodes,
     recoveryEvents: state.recoveryEvents,
     diagnostics: state.diagnostics.append(diagnostic)
@@ -349,11 +586,26 @@ function expectTypeListClose(state: ParserState): StateFlag {
 }
 
 function recoverConsume(state: ParserState, recovery: Int[]): ParserState {
+  const chunk = recoverConsumeSmall(state, recovery, 16);
+  if (chunk.value) {
+    return chunk.state;
+  }
+  return recoverConsume(chunk.state, recovery);
+}
+
+function recoverConsumeSmall(
+  state: ParserState,
+  recovery: Int[],
+  remaining: Int
+): StateFlag {
   const kind = currentKind(state);
   if (kind === -1 || containsKind(recovery, kind, 0)) {
-    return state;
+    return { state: state, value: true };
   }
-  return recoverConsume(bump(state), recovery);
+  if (remaining === 0) {
+    return { state: state, value: false };
+  }
+  return recoverConsumeSmall(bump(state), recovery, remaining - 1);
 }
 
 function recoverTo(state: ParserState, recovery: Int[]): ParserState {
@@ -386,17 +638,53 @@ function nthNonTriviaFrom(
   index: Int,
   remaining: Int
 ): Int {
+  const chunk = nthNonTriviaSmall(tokens, index, remaining, 16);
+  if (chunk.finished) {
+    return chunk.kind;
+  }
+  return nthNonTriviaFrom(tokens, chunk.index, chunk.remaining);
+}
+
+function nthNonTriviaSmall(
+  tokens: LexerToken[],
+  index: Int,
+  remaining: Int,
+  budget: Int
+): LookaheadChunk {
   if (index >= tokens.length) {
-    return -1;
+    return {
+      index: index,
+      remaining: remaining,
+      kind: -1,
+      finished: true
+    };
+  }
+  if (budget === 0) {
+    return {
+      index: index,
+      remaining: remaining,
+      kind: -1,
+      finished: false
+    };
   }
   const kind = tokens[index].kind;
   if (kind === 2 || kind === 3) {
-    return nthNonTriviaFrom(tokens, index + 1, remaining);
+    return nthNonTriviaSmall(tokens, index + 1, remaining, budget - 1);
   }
   if (remaining === 0) {
-    return kind;
+    return {
+      index: index,
+      remaining: remaining,
+      kind: kind,
+      finished: true
+    };
   }
-  return nthNonTriviaFrom(tokens, index + 1, remaining - 1);
+  return nthNonTriviaSmall(
+    tokens,
+    index + 1,
+    remaining - 1,
+    budget - 1
+  );
 }
 
 function nthNonTrivia(state: ParserState, offset: Int): Int {
@@ -470,29 +758,53 @@ function atAssignmentStatement(state: ParserState): Bool {
   return nthNonTrivia(state, 0) === 0 && nthNonTrivia(state, 1) === 10;
 }
 
-function scanArrow(state: ParserState, offset: Int, depth: Int): Bool {
-  const kind = nthNonTrivia(state, offset);
-  if (kind === -1) {
-    return false;
+function scanArrow(state: ParserState, index: Int, depth: Int): Bool {
+  const chunk = scanArrowSmall(state, index, depth, 16);
+  if (chunk.finished) {
+    return chunk.found;
+  }
+  return scanArrow(state, chunk.index, chunk.depth);
+}
+
+function scanArrowSmall(
+  state: ParserState,
+  index: Int,
+  depth: Int,
+  remaining: Int
+): ArrowScanChunk {
+  if (index >= state.tokens.length) {
+    return { index: index, depth: depth, found: false, finished: true };
+  }
+  if (remaining === 0) {
+    return { index: index, depth: depth, found: false, finished: false };
+  }
+  const kind = state.tokens[index].kind;
+  if (kind === 2 || kind === 3) {
+    return scanArrowSmall(state, index + 1, depth, remaining - 1);
   }
   if (kind === 4) {
-    return scanArrow(state, offset + 1, depth + 1);
+    return scanArrowSmall(state, index + 1, depth + 1, remaining - 1);
   }
   if (kind === 5) {
     if (depth === 1) {
-      const next = nthNonTrivia(state, offset + 1);
-      return next === 26 || next === 84;
+      const next = nthNonTriviaFrom(state.tokens, index + 1, 0);
+      return {
+        index: index,
+        depth: depth,
+        found: next === 26 || next === 84,
+        finished: true
+      };
     }
-    return scanArrow(state, offset + 1, depth - 1);
+    return scanArrowSmall(state, index + 1, depth - 1, remaining - 1);
   }
-  return scanArrow(state, offset + 1, depth);
+  return scanArrowSmall(state, index + 1, depth, remaining - 1);
 }
 
 function atArrowExpression(state: ParserState): Bool {
   if (!(currentKind(state) === 4)) {
     return false;
   }
-  return scanArrow(state, 0, 0);
+  return scanArrow(state, state.position, 0);
 }
 
 function importListIsFinished(state: ParserState): Bool {
@@ -619,24 +931,38 @@ function binaryPrecedence(state: ParserState): Int {
 }
 
 function parseSourceItems(state: ParserState): ParserState {
+  const chunk = parseSourceItemsSmall(state, 16);
+  if (chunk.value) {
+    return chunk.state;
+  }
+  return parseSourceItems(chunk.state);
+}
+
+function parseSourceItemsSmall(
+  state: ParserState,
+  remaining: Int
+): StateFlag {
   const skipped = skipTrivia(state);
   const kind = currentKind(skipped);
   if (kind === -1) {
-    return skipped;
+    return { state: skipped, value: true };
+  }
+  if (remaining === 0) {
+    return { state: skipped, value: false };
   }
   if (kind === 92) {
-    return parseSourceItems(parseImportDeclaration(skipped));
+    return parseSourceItemsSmall(parseImportDeclaration(skipped), remaining - 1);
   }
   if (kind === 93) {
-    return parseSourceItems(parseExportedDeclaration(skipped));
+    return parseSourceItemsSmall(parseExportedDeclaration(skipped), remaining - 1);
   }
   if (kind === 12) {
-    return parseSourceItems(parseFunctionDeclaration(skipped));
+    return parseSourceItemsSmall(parseFunctionDeclaration(skipped), remaining - 1);
   }
   if (kind === 74) {
-    return parseSourceItems(parseTypeDeclaration(skipped));
+    return parseSourceItemsSmall(parseTypeDeclaration(skipped), remaining - 1);
   }
-  return parseSourceItems(parseUnexpectedTopLevelItem(skipped));
+  return parseSourceItemsSmall(parseUnexpectedTopLevelItem(skipped), remaining - 1);
 }
 
 function parseTypeDeclaration(state: ParserState): ParserState {
@@ -671,19 +997,33 @@ function parseImportList(state: ParserState): ParserState {
 }
 
 function parseImportListItems(state: ParserState): ParserState {
+  const chunk = parseImportListItemsSmall(state, 16);
+  if (chunk.value) {
+    return chunk.state;
+  }
+  return parseImportListItems(chunk.state);
+}
+
+function parseImportListItemsSmall(
+  state: ParserState,
+  remaining: Int
+): StateFlag {
+  if (remaining === 0) {
+    return { state: state, value: false };
+  }
   const named = parseImportedName(state);
   const skipped = skipTrivia(named);
   if (currentKind(skipped) === 8) {
     const comma = skipTrivia(bump(skipped));
     if (importListIsFinished(comma)) {
-      return errorAtCurrent(comma);
+      return { state: errorAtCurrent(comma), value: true };
     }
-    return parseImportListItems(comma);
+    return parseImportListItemsSmall(comma, remaining - 1);
   }
   if (currentKind(skipped) === 0) {
-    return parseImportListItems(errorAtCurrent(skipped));
+    return parseImportListItemsSmall(errorAtCurrent(skipped), remaining - 1);
   }
-  return skipped;
+  return { state: skipped, value: true };
 }
 
 function parseImportedName(state: ParserState): ParserState {
@@ -763,22 +1103,42 @@ function parseRecordBody(state: ParserState): ParserState {
 }
 
 function parseRecordBodyItems(state: ParserState): ParserState {
+  const chunk = parseRecordBodyItemsSmall(state, 16);
+  if (chunk.value) {
+    return chunk.state;
+  }
+  return parseRecordBodyItems(chunk.state);
+}
+
+function parseRecordBodyItemsSmall(
+  state: ParserState,
+  remaining: Int
+): StateFlag {
   const skipped = skipTrivia(state);
   const kind = currentKind(skipped);
   if (kind === 7) {
-    return bump(skipped);
+    return { state: bump(skipped), value: true };
+  }
+  if (remaining === 0) {
+    return { state: skipped, value: false };
   }
   if (kind === 0) {
-    return parseRecordBodyItems(parseRecordFieldDeclaration(skipped));
+    return parseRecordBodyItemsSmall(
+      parseRecordFieldDeclaration(skipped),
+      remaining - 1
+    );
   }
   if (kind === 92 || kind === 93 || kind === 12 || kind === 74) {
-    return errorAtCurrent(skipped);
+    return { state: errorAtCurrent(skipped), value: true };
   }
   if (kind === -1) {
-    return errorAtCurrent(skipped);
+    return { state: errorAtCurrent(skipped), value: true };
   }
   const reported = errorAtCurrent(skipped);
-  return parseRecordBodyItems(recoverRecordBody(reported));
+  return parseRecordBodyItemsSmall(
+    recoverRecordBody(reported),
+    remaining - 1
+  );
 }
 
 function parseRecordFieldDeclaration(state: ParserState): ParserState {
@@ -817,48 +1177,68 @@ function consumeLeadingPipe(state: ParserState): ParserState {
 }
 
 function parseUnionVariants(state: ParserState, parsedVariant: Bool): ParserState {
+  const chunk = parseUnionVariantsSmall(state, parsedVariant, 16);
+  if (chunk.value) {
+    return chunk.state;
+  }
+  return parseUnionVariants(chunk.state, true);
+}
+
+function parseUnionVariantsSmall(
+  state: ParserState,
+  parsedVariant: Bool,
+  remaining: Int
+): StateFlag {
   const skipped = skipTrivia(state);
   const kind = currentKind(skipped);
+  if (remaining === 0) {
+    return { state: skipped, value: false };
+  }
   if (kind === 0) {
-    return parseUnionVariantSeparator(parseUnionVariant(skipped));
+    const variant = parseUnionVariant(skipped);
+    const afterVariant = skipTrivia(variant);
+    if (currentKind(afterVariant) === 83) {
+      const pipe = skipTrivia(bump(afterVariant));
+      const afterPipe = currentKind(pipe);
+      if (
+        afterPipe === -1 || afterPipe === 9 || afterPipe === 92 ||
+        afterPipe === 93 || afterPipe === 12 || afterPipe === 74
+      ) {
+        return { state: errorAtCurrent(pipe), value: true };
+      }
+      return parseUnionVariantsSmall(pipe, true, remaining - 1);
+    }
+    if (currentKind(afterVariant) === 0) {
+      return parseUnionVariantsSmall(
+        errorAtCurrent(afterVariant),
+        true,
+        remaining - 1
+      );
+    }
+    return { state: afterVariant, value: true };
   }
   if (
     kind === -1 || kind === 9 || kind === 92 || kind === 93 || kind === 12 ||
     kind === 74
   ) {
     if (parsedVariant) {
-      return skipped;
+      return { state: skipped, value: true };
     }
-    return errorAtCurrent(skipped);
+    return { state: errorAtCurrent(skipped), value: true };
   }
   const reported = errorAtCurrent(skipped);
   const recovered = recoverTo(reported, unionDeclarationRecovery());
   if (currentKind(recovered) === 0) {
-    return parseUnionVariants(recovered, parsedVariant);
+    return parseUnionVariantsSmall(recovered, parsedVariant, remaining - 1);
   }
   if (currentKind(recovered) === 83) {
-    return parseUnionVariants(bump(recovered), parsedVariant);
+    return parseUnionVariantsSmall(
+      bump(recovered),
+      parsedVariant,
+      remaining - 1
+    );
   }
-  return recovered;
-}
-
-function parseUnionVariantSeparator(state: ParserState): ParserState {
-  const skipped = skipTrivia(state);
-  if (currentKind(skipped) === 83) {
-    const pipe = skipTrivia(bump(skipped));
-    const kind = currentKind(pipe);
-    if (
-      kind === -1 || kind === 9 || kind === 92 || kind === 93 || kind === 12 ||
-      kind === 74
-    ) {
-      return errorAtCurrent(pipe);
-    }
-    return parseUnionVariants(pipe, true);
-  }
-  if (currentKind(skipped) === 0) {
-    return parseUnionVariants(errorAtCurrent(skipped), true);
-  }
-  return skipped;
+  return { state: recovered, value: true };
 }
 
 function parseUnionVariant(state: ParserState): ParserState {
@@ -882,6 +1262,20 @@ function parseVariantPayload(state: ParserState): ParserState {
 }
 
 function parseVariantPayloadFields(state: ParserState): ParserState {
+  const chunk = parseVariantPayloadFieldsSmall(state, 16);
+  if (chunk.value) {
+    return chunk.state;
+  }
+  return parseVariantPayloadFields(chunk.state);
+}
+
+function parseVariantPayloadFieldsSmall(
+  state: ParserState,
+  remaining: Int
+): StateFlag {
+  if (remaining === 0) {
+    return { state: state, value: false };
+  }
   const position = state.position;
   const name = expect(state, 0).state;
   const colon = expect(name, 26).state;
@@ -891,26 +1285,29 @@ function parseVariantPayloadFields(state: ParserState): ParserState {
   if (currentKind(skipped) === 8) {
     const comma = skipTrivia(bump(skipped));
     if (currentKind(comma) === 5) {
-      return errorAtCurrent(comma);
+      return { state: errorAtCurrent(comma), value: true };
     }
-    return parseVariantPayloadFields(comma);
+    return parseVariantPayloadFieldsSmall(comma, remaining - 1);
   }
   if (currentKind(skipped) === 5) {
-    return skipped;
+    return { state: skipped, value: true };
   }
   if (currentKind(skipped) === 0) {
-    return parseVariantPayloadFields(errorAtCurrent(skipped));
+    return parseVariantPayloadFieldsSmall(
+      errorAtCurrent(skipped),
+      remaining - 1
+    );
   }
   const reported = errorAtCurrent(skipped);
   const recovered = recoverTo(reported, variantPayloadRecovery());
   if (currentKind(recovered) === 8) {
     const comma = skipTrivia(bump(recovered));
     if (currentKind(comma) === 5) {
-      return errorAtCurrent(comma);
+      return { state: errorAtCurrent(comma), value: true };
     }
-    return parseVariantPayloadFields(comma);
+    return parseVariantPayloadFieldsSmall(comma, remaining - 1);
   }
-  return recovered;
+  return { state: recovered, value: true };
 }
 
 function recoverVariantField(state: ParserState, position: Int): ParserState {
@@ -930,8 +1327,31 @@ function parseParameters(
   state: ParserState,
   canRecoverMissingName: Bool
 ): ParserState {
+  const chunk = parseParametersSmall(state, canRecoverMissingName, 16);
+  if (chunk.finished) {
+    return chunk.state;
+  }
+  return parseParameters(chunk.state, chunk.canRecoverMissingName);
+}
+
+function parseParametersSmall(
+  state: ParserState,
+  canRecoverMissingName: Bool,
+  remaining: Int
+): ParameterChunk {
   if (currentKind(state) === -1 || parameterListIsFinished(state, canRecoverMissingName)) {
-    return state;
+    return {
+      state: state,
+      finished: true,
+      canRecoverMissingName: canRecoverMissingName
+    };
+  }
+  if (remaining === 0) {
+    return {
+      state: state,
+      finished: false,
+      canRecoverMissingName: canRecoverMissingName
+    };
   }
   const position = state.position;
   const parameter = parseParameter(state);
@@ -940,19 +1360,31 @@ function parseParameters(
   if (currentKind(skipped) === 8) {
     const comma = skipTrivia(bump(skipped));
     if (currentKind(comma) === 5) {
-      return errorAtCurrent(comma);
+      return {
+        state: errorAtCurrent(comma),
+        finished: true,
+        canRecoverMissingName: true
+      };
     }
-    return parseParameters(comma, true);
+    return parseParametersSmall(comma, true, remaining - 1);
   }
   if (!parameterListIsFinished(skipped, false)) {
     const reported = errorAtCurrent(skipped);
     const recovered = recoverTo(reported, parameterListRecovery());
     if (currentKind(recovered) === 8) {
-      return parseParameters(skipTrivia(bump(recovered)), true);
+      return parseParametersSmall(
+        skipTrivia(bump(recovered)),
+        true,
+        remaining - 1
+      );
     }
-    return parseParameters(recovered, false);
+    return parseParametersSmall(recovered, false, remaining - 1);
   }
-  return skipped;
+  return {
+    state: skipped,
+    finished: true,
+    canRecoverMissingName: false
+  };
 }
 
 function recoverParameter(state: ParserState, position: Int): ParserState {
@@ -993,6 +1425,20 @@ function parseTypeParameterList(state: ParserState): ParserState {
 }
 
 function parseTypeParameters(state: ParserState): ParserState {
+  const chunk = parseTypeParametersSmall(state, 16);
+  if (chunk.value) {
+    return chunk.state;
+  }
+  return parseTypeParameters(chunk.state);
+}
+
+function parseTypeParametersSmall(
+  state: ParserState,
+  remaining: Int
+): StateFlag {
+  if (remaining === 0) {
+    return { state: state, value: false };
+  }
   const position = state.position;
   const opened = startNode(state, 99);
   const parameter = finishNode(expect(opened, 0).state);
@@ -1001,29 +1447,29 @@ function parseTypeParameters(state: ParserState): ParserState {
   if (currentKind(skipped) === 8) {
     const comma = skipTrivia(bump(skipped));
     if (atTypeListClose(comma) || typeParameterListIsFinished(comma)) {
-      return errorAtCurrent(comma);
+      return { state: errorAtCurrent(comma), value: true };
     }
-    return parseTypeParameters(comma);
+    return parseTypeParametersSmall(comma, remaining - 1);
   }
   if (atTypeListClose(skipped) || typeParameterListIsFinished(skipped)) {
-    return skipped;
+    return { state: skipped, value: true };
   }
   if (currentKind(skipped) === 0) {
-    return parseTypeParameters(errorAtCurrent(skipped));
+    return parseTypeParametersSmall(errorAtCurrent(skipped), remaining - 1);
   }
   const reported = errorAtCurrent(skipped);
   const recovered = recoverTo(reported, typeParameterRecovery());
   if (currentKind(recovered) === 8) {
     const comma = skipTrivia(bump(recovered));
     if (atTypeListClose(comma)) {
-      return errorAtCurrent(comma);
+      return { state: errorAtCurrent(comma), value: true };
     }
-    return parseTypeParameters(comma);
+    return parseTypeParametersSmall(comma, remaining - 1);
   }
   if (currentKind(recovered) === 0) {
-    return parseTypeParameters(recovered);
+    return parseTypeParametersSmall(recovered, remaining - 1);
   }
-  return recovered;
+  return { state: recovered, value: true };
 }
 
 function recoverTypeParameter(state: ParserState, position: Int): ParserState {
@@ -1116,6 +1562,20 @@ function parseTypeArgumentList(state: ParserState): ParserState {
 }
 
 function parseTypeArguments(state: ParserState): ParserState {
+  const chunk = parseTypeArgumentsSmall(state, 16);
+  if (chunk.value) {
+    return chunk.state;
+  }
+  return parseTypeArguments(chunk.state);
+}
+
+function parseTypeArgumentsSmall(
+  state: ParserState,
+  remaining: Int
+): StateFlag {
+  if (remaining === 0) {
+    return { state: state, value: false };
+  }
   const position = state.position;
   const argument = parseType(state);
   const progressed = recoverTypeArgument(argument, position);
@@ -1123,29 +1583,29 @@ function parseTypeArguments(state: ParserState): ParserState {
   if (currentKind(skipped) === 8) {
     const comma = skipTrivia(bump(skipped));
     if (atTypeListClose(comma) || typeArgumentListIsFinished(comma)) {
-      return errorAtCurrent(comma);
+      return { state: errorAtCurrent(comma), value: true };
     }
-    return parseTypeArguments(comma);
+    return parseTypeArgumentsSmall(comma, remaining - 1);
   }
   if (atTypeListClose(skipped) || typeArgumentListIsFinished(skipped)) {
-    return skipped;
+    return { state: skipped, value: true };
   }
   if (isTypeStart(currentKind(skipped))) {
-    return parseTypeArguments(errorAtCurrent(skipped));
+    return parseTypeArgumentsSmall(errorAtCurrent(skipped), remaining - 1);
   }
   const reported = errorAtCurrent(skipped);
   const recovered = recoverTo(reported, typeArgumentRecovery());
   if (currentKind(recovered) === 8) {
     const comma = skipTrivia(bump(recovered));
     if (atTypeListClose(comma)) {
-      return errorAtCurrent(comma);
+      return { state: errorAtCurrent(comma), value: true };
     }
-    return parseTypeArguments(comma);
+    return parseTypeArgumentsSmall(comma, remaining - 1);
   }
   if (isTypeStart(currentKind(recovered))) {
-    return parseTypeArguments(recovered);
+    return parseTypeArgumentsSmall(recovered, remaining - 1);
   }
-  return recovered;
+  return { state: recovered, value: true };
 }
 
 function recoverTypeArgument(state: ParserState, position: Int): ParserState {
@@ -1165,53 +1625,70 @@ function parseBlock(state: ParserState): ParserState {
 }
 
 function parseBlockItems(state: ParserState): ParserState {
+  const chunk = parseBlockItemsSmall(state, 16);
+  if (chunk.value) {
+    return chunk.state;
+  }
+  return parseBlockItems(chunk.state);
+}
+
+function parseBlockItemsSmall(
+  state: ParserState,
+  remaining: Int
+): StateFlag {
   const skipped = skipTrivia(state);
   const kind = currentKind(skipped);
   if (kind === 7) {
-    return bump(skipped);
+    return { state: bump(skipped), value: true };
+  }
+  if (remaining === 0) {
+    return { state: skipped, value: false };
   }
   if (kind === 13) {
-    return parseBlockItems(parseConstDeclaration(skipped));
+    return parseBlockItemsSmall(parseConstDeclaration(skipped), remaining - 1);
   }
   if (kind === 14) {
-    return parseBlockItems(parseLetDeclaration(skipped));
+    return parseBlockItemsSmall(parseLetDeclaration(skipped), remaining - 1);
   }
   if (kind === 15) {
-    return parseBlockItems(parseIfStatement(skipped));
+    return parseBlockItemsSmall(parseIfStatement(skipped), remaining - 1);
   }
   if (kind === 17) {
-    return parseBlockItems(parseWhileStatement(skipped));
+    return parseBlockItemsSmall(parseWhileStatement(skipped), remaining - 1);
   }
   if (kind === 101) {
-    return parseBlockItems(parseForStatement(skipped));
+    return parseBlockItemsSmall(parseForStatement(skipped), remaining - 1);
   }
   if (kind === 18) {
-    return parseBlockItems(parseBreakStatement(skipped));
+    return parseBlockItemsSmall(parseBreakStatement(skipped), remaining - 1);
   }
   if (kind === 19) {
-    return parseBlockItems(parseContinueStatement(skipped));
+    return parseBlockItemsSmall(parseContinueStatement(skipped), remaining - 1);
   }
   if (kind === 20) {
-    return parseBlockItems(parseReturnStatement(skipped));
+    return parseBlockItemsSmall(parseReturnStatement(skipped), remaining - 1);
   }
   if (kind === 16) {
-    return parseBlockItems(bump(errorAtCurrent(skipped)));
+    return parseBlockItemsSmall(bump(errorAtCurrent(skipped)), remaining - 1);
   }
   if (kind === 92 || kind === 93 || kind === 12 || kind === 74) {
-    return errorAtCurrent(skipped);
+    return { state: errorAtCurrent(skipped), value: true };
   }
   if (kind === -1) {
-    return errorAtCurrent(skipped);
+    return { state: errorAtCurrent(skipped), value: true };
   }
   if (kind === 0 && atAssignmentStatement(skipped)) {
-    return parseBlockItems(parseAssignmentStatement(skipped));
+    return parseBlockItemsSmall(parseAssignmentStatement(skipped), remaining - 1);
   }
   const position = skipped.position;
   const expression = parseExpressionStatement(skipped);
   if (expression.position === position) {
-    return parseBlockItems(bump(errorAtCurrent(expression)));
+    return parseBlockItemsSmall(
+      bump(errorAtCurrent(expression)),
+      remaining - 1
+    );
   }
-  return parseBlockItems(expression);
+  return parseBlockItemsSmall(expression, remaining - 1);
 }
 
 function parseConstDeclaration(state: ParserState): ParserState {
@@ -1407,16 +1884,37 @@ function parseBinaryTail(
   point: Checkpoint,
   minimumPrecedence: Int
 ): ParserState {
+  const chunk = parseBinaryTailSmall(state, point, minimumPrecedence, 16);
+  if (chunk.value) {
+    return chunk.state;
+  }
+  return parseBinaryTail(chunk.state, point, minimumPrecedence);
+}
+
+function parseBinaryTailSmall(
+  state: ParserState,
+  point: Checkpoint,
+  minimumPrecedence: Int,
+  remaining: Int
+): StateFlag {
   const skipped = skipTrivia(state);
   const precedence = binaryPrecedence(skipped);
   if (precedence === 0 || precedence < minimumPrecedence) {
-    return skipped;
+    return { state: skipped, value: true };
+  }
+  if (remaining === 0) {
+    return { state: skipped, value: false };
   }
   const opened = startNodeAt(skipped, point, 55);
   const operator = bump(opened);
   const right = parseBinaryExpression(operator, precedence + 1);
   const completed = ifMissingBinaryOperand(right);
-  return parseBinaryTail(finishNode(completed), point, minimumPrecedence);
+  return parseBinaryTailSmall(
+    finishNode(completed),
+    point,
+    minimumPrecedence,
+    remaining - 1
+  );
 }
 
 function ifMissingBinaryOperand(attempt: ParseAttempt): ParserState {
@@ -1457,29 +1955,44 @@ function parsePostfixExpression(state: ParserState): ParseAttempt {
 }
 
 function parsePostfixTail(state: ParserState, point: Checkpoint): ParserState {
+  const chunk = parsePostfixTailSmall(state, point, 16);
+  if (chunk.value) {
+    return chunk.state;
+  }
+  return parsePostfixTail(chunk.state, point);
+}
+
+function parsePostfixTailSmall(
+  state: ParserState,
+  point: Checkpoint,
+  remaining: Int
+): StateFlag {
   const skipped = skipTrivia(state);
   const kind = currentKind(skipped);
+  if (remaining === 0) {
+    return { state: skipped, value: false };
+  }
   if (kind === 4) {
     const opened = startNodeAt(skipped, point, 57);
     const left = bump(opened);
     const arguments = parseArgumentList(left);
     const right = expect(arguments, 5).state;
-    return parsePostfixTail(finishNode(right), point);
+    return parsePostfixTailSmall(finishNode(right), point, remaining - 1);
   }
   if (kind === 66) {
     const opened = startNodeAt(skipped, point, 72);
     const left = bump(opened);
     const index = parseExpression(left).state;
     const right = expect(index, 67).state;
-    return parsePostfixTail(finishNode(right), point);
+    return parsePostfixTailSmall(finishNode(right), point, remaining - 1);
   }
   if (kind === 68) {
     const opened = startNodeAt(skipped, point, 73);
     const dot = bump(opened);
     const member = expect(dot, 0).state;
-    return parsePostfixTail(finishNode(member), point);
+    return parsePostfixTailSmall(finishNode(member), point, remaining - 1);
   }
-  return skipped;
+  return { state: skipped, value: true };
 }
 
 function parseArgumentList(state: ParserState): ParserState {
@@ -1491,13 +2004,27 @@ function parseArgumentList(state: ParserState): ParserState {
 }
 
 function parseArguments(state: ParserState): ParserState {
+  const chunk = parseArgumentsSmall(state, 16);
+  if (chunk.value) {
+    return chunk.state;
+  }
+  return parseArguments(chunk.state);
+}
+
+function parseArgumentsSmall(
+  state: ParserState,
+  remaining: Int
+): StateFlag {
+  if (remaining === 0) {
+    return { state: state, value: false };
+  }
   const expression = parseExpression(state);
   const recovered = recoverArgument(expression);
   const skipped = skipTrivia(recovered);
   if (currentKind(skipped) === 8) {
-    return parseArguments(skipTrivia(bump(skipped)));
+    return parseArgumentsSmall(skipTrivia(bump(skipped)), remaining - 1);
   }
-  return skipped;
+  return { state: skipped, value: true };
 }
 
 function recoverArgument(attempt: ParseAttempt): ParserState {
@@ -1590,29 +2117,43 @@ function parseArrayExpression(state: ParserState): ParserState {
 }
 
 function parseArrayElements(state: ParserState): ParserState {
+  const chunk = parseArrayElementsSmall(state, 16);
+  if (chunk.value) {
+    return chunk.state;
+  }
+  return parseArrayElements(chunk.state);
+}
+
+function parseArrayElementsSmall(
+  state: ParserState,
+  remaining: Int
+): StateFlag {
+  if (remaining === 0) {
+    return { state: state, value: false };
+  }
   const element = parseExpression(state);
   const recovered = recoverArrayElement(element);
   const skipped = skipTrivia(recovered);
   if (currentKind(skipped) === 8) {
     const comma = skipTrivia(bump(skipped));
     if (currentKind(comma) === 67) {
-      return errorAtCurrent(comma);
+      return { state: errorAtCurrent(comma), value: true };
     }
-    return parseArrayElements(comma);
+    return parseArrayElementsSmall(comma, remaining - 1);
   }
   if (currentKind(skipped) === 67) {
-    return skipped;
+    return { state: skipped, value: true };
   }
   const reported = errorAtCurrent(skipped);
   const afterRecovery = recoverTo(reported, arrayRecovery());
   if (currentKind(afterRecovery) === 8) {
     const comma = skipTrivia(bump(afterRecovery));
     if (currentKind(comma) === 67) {
-      return errorAtCurrent(comma);
+      return { state: errorAtCurrent(comma), value: true };
     }
-    return parseArrayElements(comma);
+    return parseArrayElementsSmall(comma, remaining - 1);
   }
-  return afterRecovery;
+  return { state: afterRecovery, value: true };
 }
 
 function recoverArrayElement(attempt: ParseAttempt): ParserState {
@@ -1635,31 +2176,48 @@ function parseRecordExpression(state: ParserState): ParserState {
 }
 
 function parseRecordInitializers(state: ParserState): ParserState {
+  const chunk = parseRecordInitializersSmall(state, 16);
+  if (chunk.value) {
+    return chunk.state;
+  }
+  return parseRecordInitializers(chunk.state);
+}
+
+function parseRecordInitializersSmall(
+  state: ParserState,
+  remaining: Int
+): StateFlag {
+  if (remaining === 0) {
+    return { state: state, value: false };
+  }
   const field = parseRecordFieldInitializer(state);
   const skipped = skipTrivia(field);
   if (currentKind(skipped) === 8) {
     const comma = skipTrivia(bump(skipped));
     if (currentKind(comma) === 7) {
-      return errorAtCurrent(comma);
+      return { state: errorAtCurrent(comma), value: true };
     }
-    return parseRecordInitializers(comma);
+    return parseRecordInitializersSmall(comma, remaining - 1);
   }
   if (currentKind(skipped) === 7) {
-    return skipped;
+    return { state: skipped, value: true };
   }
   if (currentKind(skipped) === 0) {
-    return parseRecordInitializers(errorAtCurrent(skipped));
+    return parseRecordInitializersSmall(
+      errorAtCurrent(skipped),
+      remaining - 1
+    );
   }
   const reported = errorAtCurrent(skipped);
   const recovered = recoverTo(reported, recordExpressionRecovery());
   if (currentKind(recovered) === 8) {
     const comma = skipTrivia(bump(recovered));
     if (currentKind(comma) === 7) {
-      return errorAtCurrent(comma);
+      return { state: errorAtCurrent(comma), value: true };
     }
-    return parseRecordInitializers(comma);
+    return parseRecordInitializersSmall(comma, remaining - 1);
   }
-  return recovered;
+  return { state: recovered, value: true };
 }
 
 function parseRecordFieldInitializer(state: ParserState): ParserState {
@@ -1773,32 +2331,46 @@ function parsePatternBindingList(state: ParserState): ParserState {
 }
 
 function parsePatternBindings(state: ParserState): ParserState {
+  const chunk = parsePatternBindingsSmall(state, 16);
+  if (chunk.value) {
+    return chunk.state;
+  }
+  return parsePatternBindings(chunk.state);
+}
+
+function parsePatternBindingsSmall(
+  state: ParserState,
+  remaining: Int
+): StateFlag {
+  if (remaining === 0) {
+    return { state: state, value: false };
+  }
   const binding = expect(state, 0);
   const recoveredBinding = recoverPatternBinding(binding);
   const skipped = skipTrivia(recoveredBinding);
   if (currentKind(skipped) === 8) {
     const comma = skipTrivia(bump(skipped));
     if (currentKind(comma) === 5) {
-      return errorAtCurrent(comma);
+      return { state: errorAtCurrent(comma), value: true };
     }
-    return parsePatternBindings(comma);
+    return parsePatternBindingsSmall(comma, remaining - 1);
   }
   if (currentKind(skipped) === 5) {
-    return skipped;
+    return { state: skipped, value: true };
   }
   if (currentKind(skipped) === 0) {
-    return parsePatternBindings(errorAtCurrent(skipped));
+    return parsePatternBindingsSmall(errorAtCurrent(skipped), remaining - 1);
   }
   const reported = errorAtCurrent(skipped);
   const recovered = recoverTo(reported, patternBindingRecovery());
   if (currentKind(recovered) === 8) {
     const comma = skipTrivia(bump(recovered));
     if (currentKind(comma) === 5) {
-      return errorAtCurrent(comma);
+      return { state: errorAtCurrent(comma), value: true };
     }
-    return parsePatternBindings(comma);
+    return parsePatternBindingsSmall(comma, remaining - 1);
   }
-  return recovered;
+  return { state: recovered, value: true };
 }
 
 function recoverPatternBinding(result: StateFlag): ParserState {
@@ -1829,6 +2401,7 @@ export function parse(input: LexerInput): ParserResult {
     position: 0,
     pendingSplitEq: false,
     events: [],
+    deferredStarts: [],
     openNodes: [],
     recoveryEvents: [],
     diagnostics: []
@@ -1837,7 +2410,7 @@ export function parse(input: LexerInput): ParserResult {
   const parsed = parseSourceItems(opened);
   const completed = finishNode(parsed);
   return {
-    cstEvents: completed.events,
+    cstEvents: materializeEvents(completed),
     recoveryEvents: completed.recoveryEvents,
     diagnostics: completed.diagnostics
   };
