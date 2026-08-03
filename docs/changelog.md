@@ -10,12 +10,18 @@
 - Added bounded `PartialInit<T>` homogeneous slots with value-preserving
   duplicate/out-of-bounds rejection, incomplete-finish rejection, reverse
   successful-initialization cleanup, and exactly-once ZST Drop.
+- Added target-neutral NIR tagged unions with conservative ownership, explicit
+  checked 1/2/4/8-byte tags, maximum-payload storage, detailed 32/64-bit target
+  layouts, and deterministic recursion/overflow rejection.
+- Kept the closed private NIR artifact schema 1 compatible by rejecting tagged
+  union modules on serialization and deserialization until an explicit schema
+  upgrade is delivered.
 - Added CLI E2E coverage that executes `.ft` fixtures through `nexac` and
   verifies accepted output, rejected diagnostics, runtime failure status, and
   imported-source locations; the binary can be overridden with `NEXAC_E2E_BIN`.
-- Kept heterogeneous aggregate layout, cross-backend Drop-trace conformance,
-  compiler cleanup lowering, and stable external descriptors deferred to their
-  own implementation gates.
+- Kept normalized layout tables, cross-backend Drop-trace conformance, compiler
+  cleanup lowering, and stable external descriptors deferred to their own
+  implementation gates.
 
 ## Compiler Package 0.0.10 (Futao Type Checker Kernel)
 

@@ -77,6 +77,11 @@ artifact producer Host state.
 This is the NIR layout boundary, not completion of ADR-004 runtime storage,
 allocator, union, exported ABI, Native/Wasm conformance, or backend work.
 
+The later [ADR-004 tagged-union layout slice](adr-004-tagged-union-layout.md)
+adds an in-memory NIR type and checked target layout while deliberately keeping
+this closed schema 1 unchanged. Schema 1 artifact readers and writers reject
+tagged-union modules until a separately versioned artifact schema is accepted.
+
 ## Private Artifact Schema
 
 `CanonicalArtifact` serializes only a `VerifiedModule`. Schema 1 contains:

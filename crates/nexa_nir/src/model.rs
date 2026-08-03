@@ -151,6 +151,11 @@ pub enum NirType {
         /// Number of elements.
         length: u64,
     },
+    /// A tagged union whose zero-based discriminants follow logical variant order.
+    TaggedUnion {
+        /// Payload type for each variant; payloadless variants use [`NirType::Unit`].
+        variants: Vec<TypeId>,
+    },
     /// A resolved function reference.
     FunctionRef,
 }
@@ -165,6 +170,7 @@ impl NirType {
             | Self::MutBorrowPtr { pointee } => references.push(*pointee),
             Self::Struct { fields } => references.extend(fields.iter().copied()),
             Self::FixedArray { element, .. } => references.push(*element),
+            Self::TaggedUnion { variants } => references.extend(variants.iter().copied()),
             Self::I1
             | Self::I8
             | Self::I16
