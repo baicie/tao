@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added the implementation contract for the complete `0.0.11` Futao compiler
+  core, including the remaining type-checker semantics, canonical HIR/MIR/NIR,
+  a real non-emulated compiler adapter, explicit candidate-driver gates, and the
+  exact evidence required before the milestone can be marked implemented.
 - Added the first ADR-004 shared-ownership slice with allocator-accounted
   `Shared<T>`/`Weak<T>`, last-owner Drop, weak upgrade rejection after release,
   and typed borrow-conflict errors.

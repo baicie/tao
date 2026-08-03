@@ -26,7 +26,10 @@ Accepted 状态解释为对应实现已经存在。
 * `0.0.7` 已交付真实 Futao Lexer、UTF-8 snapshot schema 与无差异 corpus/fuzz gate。
 * `0.0.8` 已交付真实 Futao Parser、lossless CST/recovery snapshot schema 与无差异 corpus/fuzz gate。
 * `0.0.9` 已交付真实 Futao Resolver、resolver snapshot schema、模块图/作用域/名称可观察合同与无差异 corpus/fuzz gate。
-* 当前里程碑：`0.0.10` Futao Type Checker differential 首个 expression-kernel slice。
+* 当前大目标：按
+  [`0.0.11` 完整 compiler core 实施合同](futao-compiler-core-0.0.11.md)
+  先闭合 `0.0.10` 剩余 Type Checker differential，再完成 HIR/MIR/NIR、driver
+  与完整 corpus 门槛。
 
 ## 关键依赖
 
