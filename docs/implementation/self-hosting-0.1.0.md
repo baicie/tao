@@ -11,7 +11,7 @@ Accepted 状态解释为对应实现已经存在。
 
 ## 当前基线
 
-* 工具链版本：`0.0.8`。
+* 工具链版本：`0.0.9`。
 * Stage 0：固定为 `nexac 0.0.1` Rust 实现，覆盖 Lexer、Parser、Resolver、Type Checker、HIR、CFG MIR、
   reference interpreter、诊断、conformance 与 release gate。
 * 语言名称：新设计和源码使用 Futao / `.ft`；现有 Nexa / `.nexa` 输入在迁移策略
@@ -25,7 +25,8 @@ Accepted 状态解释为对应实现已经存在。
 * `0.0.6` 已冻结 `futao-bootstrap-v1` 并交付 content-addressed Bootstrap Stdlib `0.0.1`。
 * `0.0.7` 已交付真实 Futao Lexer、UTF-8 snapshot schema 与无差异 corpus/fuzz gate。
 * `0.0.8` 已交付真实 Futao Parser、lossless CST/recovery snapshot schema 与无差异 corpus/fuzz gate。
-* 下一里程碑：`0.0.9` Futao Resolver differential。
+* `0.0.9` 已交付真实 Futao Resolver、resolver snapshot schema、模块图/作用域/名称可观察合同与无差异 corpus/fuzz gate。
+* 下一里程碑：`0.0.10` Futao Type Checker differential。
 
 ## 关键依赖
 
@@ -204,9 +205,19 @@ rejected 与 5 个 fuzz seed 均以真实 adapter 运行且无分类差异；512
 mutation gate 继续 fail closed。Rust Parser 仍为默认路径。详细合同见
 [`futao-parser-differential-0.0.8.md`](futao-parser-differential-0.0.8.md)。
 
+`0.0.9` 交付状态：已实现。真实 Futao resolver 在已验证 lexer/parser 之上构建
+确定性 module graph、symbols、visibility、function/block/match-arm/closure/for scopes、
+local/generic bindings、record fields、union variants 与 resolved names，并返回
+`E2001`、`E2002`、`E4002` 至 `E4005`。schema 1 快照比较 module graph、symbols、scopes、
+bindings、names 和 diagnostics 六类 observable；accepted/rejected 图与 4 个 fuzz seed
+共 6 个 case 全部由 Rust/Futao 真实 adapter 执行且零差异。严格
+`FUTAO-RESOLVER-1` 协议、双侧快照保留、source-aware runtime failure、snapshot validation
+和双侧 SHA-256 digest 均 fail closed。Rust Resolver 仍为默认路径。详细合同见
+[`futao-resolver-differential-0.0.9.md`](futao-resolver-differential-0.0.9.md)。
+
 Phase B5 的 parser scalability 前置已实现：chunked persistent sequence 取代大数组逐项
 复制，固定顺序叶批处理避免多个分治 runner 叠加越过 64 层调用限制；独立 release gate
-在每文件 64,000,000 step ceiling 下解析排序后的 9 文件 bootstrap compiler 完整源码图，
+在每文件 64,000,000 step ceiling 下解析排序后的 9 文件 bootstrap compiler parser 源码图，
 且保持 `0.0.7`/`0.0.8` observable 与 512-byte mutation ceiling 不变。详细边界见
 [`futao-parser-self-graph-scalability-0.0.8.md`](futao-parser-self-graph-scalability-0.0.8.md)。
 

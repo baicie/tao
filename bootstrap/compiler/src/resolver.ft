@@ -1,0 +1,4604 @@
+import { LexerInput } from "./lexer.ft";
+import { ParserCstEvent, parse } from "./parser.ft";
+import { Sequence, append, toArray } from "./sequence.ft";
+
+export type ResolverModuleInput = {
+  id: Int;
+  source: LexerInput;
+};
+
+export type ResolverEdgeInput = {
+  importer: Int;
+  imported: Int;
+  pathStart: Int;
+  pathEnd: Int;
+};
+
+export type ResolverInput = {
+  modules: ResolverModuleInput[];
+  edges: ResolverEdgeInput[];
+};
+
+export type ResolverSpan = {
+  source: Int;
+  start: Int;
+  end: Int;
+};
+
+export type ResolverTarget =
+  | Local(moduleId: Int, functionIndex: Int, localIndex: Int)
+  | Function(moduleId: Int, definitionIndex: Int)
+  | Record(moduleId: Int, definitionIndex: Int)
+  | Field(moduleId: Int, recordIndex: Int, fieldIndex: Int)
+  | Union(moduleId: Int, definitionIndex: Int)
+  | Variant(moduleId: Int, unionIndex: Int, variantIndex: Int)
+  | Payload(
+      moduleId: Int,
+      unionIndex: Int,
+      variantIndex: Int,
+      payloadIndex: Int
+    )
+  | TypeParameter(
+      ownerKind: Int,
+      moduleId: Int,
+      ownerIndex: Int,
+      parameterIndex: Int
+    )
+  | Print()
+  | ToString()
+  | ParseInt();
+
+export type ResolverSymbol = {
+  kind: Int;
+  module: Int;
+  index: Int;
+  visibility: Int;
+  nameSpan: ResolverSpan;
+};
+
+export type ResolverScope = {
+  module: Int;
+  functionIndex: Int;
+  index: Int;
+  parent: Int;
+  kind: Int;
+  span: ResolverSpan;
+};
+
+export type ResolverBinding = {
+  module: Int;
+  functionIndex: Int;
+  local: Int;
+  scope: Int;
+  nameSpan: ResolverSpan;
+  mutable: Bool;
+};
+
+export type ResolverName = {
+  span: ResolverSpan;
+  target: ResolverTarget;
+};
+
+export type ResolverLabel = {
+  style: Int;
+  span: ResolverSpan;
+};
+
+export type ResolverDiagnostic = {
+  code: Int;
+  labels: ResolverLabel[];
+};
+
+export type ResolverResult = {
+  symbols: ResolverSymbol[];
+  scopes: ResolverScope[];
+  bindings: ResolverBinding[];
+  names: ResolverName[];
+  diagnostics: ResolverDiagnostic[];
+};
+
+export type ResolverOutcome =
+  | InvalidInput()
+  | ParserInvalid()
+  | Resolved(result: ResolverResult);
+
+type CstToken = {
+  kind: Int;
+  start: Int;
+  end: Int;
+};
+
+type CstNode = {
+  kind: Int;
+  start: Int;
+  end: Int;
+  childIds: Int[];
+  directTokens: CstToken[];
+};
+
+type OpenCstNode = {
+  kind: Int;
+  start: Int;
+  childIds: Int[];
+  directTokens: CstToken[];
+};
+
+type CstBuildState = {
+  open: OpenCstNode[];
+  nodes: Sequence<CstNode>;
+  valid: Bool;
+};
+
+type ParsedModule = {
+  id: Int;
+  source: LexerInput;
+  nodes: CstNode[];
+  root: Int;
+};
+
+type ParsedModulesState = {
+  modules: Sequence<ParsedModule>;
+  valid: Bool;
+};
+
+type NameRef = {
+  source: Int;
+  start: Int;
+  end: Int;
+  codePointStart: Int;
+  codePointEnd: Int;
+  codePoints: Int[];
+};
+
+type Definition = {
+  kind: Int;
+  moduleId: Int;
+  definitionIndex: Int;
+  visibility: Int;
+  name: NameRef;
+  nodeId: Int;
+  exportCollision: ResolverSpan;
+};
+
+type DefinitionLookup =
+  | NoDefinition()
+  | FoundDefinition(definition: Definition);
+
+type RawDefinitionState = {
+  definitions: Sequence<Definition>;
+  functionCount: Int;
+  recordCount: Int;
+  unionCount: Int;
+  valid: Bool;
+};
+
+type CatalogState = {
+  definitions: Sequence<Definition>;
+  values: Definition[];
+  types: Definition[];
+  exports: Definition[];
+};
+
+type ModuleCatalog = {
+  moduleId: Int;
+  definitions: Definition[];
+  values: Definition[];
+  types: Definition[];
+  exports: Definition[];
+};
+
+type CatalogBuildState = {
+  catalogs: Sequence<ModuleCatalog>;
+  symbols: Sequence<ResolverSymbol>;
+  valid: Bool;
+};
+
+type CatalogResult = {
+  catalog: ModuleCatalog;
+  symbols: ResolverSymbol[];
+  valid: Bool;
+};
+
+type EnvironmentEntry = {
+  name: NameRef;
+  definition: Definition;
+};
+
+type EnvironmentLookup =
+  | NoEnvironmentEntry()
+  | FoundEnvironmentEntry(entry: EnvironmentEntry);
+
+type EnvironmentState = {
+  values: EnvironmentEntry[];
+  types: EnvironmentEntry[];
+  names: Sequence<ResolverName>;
+  diagnostics: Sequence<ResolverDiagnostic>;
+  valid: Bool;
+};
+
+type ModuleEnvironment = {
+  moduleId: Int;
+  values: EnvironmentEntry[];
+  types: EnvironmentEntry[];
+};
+
+type EnvironmentsBuildState = {
+  environments: Sequence<ModuleEnvironment>;
+  names: Sequence<ResolverName>;
+  diagnostics: Sequence<ResolverDiagnostic>;
+  valid: Bool;
+};
+
+type ImportNameState = {
+  environment: EnvironmentState;
+  target: ModuleCatalog;
+  moduleValue: ParsedModule;
+};
+
+type LocalEntry = {
+  name: NameRef;
+  localIndex: Int;
+  span: ResolverSpan;
+};
+
+type LocalLookup =
+  | NoLocal()
+  | FoundLocal(entry: LocalEntry);
+
+type ScopeFrame = {
+  index: Int;
+  names: LocalEntry[];
+};
+
+type TypeParameterEntry = {
+  name: NameRef;
+  index: Int;
+  span: ResolverSpan;
+};
+
+type TypeParameterLookup =
+  | NoTypeParameter()
+  | FoundTypeParameter(entry: TypeParameterEntry);
+
+type ResolveTask =
+  | ResolveType(nodeId: Int)
+  | ResolveExpression(nodeId: Int)
+  | ResolveStatement(nodeId: Int)
+  | ResolveBlock(nodeId: Int, createsScope: Bool)
+  | ResolveMatchArm(nodeId: Int)
+  | ResolveCallable(nodeId: Int)
+  | ResolveValueName(name: NameRef)
+  | ResolveTypeName(name: NameRef)
+  | ResolveQualifiedCall(qualifier: NameRef, member: NameRef)
+  | ResolveVariantName(qualifier: NameRef, member: NameRef)
+  | PushScope(scopeKind: Int, nodeId: Int)
+  | PopScope()
+  | Bind(name: NameRef, mutableBinding: Bool);
+
+type ResolverContext = {
+  moduleValue: ParsedModule;
+  modules: ParsedModule[];
+  environment: ModuleEnvironment;
+  ownerKind: Int;
+  ownerIndex: Int;
+};
+
+type ResolverOutput = {
+  scopes: Sequence<ResolverScope>;
+  bindings: Sequence<ResolverBinding>;
+  names: Sequence<ResolverName>;
+  diagnostics: Sequence<ResolverDiagnostic>;
+};
+
+type ResolverMachine = {
+  context: ResolverContext;
+  output: ResolverOutput;
+  scopeStack: ScopeFrame[];
+  typeParameters: TypeParameterEntry[];
+  tasks: ResolveTask[];
+  nextScope: Int;
+  nextLocal: Int;
+  valid: Bool;
+};
+
+type SemanticBuildState = {
+  scopes: Sequence<ResolverScope>;
+  bindings: Sequence<ResolverBinding>;
+  names: Sequence<ResolverName>;
+  diagnostics: Sequence<ResolverDiagnostic>;
+  valid: Bool;
+};
+
+type CycleState = {
+  visits: Int[];
+  parents: Int[];
+  backEdges: Int[];
+};
+
+function arrayRange<T>(values: T[], start: Int, end: Int): T[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [values[start]];
+  }
+  const middle = start + (end - start) / 2;
+  return arrayRange(values, start, middle).concat(
+    arrayRange(values, middle, end)
+  );
+}
+
+function reverseArrayRange<T>(values: T[], start: Int, end: Int): T[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [values[start]];
+  }
+  const middle = start + (end - start) / 2;
+  return reverseArrayRange(values, middle, end).concat(
+    reverseArrayRange(values, start, middle)
+  );
+}
+
+function noSpan(): ResolverSpan {
+  return { source: -1, start: 0, end: 0 };
+}
+
+function spanOfName(name: NameRef): ResolverSpan {
+  return { source: name.source, start: name.start, end: name.end };
+}
+
+function byteOffsetIndex(
+  offsets: Int[],
+  target: Int,
+  start: Int,
+  end: Int
+): Int {
+  if (start >= end) {
+    return start;
+  }
+  const middle = start + (end - start) / 2;
+  if (offsets[middle] < target) {
+    return byteOffsetIndex(offsets, target, middle + 1, end);
+  }
+  return byteOffsetIndex(offsets, target, start, middle);
+}
+
+function nameRef(moduleValue: ParsedModule, token: CstToken): NameRef {
+  return {
+    source: moduleValue.id,
+    start: token.start,
+    end: token.end,
+    codePointStart: byteOffsetIndex(
+      moduleValue.source.byteOffsets,
+      token.start,
+      0,
+      moduleValue.source.byteOffsets.length
+    ),
+    codePointEnd: byteOffsetIndex(
+      moduleValue.source.byteOffsets,
+      token.end,
+      0,
+      moduleValue.source.byteOffsets.length
+    ),
+    codePoints: moduleValue.source.codePoints
+  };
+}
+
+function sameCodePointRange(
+  left: NameRef,
+  right: NameRef,
+  start: Int,
+  end: Int
+): Bool {
+  if (start >= end) {
+    return true;
+  }
+  if (end - start === 1) {
+    return left.codePoints[left.codePointStart + start] ===
+      right.codePoints[right.codePointStart + start];
+  }
+  const middle = start + (end - start) / 2;
+  return sameCodePointRange(left, right, start, middle) &&
+    sameCodePointRange(left, right, middle, end);
+}
+
+function sameName(left: NameRef, right: NameRef): Bool {
+  const leftLength = left.codePointEnd - left.codePointStart;
+  const rightLength = right.codePointEnd - right.codePointStart;
+  return leftLength === rightLength &&
+    sameCodePointRange(left, right, 0, leftLength);
+}
+
+function sameAsciiRange(
+  name: NameRef,
+  expected: Int[],
+  start: Int,
+  end: Int
+): Bool {
+  if (start >= end) {
+    return true;
+  }
+  if (end - start === 1) {
+    return name.codePoints[name.codePointStart + start] === expected[start];
+  }
+  const middle = start + (end - start) / 2;
+  return sameAsciiRange(name, expected, start, middle) &&
+    sameAsciiRange(name, expected, middle, end);
+}
+
+function sameAscii(name: NameRef, expected: Int[]): Bool {
+  return name.codePointEnd - name.codePointStart === expected.length &&
+    sameAsciiRange(name, expected, 0, expected.length);
+}
+
+function directTokenRange(
+  tokens: CstToken[],
+  kind: Int,
+  start: Int,
+  end: Int
+): CstToken {
+  if (start >= end) {
+    return { kind: -1, start: 0, end: 0 };
+  }
+  if (end - start === 1) {
+    if (tokens[start].kind === kind) {
+      return tokens[start];
+    }
+    return { kind: -1, start: 0, end: 0 };
+  }
+  const middle = start + (end - start) / 2;
+  const left = directTokenRange(tokens, kind, start, middle);
+  if (left.kind >= 0) {
+    return left;
+  }
+  return directTokenRange(tokens, kind, middle, end);
+}
+
+function directToken(node: CstNode, kind: Int): CstToken {
+  return directTokenRange(node.directTokens, kind, 0, node.directTokens.length);
+}
+
+function childOfKindRange(
+  nodes: CstNode[],
+  childIds: Int[],
+  kind: Int,
+  start: Int,
+  end: Int
+): Int {
+  if (start >= end) {
+    return -1;
+  }
+  if (end - start === 1) {
+    const childId = childIds[start];
+    if (nodes[childId].kind === kind) {
+      return childId;
+    }
+    return -1;
+  }
+  const middle = start + (end - start) / 2;
+  const left = childOfKindRange(nodes, childIds, kind, start, middle);
+  if (left >= 0) {
+    return left;
+  }
+  return childOfKindRange(nodes, childIds, kind, middle, end);
+}
+
+function childOfKind(nodes: CstNode[], node: CstNode, kind: Int): Int {
+  return childOfKindRange(nodes, node.childIds, kind, 0, node.childIds.length);
+}
+
+function definitionTarget(definition: Definition): ResolverTarget {
+  if (definition.kind === 0) {
+    return ResolverTarget.Function(
+      definition.moduleId,
+      definition.definitionIndex
+    );
+  }
+  if (definition.kind === 1) {
+    return ResolverTarget.Record(
+      definition.moduleId,
+      definition.definitionIndex
+    );
+  }
+  return ResolverTarget.Union(
+    definition.moduleId,
+    definition.definitionIndex
+  );
+}
+
+function definitionRange(
+  definitions: Definition[],
+  name: NameRef,
+  start: Int,
+  end: Int
+): DefinitionLookup {
+  if (start >= end) {
+    return DefinitionLookup.NoDefinition();
+  }
+  if (end - start === 1) {
+    if (sameName(definitions[start].name, name)) {
+      return DefinitionLookup.FoundDefinition(definitions[start]);
+    }
+    return DefinitionLookup.NoDefinition();
+  }
+  const middle = start + (end - start) / 2;
+  const left = definitionRange(definitions, name, start, middle);
+  return match (left) {
+    case DefinitionLookup.NoDefinition() =>
+      definitionRange(definitions, name, middle, end);
+    case DefinitionLookup.FoundDefinition(definition) =>
+      DefinitionLookup.FoundDefinition(definition);
+  };
+}
+
+function findDefinition(
+  definitions: Definition[],
+  name: NameRef
+): DefinitionLookup {
+  return definitionRange(definitions, name, 0, definitions.length);
+}
+
+function definitionByNodeRange(
+  definitions: Definition[],
+  nodeId: Int,
+  start: Int,
+  end: Int
+): DefinitionLookup {
+  if (start >= end) {
+    return DefinitionLookup.NoDefinition();
+  }
+  if (end - start === 1) {
+    if (definitions[start].nodeId === nodeId) {
+      return DefinitionLookup.FoundDefinition(definitions[start]);
+    }
+    return DefinitionLookup.NoDefinition();
+  }
+  const middle = start + (end - start) / 2;
+  const left = definitionByNodeRange(definitions, nodeId, start, middle);
+  return match (left) {
+    case DefinitionLookup.NoDefinition() =>
+      definitionByNodeRange(definitions, nodeId, middle, end);
+    case DefinitionLookup.FoundDefinition(definition) =>
+      DefinitionLookup.FoundDefinition(definition);
+  };
+}
+
+function definitionByNode(
+  definitions: Definition[],
+  nodeId: Int
+): DefinitionLookup {
+  return definitionByNodeRange(definitions, nodeId, 0, definitions.length);
+}
+
+function primaryLabel(span: ResolverSpan): ResolverLabel {
+  return { style: 0, span: span };
+}
+
+function secondaryLabel(span: ResolverSpan): ResolverLabel {
+  return { style: 1, span: span };
+}
+
+function oneLabelDiagnostic(code: Int, primary: ResolverSpan): ResolverDiagnostic {
+  return { code: code, labels: [primaryLabel(primary)] };
+}
+
+function twoLabelDiagnostic(
+  code: Int,
+  primary: ResolverSpan,
+  secondary: ResolverSpan
+): ResolverDiagnostic {
+  return {
+    code: code,
+    labels: [primaryLabel(primary), secondaryLabel(secondary)]
+  };
+}
+
+function replaceLastOpen(
+  values: OpenCstNode[],
+  value: OpenCstNode
+): OpenCstNode[] {
+  return arrayRange(values, 0, values.length - 1).append(value);
+}
+
+function pushOpen(
+  state: CstBuildState,
+  kind: Int,
+  start: Int
+): CstBuildState {
+  return {
+    open: state.open.append({
+      kind: kind,
+      start: start,
+      childIds: [],
+      directTokens: []
+    }),
+    nodes: state.nodes,
+    valid: state.valid
+  };
+}
+
+function pushToken(
+  state: CstBuildState,
+  kind: Int,
+  start: Int,
+  end: Int
+): CstBuildState {
+  if (!state.valid || state.open.length === 0) {
+    return { open: state.open, nodes: state.nodes, valid: false };
+  }
+  const current = state.open[state.open.length - 1];
+  const updated: OpenCstNode = {
+    kind: current.kind,
+    start: current.start,
+    childIds: current.childIds,
+    directTokens: current.directTokens.append({
+      kind: kind,
+      start: start,
+      end: end
+    })
+  };
+  return {
+    open: replaceLastOpen(state.open, updated),
+    nodes: state.nodes,
+    valid: true
+  };
+}
+
+function finishOpen(state: CstBuildState, end: Int): CstBuildState {
+  if (!state.valid || state.open.length === 0) {
+    return { open: state.open, nodes: state.nodes, valid: false };
+  }
+  const current = state.open[state.open.length - 1];
+  const nodeId = state.nodes.length;
+  const node: CstNode = {
+    kind: current.kind,
+    start: current.start,
+    end: end,
+    childIds: current.childIds,
+    directTokens: current.directTokens
+  };
+  const remaining = arrayRange(state.open, 0, state.open.length - 1);
+  const withNode = append(state.nodes, node);
+  if (remaining.length === 0) {
+    return { open: [], nodes: withNode, valid: true };
+  }
+  const parent = remaining[remaining.length - 1];
+  const updatedParent: OpenCstNode = {
+    kind: parent.kind,
+    start: parent.start,
+    childIds: parent.childIds.append(nodeId),
+    directTokens: parent.directTokens
+  };
+  return {
+    open: replaceLastOpen(remaining, updatedParent),
+    nodes: withNode,
+    valid: true
+  };
+}
+
+function stepCstBuild(
+  state: CstBuildState,
+  event: ParserCstEvent
+): CstBuildState {
+  if (!state.valid) {
+    return state;
+  }
+  return match (event) {
+    case ParserCstEvent.StartNode(kind, offset) =>
+      pushOpen(state, kind, offset);
+    case ParserCstEvent.Token(kind, start, end) =>
+      pushToken(state, kind, start, end);
+    case ParserCstEvent.FinishNode(offset) => finishOpen(state, offset);
+  };
+}
+
+function buildCstRange(
+  events: ParserCstEvent[],
+  start: Int,
+  end: Int,
+  state: CstBuildState
+): CstBuildState {
+  if (!state.valid || start >= end) {
+    return state;
+  }
+  if (end - start === 1) {
+    return stepCstBuild(state, events[start]);
+  }
+  const middle = start + (end - start) / 2;
+  const left = buildCstRange(events, start, middle, state);
+  return buildCstRange(events, middle, end, left);
+}
+
+function parseModule(module: ResolverModuleInput): ParsedModulesState {
+  const parsed = parse(module.source);
+  if (parsed.diagnostics.length > 0) {
+    return {
+      modules: { chunks: [], tail: [], length: 0 },
+      valid: false
+    };
+  }
+  const initial: CstBuildState = {
+    open: [],
+    nodes: { chunks: [], tail: [], length: 0 },
+    valid: true
+  };
+  const built = buildCstRange(
+    parsed.cstEvents,
+    0,
+    parsed.cstEvents.length,
+    initial
+  );
+  const nodes = toArray(built.nodes);
+  if (
+    !built.valid || built.open.length > 0 || nodes.length === 0 ||
+    !(nodes[nodes.length - 1].kind === 39)
+  ) {
+    return {
+      modules: { chunks: [], tail: [], length: 0 },
+      valid: false
+    };
+  }
+  return {
+    modules: {
+      chunks: [],
+      tail: [{
+        id: module.id,
+        source: module.source,
+        nodes: nodes,
+        root: nodes.length - 1
+      }],
+      length: 1
+    },
+    valid: true
+  };
+}
+
+function parseModuleRange(
+  modules: ResolverModuleInput[],
+  start: Int,
+  end: Int,
+  state: ParsedModulesState
+): ParsedModulesState {
+  if (!state.valid || start >= end) {
+    return state;
+  }
+  if (end - start === 1) {
+    const parsed = parseModule(modules[start]);
+    if (!parsed.valid) {
+      return { modules: state.modules, valid: false };
+    }
+    return {
+      modules: append(state.modules, toArray(parsed.modules)[0]),
+      valid: true
+    };
+  }
+  const middle = start + (end - start) / 2;
+  const left = parseModuleRange(modules, start, middle, state);
+  return parseModuleRange(modules, middle, end, left);
+}
+
+function exportedDeclarationNode(moduleValue: ParsedModule, itemId: Int): Int {
+  const item = moduleValue.nodes[itemId];
+  const functionId = childOfKind(moduleValue.nodes, item, 40);
+  if (functionId >= 0) {
+    return functionId;
+  }
+  const recordId = childOfKind(moduleValue.nodes, item, 75);
+  if (recordId >= 0) {
+    return recordId;
+  }
+  return childOfKind(moduleValue.nodes, item, 85);
+}
+
+function declarationNode(moduleValue: ParsedModule, itemId: Int): Int {
+  if (moduleValue.nodes[itemId].kind === 97) {
+    return exportedDeclarationNode(moduleValue, itemId);
+  }
+  return itemId;
+}
+
+function appendRawDefinition(
+  moduleValue: ParsedModule,
+  itemId: Int,
+  state: RawDefinitionState
+): RawDefinitionState {
+  const item = moduleValue.nodes[itemId];
+  if (item.kind === 95) {
+    return state;
+  }
+  const nodeId = declarationNode(moduleValue, itemId);
+  if (nodeId < 0) {
+    return {
+      definitions: state.definitions,
+      functionCount: state.functionCount,
+      recordCount: state.recordCount,
+      unionCount: state.unionCount,
+      valid: false
+    };
+  }
+  const node = moduleValue.nodes[nodeId];
+  const token = directToken(node, 0);
+  if (token.kind < 0) {
+    return {
+      definitions: state.definitions,
+      functionCount: state.functionCount,
+      recordCount: state.recordCount,
+      unionCount: state.unionCount,
+      valid: false
+    };
+  }
+  const visibility = ifExported(item.kind);
+  if (node.kind === 40) {
+    const definition: Definition = {
+      kind: 0,
+      moduleId: moduleValue.id,
+      definitionIndex: state.functionCount,
+      visibility: visibility,
+      name: nameRef(moduleValue, token),
+      nodeId: nodeId,
+      exportCollision: noSpan()
+    };
+    return {
+      definitions: append(state.definitions, definition),
+      functionCount: state.functionCount + 1,
+      recordCount: state.recordCount,
+      unionCount: state.unionCount,
+      valid: state.valid
+    };
+  }
+  if (node.kind === 75) {
+    const definition: Definition = {
+      kind: 1,
+      moduleId: moduleValue.id,
+      definitionIndex: state.recordCount,
+      visibility: visibility,
+      name: nameRef(moduleValue, token),
+      nodeId: nodeId,
+      exportCollision: noSpan()
+    };
+    return {
+      definitions: append(state.definitions, definition),
+      functionCount: state.functionCount,
+      recordCount: state.recordCount + 1,
+      unionCount: state.unionCount,
+      valid: state.valid
+    };
+  }
+  if (node.kind === 85) {
+    const definition: Definition = {
+      kind: 2,
+      moduleId: moduleValue.id,
+      definitionIndex: state.unionCount,
+      visibility: visibility,
+      name: nameRef(moduleValue, token),
+      nodeId: nodeId,
+      exportCollision: noSpan()
+    };
+    return {
+      definitions: append(state.definitions, definition),
+      functionCount: state.functionCount,
+      recordCount: state.recordCount,
+      unionCount: state.unionCount + 1,
+      valid: state.valid
+    };
+  }
+  return {
+    definitions: state.definitions,
+    functionCount: state.functionCount,
+    recordCount: state.recordCount,
+    unionCount: state.unionCount,
+    valid: false
+  };
+}
+
+function ifExported(itemKind: Int): Int {
+  if (itemKind === 97) {
+    return 1;
+  }
+  return 0;
+}
+
+function collectRawDefinitionRange(
+  moduleValue: ParsedModule,
+  childIds: Int[],
+  start: Int,
+  end: Int,
+  state: RawDefinitionState
+): RawDefinitionState {
+  if (!state.valid || start >= end) {
+    return state;
+  }
+  if (end - start === 1) {
+    return appendRawDefinition(moduleValue, childIds[start], state);
+  }
+  const middle = start + (end - start) / 2;
+  const left = collectRawDefinitionRange(
+    moduleValue,
+    childIds,
+    start,
+    middle,
+    state
+  );
+  return collectRawDefinitionRange(
+    moduleValue,
+    childIds,
+    middle,
+    end,
+    left
+  );
+}
+
+function lookupExists(lookup: DefinitionLookup): Bool {
+  return match (lookup) {
+    case DefinitionLookup.NoDefinition() => false;
+    case DefinitionLookup.FoundDefinition(definition) => true;
+  };
+}
+
+function lookupSpan(lookup: DefinitionLookup): ResolverSpan {
+  return match (lookup) {
+    case DefinitionLookup.NoDefinition() => noSpan();
+    case DefinitionLookup.FoundDefinition(definition) =>
+      spanOfName(definition.name);
+  };
+}
+
+function withExportCollision(
+  definition: Definition,
+  collision: ResolverSpan
+): Definition {
+  return {
+    kind: definition.kind,
+    moduleId: definition.moduleId,
+    definitionIndex: definition.definitionIndex,
+    visibility: definition.visibility,
+    name: definition.name,
+    nodeId: definition.nodeId,
+    exportCollision: collision
+  };
+}
+
+function analyzeDefinition(
+  state: CatalogState,
+  definition: Definition
+): CatalogState {
+  const namespace = selectDefinitionNamespace(
+    definition.kind,
+    state.values,
+    state.types
+  );
+  const duplicate = findDefinition(namespace, definition.name);
+  const accepted = !lookupExists(duplicate);
+  const values = appendDefinitionNamespace(
+    definition.kind === 0 && accepted,
+    state.values,
+    definition
+  );
+  const types = appendDefinitionNamespace(
+    !(definition.kind === 0) && accepted,
+    state.types,
+    definition
+  );
+  if (!(definition.visibility === 1) || !accepted) {
+    return {
+      definitions: append(state.definitions, definition),
+      values: values,
+      types: types,
+      exports: state.exports
+    };
+  }
+  const previousExport = findDefinition(state.exports, definition.name);
+  if (lookupExists(previousExport)) {
+    return {
+      definitions: append(
+        state.definitions,
+        withExportCollision(definition, lookupSpan(previousExport))
+      ),
+      values: values,
+      types: types,
+      exports: state.exports
+    };
+  }
+  return {
+    definitions: append(state.definitions, definition),
+    values: values,
+    types: types,
+    exports: state.exports.append(definition)
+  };
+}
+
+function selectDefinitionNamespace(
+  kind: Int,
+  values: Definition[],
+  types: Definition[]
+): Definition[] {
+  if (kind === 0) {
+    return values;
+  }
+  return types;
+}
+
+function appendDefinitionNamespace(
+  shouldAppend: Bool,
+  values: Definition[],
+  definition: Definition
+): Definition[] {
+  if (shouldAppend) {
+    return values.append(definition);
+  }
+  return values;
+}
+
+function analyzeDefinitionRange(
+  definitions: Definition[],
+  start: Int,
+  end: Int,
+  state: CatalogState
+): CatalogState {
+  if (start >= end) {
+    return state;
+  }
+  if (end - start === 1) {
+    return analyzeDefinition(state, definitions[start]);
+  }
+  const middle = start + (end - start) / 2;
+  const left = analyzeDefinitionRange(definitions, start, middle, state);
+  return analyzeDefinitionRange(definitions, middle, end, left);
+}
+
+function symbolRange(
+  definitions: Definition[],
+  start: Int,
+  end: Int
+): ResolverSymbol[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    const definition = definitions[start];
+    return [{
+      kind: definition.kind,
+      module: definition.moduleId,
+      index: definition.definitionIndex,
+      visibility: definition.visibility,
+      nameSpan: spanOfName(definition.name)
+    }];
+  }
+  const middle = start + (end - start) / 2;
+  return symbolRange(definitions, start, middle).concat(
+    symbolRange(definitions, middle, end)
+  );
+}
+
+function buildCatalog(moduleValue: ParsedModule): CatalogResult {
+  const root = moduleValue.nodes[moduleValue.root];
+  const initial: RawDefinitionState = {
+    definitions: { chunks: [], tail: [], length: 0 },
+    functionCount: 0,
+    recordCount: 0,
+    unionCount: 0,
+    valid: true
+  };
+  const raw = collectRawDefinitionRange(
+    moduleValue,
+    root.childIds,
+    0,
+    root.childIds.length,
+    initial
+  );
+  if (!raw.valid) {
+    return {
+      catalog: {
+        moduleId: moduleValue.id,
+        definitions: [],
+        values: [],
+        types: [],
+        exports: []
+      },
+      symbols: [],
+      valid: false
+    };
+  }
+  const definitions = toArray(raw.definitions);
+  const catalogInitial: CatalogState = {
+    definitions: { chunks: [], tail: [], length: 0 },
+    values: [],
+    types: [],
+    exports: []
+  };
+  const analyzed = analyzeDefinitionRange(
+    definitions,
+    0,
+    definitions.length,
+    catalogInitial
+  );
+  const enriched = toArray(analyzed.definitions);
+  return {
+    catalog: {
+      moduleId: moduleValue.id,
+      definitions: enriched,
+      values: analyzed.values,
+      types: analyzed.types,
+      exports: analyzed.exports
+    },
+    symbols: symbolRange(enriched, 0, enriched.length),
+    valid: true
+  };
+}
+
+function buildCatalogRange(
+  modules: ParsedModule[],
+  start: Int,
+  end: Int,
+  state: CatalogBuildState
+): CatalogBuildState {
+  if (!state.valid || start >= end) {
+    return state;
+  }
+  if (end - start === 1) {
+    const built = buildCatalog(modules[start]);
+    if (!built.valid) {
+      return {
+        catalogs: state.catalogs,
+        symbols: state.symbols,
+        valid: false
+      };
+    }
+    return {
+      catalogs: append(state.catalogs, built.catalog),
+      symbols: {
+        chunks: state.symbols.chunks,
+        tail: state.symbols.tail.concat(built.symbols),
+        length: state.symbols.length + built.symbols.length
+      },
+      valid: true
+    };
+  }
+  const middle = start + (end - start) / 2;
+  const left = buildCatalogRange(modules, start, middle, state);
+  return buildCatalogRange(modules, middle, end, left);
+}
+
+function environmentEntryRange(
+  entries: EnvironmentEntry[],
+  name: NameRef,
+  start: Int,
+  end: Int
+): EnvironmentLookup {
+  if (start >= end) {
+    return EnvironmentLookup.NoEnvironmentEntry();
+  }
+  if (end - start === 1) {
+    if (sameName(entries[start].name, name)) {
+      return EnvironmentLookup.FoundEnvironmentEntry(entries[start]);
+    }
+    return EnvironmentLookup.NoEnvironmentEntry();
+  }
+  const middle = start + (end - start) / 2;
+  const left = environmentEntryRange(entries, name, start, middle);
+  return match (left) {
+    case EnvironmentLookup.NoEnvironmentEntry() =>
+      environmentEntryRange(entries, name, middle, end);
+    case EnvironmentLookup.FoundEnvironmentEntry(entry) =>
+      EnvironmentLookup.FoundEnvironmentEntry(entry);
+  };
+}
+
+function findEnvironmentEntry(
+  entries: EnvironmentEntry[],
+  name: NameRef
+): EnvironmentLookup {
+  return environmentEntryRange(entries, name, 0, entries.length);
+}
+
+function environmentLookupExists(lookup: EnvironmentLookup): Bool {
+  return match (lookup) {
+    case EnvironmentLookup.NoEnvironmentEntry() => false;
+    case EnvironmentLookup.FoundEnvironmentEntry(entry) => true;
+  };
+}
+
+function environmentLookupSpan(lookup: EnvironmentLookup): ResolverSpan {
+  return match (lookup) {
+    case EnvironmentLookup.NoEnvironmentEntry() => noSpan();
+    case EnvironmentLookup.FoundEnvironmentEntry(entry) =>
+      spanOfName(entry.name);
+  };
+}
+
+function appendDiagnostic(
+  state: EnvironmentState,
+  diagnostic: ResolverDiagnostic
+): EnvironmentState {
+  return {
+    values: state.values,
+    types: state.types,
+    names: state.names,
+    diagnostics: append(state.diagnostics, diagnostic),
+    valid: state.valid
+  };
+}
+
+function insertEnvironmentEntry(
+  state: EnvironmentState,
+  name: NameRef,
+  definition: Definition
+): EnvironmentState {
+  const namespace = selectEnvironmentNamespace(
+    definition.kind,
+    state.values,
+    state.types
+  );
+  const previous = findEnvironmentEntry(namespace, name);
+  const reservedPrint = definition.kind === 0 &&
+    sameAscii(name, [112, 114, 105, 110, 116]);
+  if (reservedPrint || environmentLookupExists(previous)) {
+    const diagnostic = duplicateEnvironmentDiagnostic(
+      spanOfName(name),
+      previous
+    );
+    return appendDiagnostic(state, diagnostic);
+  }
+  const entry: EnvironmentEntry = { name: name, definition: definition };
+  return {
+    values: appendEnvironmentNamespace(
+      definition.kind === 0,
+      state.values,
+      entry
+    ),
+    types: appendEnvironmentNamespace(
+      !(definition.kind === 0),
+      state.types,
+      entry
+    ),
+    names: state.names,
+    diagnostics: state.diagnostics,
+    valid: state.valid
+  };
+}
+
+function selectEnvironmentNamespace(
+  kind: Int,
+  values: EnvironmentEntry[],
+  types: EnvironmentEntry[]
+): EnvironmentEntry[] {
+  if (kind === 0) {
+    return values;
+  }
+  return types;
+}
+
+function appendEnvironmentNamespace(
+  shouldAppend: Bool,
+  entries: EnvironmentEntry[],
+  entry: EnvironmentEntry
+): EnvironmentEntry[] {
+  if (shouldAppend) {
+    return entries.append(entry);
+  }
+  return entries;
+}
+
+function duplicateEnvironmentDiagnostic(
+  primary: ResolverSpan,
+  previous: EnvironmentLookup
+): ResolverDiagnostic {
+  return match (previous) {
+    case EnvironmentLookup.NoEnvironmentEntry() =>
+      oneLabelDiagnostic(1, primary);
+    case EnvironmentLookup.FoundEnvironmentEntry(entry) =>
+      twoLabelDiagnostic(1, primary, spanOfName(entry.name));
+  };
+}
+
+function observeDefinition(
+  state: EnvironmentState,
+  definition: Definition
+): EnvironmentState {
+  const named: EnvironmentState = {
+    values: state.values,
+    types: state.types,
+    names: append(state.names, {
+      span: spanOfName(definition.name),
+      target: definitionTarget(definition)
+    }),
+    diagnostics: state.diagnostics,
+    valid: state.valid
+  };
+  const collision = definition.exportCollision;
+  const diagnosed = ifExportCollision(named, definition, collision);
+  return insertEnvironmentEntry(diagnosed, definition.name, definition);
+}
+
+function ifExportCollision(
+  state: EnvironmentState,
+  definition: Definition,
+  collision: ResolverSpan
+): EnvironmentState {
+  if (collision.source < 0) {
+    return state;
+  }
+  return appendDiagnostic(
+    state,
+    twoLabelDiagnostic(5, spanOfName(definition.name), collision)
+  );
+}
+
+function tokenKindRange(
+  tokens: CstToken[],
+  kind: Int,
+  start: Int,
+  end: Int
+): CstToken[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    if (tokens[start].kind === kind) {
+      return [tokens[start]];
+    }
+    return [];
+  }
+  const middle = start + (end - start) / 2;
+  return tokenKindRange(tokens, kind, start, middle).concat(
+    tokenKindRange(tokens, kind, middle, end)
+  );
+}
+
+function isExpressionKind(kind: Int): Bool {
+  return kind === 55 || kind === 56 || kind === 57 || kind === 103 ||
+    kind === 58 || kind === 59 || kind === 60 || kind === 69 ||
+    kind === 71 || kind === 78 || kind === 88 || kind === 72 ||
+    kind === 73 || kind === 61;
+}
+
+function isStatementKind(kind: Int): Bool {
+  return kind === 45 || kind === 46 || kind === 47 || kind === 48 ||
+    kind === 50 || kind === 105 || kind === 51 || kind === 52 ||
+    kind === 53 || kind === 54;
+}
+
+function isTypeKind(kind: Int): Bool {
+  return kind === 43 || kind === 70;
+}
+
+function childMatchesMode(kind: Int, mode: Int): Bool {
+  if (mode === 0) {
+    return isExpressionKind(kind);
+  }
+  if (mode === 1) {
+    return isStatementKind(kind);
+  }
+  if (mode === 2) {
+    return isTypeKind(kind);
+  }
+  return kind === mode;
+}
+
+function filteredChildRange(
+  nodes: CstNode[],
+  childIds: Int[],
+  mode: Int,
+  start: Int,
+  end: Int
+): Int[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    const childId = childIds[start];
+    if (childMatchesMode(nodes[childId].kind, mode)) {
+      return [childId];
+    }
+    return [];
+  }
+  const middle = start + (end - start) / 2;
+  return filteredChildRange(nodes, childIds, mode, start, middle).concat(
+    filteredChildRange(nodes, childIds, mode, middle, end)
+  );
+}
+
+function filteredChildren(
+  nodes: CstNode[],
+  node: CstNode,
+  mode: Int
+): Int[] {
+  return filteredChildRange(nodes, node.childIds, mode, 0, node.childIds.length);
+}
+
+function edgeTargetRange(
+  edges: ResolverEdgeInput[],
+  importer: Int,
+  pathStart: Int,
+  pathEnd: Int,
+  start: Int,
+  end: Int
+): Int {
+  if (start >= end) {
+    return -1;
+  }
+  if (end - start === 1) {
+    const edge = edges[start];
+    if (
+      edge.importer === importer && edge.pathStart === pathStart &&
+      edge.pathEnd === pathEnd
+    ) {
+      return edge.imported;
+    }
+    return -1;
+  }
+  const middle = start + (end - start) / 2;
+  const left = edgeTargetRange(
+    edges,
+    importer,
+    pathStart,
+    pathEnd,
+    start,
+    middle
+  );
+  if (left >= 0) {
+    return left;
+  }
+  return edgeTargetRange(
+    edges,
+    importer,
+    pathStart,
+    pathEnd,
+    middle,
+    end
+  );
+}
+
+function resolveImportedName(
+  state: ImportNameState,
+  token: CstToken
+): ImportNameState {
+  const name = nameRef(state.moduleValue, token);
+  const exported = findDefinition(state.target.exports, name);
+  return match (exported) {
+    case DefinitionLookup.FoundDefinition(definition) =>
+      resolveAvailableImport(state, name, definition);
+    case DefinitionLookup.NoDefinition() =>
+      resolveUnavailableImport(state, name);
+  };
+}
+
+function resolveAvailableImport(
+  state: ImportNameState,
+  name: NameRef,
+  definition: Definition
+): ImportNameState {
+  const observed: EnvironmentState = {
+    values: state.environment.values,
+    types: state.environment.types,
+    names: append(state.environment.names, {
+      span: spanOfName(name),
+      target: definitionTarget(definition)
+    }),
+    diagnostics: state.environment.diagnostics,
+    valid: state.environment.valid
+  };
+  return {
+    environment: insertEnvironmentEntry(observed, name, definition),
+    target: state.target,
+    moduleValue: state.moduleValue
+  };
+}
+
+function resolveUnavailableImport(
+  state: ImportNameState,
+  name: NameRef
+): ImportNameState {
+  const declared = findDefinition(state.target.definitions, name);
+  const diagnostic = match (declared) {
+    case DefinitionLookup.NoDefinition() =>
+      oneLabelDiagnostic(3, spanOfName(name));
+    case DefinitionLookup.FoundDefinition(definition) =>
+      twoLabelDiagnostic(
+        4,
+        spanOfName(name),
+        spanOfName(definition.name)
+      );
+  };
+  return {
+    environment: appendDiagnostic(state.environment, diagnostic),
+    target: state.target,
+    moduleValue: state.moduleValue
+  };
+}
+
+function resolveImportNameRange(
+  tokens: CstToken[],
+  start: Int,
+  end: Int,
+  state: ImportNameState
+): ImportNameState {
+  if (!state.environment.valid || start >= end) {
+    return state;
+  }
+  if (end - start === 1) {
+    return resolveImportedName(state, tokens[start]);
+  }
+  const middle = start + (end - start) / 2;
+  const left = resolveImportNameRange(tokens, start, middle, state);
+  return resolveImportNameRange(tokens, middle, end, left);
+}
+
+function invalidEnvironment(state: EnvironmentState): EnvironmentState {
+  return {
+    values: state.values,
+    types: state.types,
+    names: state.names,
+    diagnostics: state.diagnostics,
+    valid: false
+  };
+}
+
+function resolveImport(
+  moduleValue: ParsedModule,
+  catalogs: ModuleCatalog[],
+  edges: ResolverEdgeInput[],
+  nodeId: Int,
+  state: EnvironmentState
+): EnvironmentState {
+  const node = moduleValue.nodes[nodeId];
+  const listId = childOfKind(moduleValue.nodes, node, 96);
+  const path = directToken(node, 64);
+  if (listId < 0 || path.kind < 0) {
+    return invalidEnvironment(state);
+  }
+  const targetId = edgeTargetRange(
+    edges,
+    moduleValue.id,
+    path.start,
+    path.end,
+    0,
+    edges.length
+  );
+  if (targetId < 0 || targetId >= catalogs.length) {
+    return invalidEnvironment(state);
+  }
+  const list = moduleValue.nodes[listId];
+  const tokens = tokenKindRange(
+    list.directTokens,
+    0,
+    0,
+    list.directTokens.length
+  );
+  const initial: ImportNameState = {
+    environment: state,
+    target: catalogs[targetId],
+    moduleValue: moduleValue
+  };
+  return resolveImportNameRange(tokens, 0, tokens.length, initial).environment;
+}
+
+function resolveTopLevelItem(
+  moduleValue: ParsedModule,
+  catalog: ModuleCatalog,
+  catalogs: ModuleCatalog[],
+  edges: ResolverEdgeInput[],
+  itemId: Int,
+  state: EnvironmentState
+): EnvironmentState {
+  if (moduleValue.nodes[itemId].kind === 95) {
+    return resolveImport(moduleValue, catalogs, edges, itemId, state);
+  }
+  const nodeId = declarationNode(moduleValue, itemId);
+  const lookup = definitionByNode(catalog.definitions, nodeId);
+  return match (lookup) {
+    case DefinitionLookup.NoDefinition() => invalidEnvironment(state);
+    case DefinitionLookup.FoundDefinition(definition) =>
+      observeDefinition(state, definition);
+  };
+}
+
+function resolveTopLevelRange(
+  moduleValue: ParsedModule,
+  catalog: ModuleCatalog,
+  catalogs: ModuleCatalog[],
+  edges: ResolverEdgeInput[],
+  childIds: Int[],
+  start: Int,
+  end: Int,
+  state: EnvironmentState
+): EnvironmentState {
+  if (!state.valid || start >= end) {
+    return state;
+  }
+  if (end - start === 1) {
+    return resolveTopLevelItem(
+      moduleValue,
+      catalog,
+      catalogs,
+      edges,
+      childIds[start],
+      state
+    );
+  }
+  const middle = start + (end - start) / 2;
+  const left = resolveTopLevelRange(
+    moduleValue,
+    catalog,
+    catalogs,
+    edges,
+    childIds,
+    start,
+    middle,
+    state
+  );
+  return resolveTopLevelRange(
+    moduleValue,
+    catalog,
+    catalogs,
+    edges,
+    childIds,
+    middle,
+    end,
+    left
+  );
+}
+
+function buildEnvironment(
+  moduleValue: ParsedModule,
+  catalog: ModuleCatalog,
+  catalogs: ModuleCatalog[],
+  edges: ResolverEdgeInput[]
+): EnvironmentState {
+  const initial: EnvironmentState = {
+    values: [],
+    types: [],
+    names: { chunks: [], tail: [], length: 0 },
+    diagnostics: { chunks: [], tail: [], length: 0 },
+    valid: true
+  };
+  const root = moduleValue.nodes[moduleValue.root];
+  return resolveTopLevelRange(
+    moduleValue,
+    catalog,
+    catalogs,
+    edges,
+    root.childIds,
+    0,
+    root.childIds.length,
+    initial
+  );
+}
+
+function appendSequenceValues<T>(
+  sequence: Sequence<T>,
+  values: T[]
+): Sequence<T> {
+  if (values.length === 0) {
+    return sequence;
+  }
+  return {
+    chunks: sequence.chunks.append(sequence.tail),
+    tail: values,
+    length: sequence.length + values.length
+  };
+}
+
+function buildEnvironmentRange(
+  modules: ParsedModule[],
+  catalogs: ModuleCatalog[],
+  edges: ResolverEdgeInput[],
+  start: Int,
+  end: Int,
+  state: EnvironmentsBuildState
+): EnvironmentsBuildState {
+  if (!state.valid || start >= end) {
+    return state;
+  }
+  if (end - start === 1) {
+    const environment = buildEnvironment(
+      modules[start],
+      catalogs[start],
+      catalogs,
+      edges
+    );
+    if (!environment.valid) {
+      return {
+        environments: state.environments,
+        names: state.names,
+        diagnostics: state.diagnostics,
+        valid: false
+      };
+    }
+    return {
+      environments: append(state.environments, {
+        moduleId: modules[start].id,
+        values: environment.values,
+        types: environment.types
+      }),
+      names: appendSequenceValues(state.names, toArray(environment.names)),
+      diagnostics: appendSequenceValues(
+        state.diagnostics,
+        toArray(environment.diagnostics)
+      ),
+      valid: true
+    };
+  }
+  const middle = start + (end - start) / 2;
+  const left = buildEnvironmentRange(
+    modules,
+    catalogs,
+    edges,
+    start,
+    middle,
+    state
+  );
+  return buildEnvironmentRange(
+    modules,
+    catalogs,
+    edges,
+    middle,
+    end,
+    left
+  );
+}
+
+function replaceMachine(
+  machine: ResolverMachine,
+  output: ResolverOutput,
+  scopeStack: ScopeFrame[],
+  typeParameters: TypeParameterEntry[],
+  tasks: ResolveTask[],
+  nextScope: Int,
+  nextLocal: Int,
+  valid: Bool
+): ResolverMachine {
+  return {
+    context: machine.context,
+    output: output,
+    scopeStack: scopeStack,
+    typeParameters: typeParameters,
+    tasks: tasks,
+    nextScope: nextScope,
+    nextLocal: nextLocal,
+    valid: valid
+  };
+}
+
+function withOutput(
+  machine: ResolverMachine,
+  output: ResolverOutput
+): ResolverMachine {
+  return replaceMachine(
+    machine,
+    output,
+    machine.scopeStack,
+    machine.typeParameters,
+    machine.tasks,
+    machine.nextScope,
+    machine.nextLocal,
+    machine.valid
+  );
+}
+
+function pushTasks(
+  machine: ResolverMachine,
+  executionOrder: ResolveTask[]
+): ResolverMachine {
+  return replaceMachine(
+    machine,
+    machine.output,
+    machine.scopeStack,
+    machine.typeParameters,
+    machine.tasks.concat(
+      reverseArrayRange(executionOrder, 0, executionOrder.length)
+    ),
+    machine.nextScope,
+    machine.nextLocal,
+    machine.valid
+  );
+}
+
+function popTask(machine: ResolverMachine): ResolverMachine {
+  return replaceMachine(
+    machine,
+    machine.output,
+    machine.scopeStack,
+    machine.typeParameters,
+    arrayRange(machine.tasks, 0, machine.tasks.length - 1),
+    machine.nextScope,
+    machine.nextLocal,
+    machine.valid
+  );
+}
+
+function invalidateMachine(machine: ResolverMachine): ResolverMachine {
+  return replaceMachine(
+    machine,
+    machine.output,
+    machine.scopeStack,
+    machine.typeParameters,
+    machine.tasks,
+    machine.nextScope,
+    machine.nextLocal,
+    false
+  );
+}
+
+function recordResolvedName(
+  machine: ResolverMachine,
+  name: NameRef,
+  target: ResolverTarget
+): ResolverMachine {
+  const output: ResolverOutput = {
+    scopes: machine.output.scopes,
+    bindings: machine.output.bindings,
+    names: append(machine.output.names, {
+      span: spanOfName(name),
+      target: target
+    }),
+    diagnostics: machine.output.diagnostics
+  };
+  return withOutput(machine, output);
+}
+
+function recordResolverDiagnostic(
+  machine: ResolverMachine,
+  diagnostic: ResolverDiagnostic
+): ResolverMachine {
+  const output: ResolverOutput = {
+    scopes: machine.output.scopes,
+    bindings: machine.output.bindings,
+    names: machine.output.names,
+    diagnostics: append(machine.output.diagnostics, diagnostic)
+  };
+  return withOutput(machine, output);
+}
+
+function localEntryRange(
+  entries: LocalEntry[],
+  name: NameRef,
+  start: Int,
+  end: Int
+): LocalLookup {
+  if (start >= end) {
+    return LocalLookup.NoLocal();
+  }
+  if (end - start === 1) {
+    if (sameName(entries[start].name, name)) {
+      return LocalLookup.FoundLocal(entries[start]);
+    }
+    return LocalLookup.NoLocal();
+  }
+  const middle = start + (end - start) / 2;
+  const left = localEntryRange(entries, name, start, middle);
+  return match (left) {
+    case LocalLookup.NoLocal() =>
+      localEntryRange(entries, name, middle, end);
+    case LocalLookup.FoundLocal(entry) => LocalLookup.FoundLocal(entry);
+  };
+}
+
+function localScopeRange(
+  scopes: ScopeFrame[],
+  name: NameRef,
+  start: Int,
+  end: Int
+): LocalLookup {
+  if (start >= end) {
+    return LocalLookup.NoLocal();
+  }
+  if (end - start === 1) {
+    return localEntryRange(
+      scopes[start].names,
+      name,
+      0,
+      scopes[start].names.length
+    );
+  }
+  const middle = start + (end - start) / 2;
+  const right = localScopeRange(scopes, name, middle, end);
+  return match (right) {
+    case LocalLookup.NoLocal() =>
+      localScopeRange(scopes, name, start, middle);
+    case LocalLookup.FoundLocal(entry) => LocalLookup.FoundLocal(entry);
+  };
+}
+
+function findLocal(machine: ResolverMachine, name: NameRef): LocalLookup {
+  return localScopeRange(
+    machine.scopeStack,
+    name,
+    0,
+    machine.scopeStack.length
+  );
+}
+
+function typeParameterRange(
+  entries: TypeParameterEntry[],
+  name: NameRef,
+  start: Int,
+  end: Int
+): TypeParameterLookup {
+  if (start >= end) {
+    return TypeParameterLookup.NoTypeParameter();
+  }
+  if (end - start === 1) {
+    if (sameName(entries[start].name, name)) {
+      return TypeParameterLookup.FoundTypeParameter(entries[start]);
+    }
+    return TypeParameterLookup.NoTypeParameter();
+  }
+  const middle = start + (end - start) / 2;
+  const left = typeParameterRange(entries, name, start, middle);
+  return match (left) {
+    case TypeParameterLookup.NoTypeParameter() =>
+      typeParameterRange(entries, name, middle, end);
+    case TypeParameterLookup.FoundTypeParameter(entry) =>
+      TypeParameterLookup.FoundTypeParameter(entry);
+  };
+}
+
+function findTypeParameter(
+  machine: ResolverMachine,
+  name: NameRef
+): TypeParameterLookup {
+  return typeParameterRange(
+    machine.typeParameters,
+    name,
+    0,
+    machine.typeParameters.length
+  );
+}
+
+function recordLocalLookup(
+  machine: ResolverMachine,
+  name: NameRef,
+  lookup: LocalLookup
+): ResolverMachine {
+  return match (lookup) {
+    case LocalLookup.NoLocal() => machine;
+    case LocalLookup.FoundLocal(entry) =>
+      recordResolvedName(
+        machine,
+        name,
+        ResolverTarget.Local(
+          machine.context.moduleValue.id,
+          machine.context.ownerIndex,
+          entry.localIndex
+        )
+      );
+  };
+}
+
+function recordEnvironmentLookup(
+  machine: ResolverMachine,
+  name: NameRef,
+  lookup: EnvironmentLookup
+): ResolverMachine {
+  return match (lookup) {
+    case EnvironmentLookup.NoEnvironmentEntry() =>
+      recordResolverDiagnostic(
+        machine,
+        oneLabelDiagnostic(0, spanOfName(name))
+      );
+    case EnvironmentLookup.FoundEnvironmentEntry(entry) =>
+      recordResolvedName(machine, name, definitionTarget(entry.definition));
+  };
+}
+
+function resolveValueName(
+  machine: ResolverMachine,
+  name: NameRef
+): ResolverMachine {
+  const local = findLocal(machine, name);
+  return match (local) {
+    case LocalLookup.FoundLocal(entry) =>
+      recordLocalLookup(machine, name, local);
+    case LocalLookup.NoLocal() =>
+      recordEnvironmentLookup(
+        machine,
+        name,
+        findEnvironmentEntry(machine.context.environment.values, name)
+      );
+  };
+}
+
+function typeParameterTarget(
+  machine: ResolverMachine,
+  entry: TypeParameterEntry
+): ResolverTarget {
+  return ResolverTarget.TypeParameter(
+    machine.context.ownerKind,
+    machine.context.moduleValue.id,
+    machine.context.ownerIndex,
+    entry.index
+  );
+}
+
+function resolveTypeName(
+  machine: ResolverMachine,
+  name: NameRef
+): ResolverMachine {
+  const parameter = findTypeParameter(machine, name);
+  return match (parameter) {
+    case TypeParameterLookup.FoundTypeParameter(entry) =>
+      recordResolvedName(machine, name, typeParameterTarget(machine, entry));
+    case TypeParameterLookup.NoTypeParameter() =>
+      recordEnvironmentLookup(
+        machine,
+        name,
+        findEnvironmentEntry(machine.context.environment.types, name)
+      );
+  };
+}
+
+function builtinTarget(name: NameRef): ResolverTarget {
+  if (sameAscii(name, [112, 114, 105, 110, 116])) {
+    return ResolverTarget.Print();
+  }
+  if (sameAscii(name, [116, 111, 83, 116, 114, 105, 110, 103])) {
+    return ResolverTarget.ToString();
+  }
+  return ResolverTarget.ParseInt();
+}
+
+function isBuiltinName(name: NameRef): Bool {
+  return sameAscii(name, [112, 114, 105, 110, 116]) ||
+    sameAscii(name, [116, 111, 83, 116, 114, 105, 110, 103]) ||
+    sameAscii(name, [112, 97, 114, 115, 101, 73, 110, 116]);
+}
+
+function resolveCallableName(
+  machine: ResolverMachine,
+  name: NameRef
+): ResolverMachine {
+  const local = findLocal(machine, name);
+  return match (local) {
+    case LocalLookup.FoundLocal(entry) =>
+      recordLocalLookup(machine, name, local);
+    case LocalLookup.NoLocal() => resolveNonLocalCallable(machine, name);
+  };
+}
+
+function resolveNonLocalCallable(
+  machine: ResolverMachine,
+  name: NameRef
+): ResolverMachine {
+  if (isBuiltinName(name)) {
+    return recordResolvedName(machine, name, builtinTarget(name));
+  }
+  return recordEnvironmentLookup(
+    machine,
+    name,
+    findEnvironmentEntry(machine.context.environment.values, name)
+  );
+}
+
+function unionVariantIndexRange(
+  moduleValue: ParsedModule,
+  childIds: Int[],
+  member: NameRef,
+  variantIndex: Int,
+  start: Int,
+  end: Int
+): Int {
+  if (start >= end) {
+    return -1;
+  }
+  if (end - start === 1) {
+    const child = moduleValue.nodes[childIds[start]];
+    if (!(child.kind === 86)) {
+      return -1;
+    }
+    const token = directToken(child, 0);
+    if (token.kind >= 0 && sameName(nameRef(moduleValue, token), member)) {
+      return variantIndex;
+    }
+    return -2;
+  }
+  const middle = start + (end - start) / 2;
+  const leftIds = filteredChildRange(
+    moduleValue.nodes,
+    childIds,
+    86,
+    start,
+    middle
+  );
+  const left = unionVariantListRange(
+    moduleValue,
+    leftIds,
+    member,
+    variantIndex,
+    0,
+    leftIds.length
+  );
+  if (left >= 0) {
+    return left;
+  }
+  const rightIds = filteredChildRange(
+    moduleValue.nodes,
+    childIds,
+    86,
+    middle,
+    end
+  );
+  return unionVariantListRange(
+    moduleValue,
+    rightIds,
+    member,
+    variantIndex + leftIds.length,
+    0,
+    rightIds.length
+  );
+}
+
+function unionVariantListRange(
+  moduleValue: ParsedModule,
+  variantIds: Int[],
+  member: NameRef,
+  baseIndex: Int,
+  start: Int,
+  end: Int
+): Int {
+  if (start >= end) {
+    return -1;
+  }
+  if (end - start === 1) {
+    const node = moduleValue.nodes[variantIds[start]];
+    const token = directToken(node, 0);
+    if (token.kind >= 0 && sameName(nameRef(moduleValue, token), member)) {
+      return baseIndex + start;
+    }
+    return -1;
+  }
+  const middle = start + (end - start) / 2;
+  const left = unionVariantListRange(
+    moduleValue,
+    variantIds,
+    member,
+    baseIndex,
+    start,
+    middle
+  );
+  if (left >= 0) {
+    return left;
+  }
+  return unionVariantListRange(
+    moduleValue,
+    variantIds,
+    member,
+    baseIndex,
+    middle,
+    end
+  );
+}
+
+function unionVariantIndex(
+  machine: ResolverMachine,
+  definition: Definition,
+  member: NameRef
+): Int {
+  if (!(definition.kind === 2)) {
+    return -1;
+  }
+  const moduleValue = machine.context.modules[definition.moduleId];
+  const declaration = moduleValue.nodes[definition.nodeId];
+  const variants = filteredChildren(moduleValue.nodes, declaration, 86);
+  return unionVariantListRange(
+    moduleValue,
+    variants,
+    member,
+    0,
+    0,
+    variants.length
+  );
+}
+
+function resolveQualifiedEnvironment(
+  machine: ResolverMachine,
+  qualifier: NameRef,
+  member: NameRef,
+  entry: EnvironmentEntry
+): ResolverMachine {
+  const qualified = recordResolvedName(
+    machine,
+    qualifier,
+    definitionTarget(entry.definition)
+  );
+  const variantIndex = unionVariantIndex(machine, entry.definition, member);
+  if (variantIndex < 0) {
+    return qualified;
+  }
+  return recordResolvedName(
+    qualified,
+    member,
+    ResolverTarget.Variant(
+      entry.definition.moduleId,
+      entry.definition.definitionIndex,
+      variantIndex
+    )
+  );
+}
+
+function resolveQualifiedCall(
+  machine: ResolverMachine,
+  qualifier: NameRef,
+  member: NameRef
+): ResolverMachine {
+  const local = findLocal(machine, qualifier);
+  return match (local) {
+    case LocalLookup.FoundLocal(entry) =>
+      recordLocalLookup(machine, qualifier, local);
+    case LocalLookup.NoLocal() =>
+      resolveQualifiedNonLocal(machine, qualifier, member);
+  };
+}
+
+function resolveQualifiedNonLocal(
+  machine: ResolverMachine,
+  qualifier: NameRef,
+  member: NameRef
+): ResolverMachine {
+  const parameter = findTypeParameter(machine, qualifier);
+  return match (parameter) {
+    case TypeParameterLookup.FoundTypeParameter(entry) =>
+      recordResolvedName(
+        machine,
+        qualifier,
+        typeParameterTarget(machine, entry)
+      );
+    case TypeParameterLookup.NoTypeParameter() =>
+      resolveQualifiedDefinition(machine, qualifier, member);
+  };
+}
+
+function resolveQualifiedDefinition(
+  machine: ResolverMachine,
+  qualifier: NameRef,
+  member: NameRef
+): ResolverMachine {
+  const definition = findEnvironmentEntry(
+    machine.context.environment.types,
+    qualifier
+  );
+  return match (definition) {
+    case EnvironmentLookup.FoundEnvironmentEntry(entry) =>
+      resolveQualifiedEnvironment(machine, qualifier, member, entry);
+    case EnvironmentLookup.NoEnvironmentEntry() =>
+      resolveValueName(machine, qualifier);
+  };
+}
+
+function replaceLastScope(
+  scopes: ScopeFrame[],
+  scope: ScopeFrame
+): ScopeFrame[] {
+  return arrayRange(scopes, 0, scopes.length - 1).append(scope);
+}
+
+function pushResolverScope(
+  machine: ResolverMachine,
+  scopeKind: Int,
+  nodeId: Int
+): ResolverMachine {
+  if (!(machine.context.ownerKind === 0) || nodeId < 0) {
+    return invalidateMachine(machine);
+  }
+  const node = machine.context.moduleValue.nodes[nodeId];
+  const parent = parentScopeIndex(machine.scopeStack);
+  const scope: ResolverScope = {
+    module: machine.context.moduleValue.id,
+    functionIndex: machine.context.ownerIndex,
+    index: machine.nextScope,
+    parent: parent,
+    kind: scopeKind,
+    span: {
+      source: machine.context.moduleValue.id,
+      start: node.start,
+      end: node.end
+    }
+  };
+  const output: ResolverOutput = {
+    scopes: append(machine.output.scopes, scope),
+    bindings: machine.output.bindings,
+    names: machine.output.names,
+    diagnostics: machine.output.diagnostics
+  };
+  return replaceMachine(
+    machine,
+    output,
+    machine.scopeStack.append({ index: machine.nextScope, names: [] }),
+    machine.typeParameters,
+    machine.tasks,
+    machine.nextScope + 1,
+    machine.nextLocal,
+    machine.valid
+  );
+}
+
+function parentScopeIndex(scopes: ScopeFrame[]): Int {
+  if (scopes.length === 0) {
+    return -1;
+  }
+  return scopes[scopes.length - 1].index;
+}
+
+function popResolverScope(machine: ResolverMachine): ResolverMachine {
+  if (machine.scopeStack.length === 0) {
+    return invalidateMachine(machine);
+  }
+  return replaceMachine(
+    machine,
+    machine.output,
+    arrayRange(machine.scopeStack, 0, machine.scopeStack.length - 1),
+    machine.typeParameters,
+    machine.tasks,
+    machine.nextScope,
+    machine.nextLocal,
+    machine.valid
+  );
+}
+
+function bindLocal(
+  machine: ResolverMachine,
+  name: NameRef,
+  mutableBinding: Bool
+): ResolverMachine {
+  if (machine.scopeStack.length === 0) {
+    return invalidateMachine(machine);
+  }
+  const current = machine.scopeStack[machine.scopeStack.length - 1];
+  const previous = localEntryRange(
+    current.names,
+    name,
+    0,
+    current.names.length
+  );
+  return match (previous) {
+    case LocalLookup.FoundLocal(entry) =>
+      recordResolverDiagnostic(
+        machine,
+        twoLabelDiagnostic(1, spanOfName(name), entry.span)
+      );
+    case LocalLookup.NoLocal() =>
+      acceptLocalBinding(machine, current, name, mutableBinding);
+  };
+}
+
+function acceptLocalBinding(
+  machine: ResolverMachine,
+  current: ScopeFrame,
+  name: NameRef,
+  mutableBinding: Bool
+): ResolverMachine {
+  const entry: LocalEntry = {
+    name: name,
+    localIndex: machine.nextLocal,
+    span: spanOfName(name)
+  };
+  const updatedScope: ScopeFrame = {
+    index: current.index,
+    names: current.names.append(entry)
+  };
+  const binding: ResolverBinding = {
+    module: machine.context.moduleValue.id,
+    functionIndex: machine.context.ownerIndex,
+    local: machine.nextLocal,
+    scope: current.index,
+    nameSpan: spanOfName(name),
+    mutable: mutableBinding
+  };
+  const output: ResolverOutput = {
+    scopes: machine.output.scopes,
+    bindings: append(machine.output.bindings, binding),
+    names: append(machine.output.names, {
+      span: spanOfName(name),
+      target: ResolverTarget.Local(
+        machine.context.moduleValue.id,
+        machine.context.ownerIndex,
+        machine.nextLocal
+      )
+    }),
+    diagnostics: machine.output.diagnostics
+  };
+  return replaceMachine(
+    machine,
+    output,
+    replaceLastScope(machine.scopeStack, updatedScope),
+    machine.typeParameters,
+    machine.tasks,
+    machine.nextScope,
+    machine.nextLocal + 1,
+    machine.valid
+  );
+}
+
+function expressionTaskRange(
+  nodeIds: Int[],
+  start: Int,
+  end: Int
+): ResolveTask[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [ResolveTask.ResolveExpression(nodeIds[start])];
+  }
+  const middle = start + (end - start) / 2;
+  return expressionTaskRange(nodeIds, start, middle).concat(
+    expressionTaskRange(nodeIds, middle, end)
+  );
+}
+
+function statementTaskRange(
+  nodeIds: Int[],
+  start: Int,
+  end: Int
+): ResolveTask[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [ResolveTask.ResolveStatement(nodeIds[start])];
+  }
+  const middle = start + (end - start) / 2;
+  return statementTaskRange(nodeIds, start, middle).concat(
+    statementTaskRange(nodeIds, middle, end)
+  );
+}
+
+function typeTaskRange(
+  nodeIds: Int[],
+  start: Int,
+  end: Int
+): ResolveTask[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [ResolveTask.ResolveType(nodeIds[start])];
+  }
+  const middle = start + (end - start) / 2;
+  return typeTaskRange(nodeIds, start, middle).concat(
+    typeTaskRange(nodeIds, middle, end)
+  );
+}
+
+function matchArmTaskRange(
+  nodeIds: Int[],
+  start: Int,
+  end: Int
+): ResolveTask[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [ResolveTask.ResolveMatchArm(nodeIds[start])];
+  }
+  const middle = start + (end - start) / 2;
+  return matchArmTaskRange(nodeIds, start, middle).concat(
+    matchArmTaskRange(nodeIds, middle, end)
+  );
+}
+
+function parameterTaskRange(
+  moduleValue: ParsedModule,
+  parameterIds: Int[],
+  includeBindings: Bool,
+  start: Int,
+  end: Int
+): ResolveTask[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    const parameter = moduleValue.nodes[parameterIds[start]];
+    const types = filteredChildren(moduleValue.nodes, parameter, 2);
+    const token = directToken(parameter, 0);
+    if (includeBindings && token.kind >= 0) {
+      return typeTaskRange(types, 0, types.length).append(
+        ResolveTask.Bind(nameRef(moduleValue, token), false)
+      );
+    }
+    return typeTaskRange(types, 0, types.length);
+  }
+  const middle = start + (end - start) / 2;
+  return parameterTaskRange(
+    moduleValue,
+    parameterIds,
+    includeBindings,
+    start,
+    middle
+  ).concat(
+    parameterTaskRange(
+      moduleValue,
+      parameterIds,
+      includeBindings,
+      middle,
+      end
+    )
+  );
+}
+
+function blockTasks(
+  machine: ResolverMachine,
+  nodeId: Int,
+  createsScope: Bool
+): ResolveTask[] {
+  if (nodeId < 0) {
+    return [];
+  }
+  const node = machine.context.moduleValue.nodes[nodeId];
+  const statements = filteredChildren(
+    machine.context.moduleValue.nodes,
+    node,
+    1
+  );
+  const bodyTasks = statementTaskRange(statements, 0, statements.length);
+  if (createsScope) {
+    return [ResolveTask.PushScope(1, nodeId)].concat(bodyTasks).append(
+      ResolveTask.PopScope()
+    );
+  }
+  return bodyTasks;
+}
+
+function expandResolveBlock(
+  machine: ResolverMachine,
+  nodeId: Int,
+  createsScope: Bool
+): ResolverMachine {
+  if (nodeId < 0) {
+    return invalidateMachine(machine);
+  }
+  return pushTasks(machine, blockTasks(machine, nodeId, createsScope));
+}
+
+function expandResolveType(
+  machine: ResolverMachine,
+  nodeId: Int
+): ResolverMachine {
+  if (nodeId < 0) {
+    return invalidateMachine(machine);
+  }
+  const node = machine.context.moduleValue.nodes[nodeId];
+  if (node.kind === 70) {
+    const nested = filteredChildren(machine.context.moduleValue.nodes, node, 2);
+    return pushTasks(machine, typeTaskRange(nested, 0, nested.length));
+  }
+  if (!(node.kind === 43)) {
+    return invalidateMachine(machine);
+  }
+  const functionTypeId = childOfKind(
+    machine.context.moduleValue.nodes,
+    node,
+    102
+  );
+  if (functionTypeId >= 0) {
+    return expandFunctionType(machine, functionTypeId);
+  }
+  const token = directToken(node, 0);
+  if (token.kind < 0) {
+    return machine;
+  }
+  const argumentListId = childOfKind(
+    machine.context.moduleValue.nodes,
+    node,
+    100
+  );
+  const arguments = typeChildrenOfOptionalNode(machine, argumentListId);
+  return pushTasks(
+    machine,
+    [ResolveTask.ResolveTypeName(nameRef(machine.context.moduleValue, token))]
+      .concat(typeTaskRange(arguments, 0, arguments.length))
+  );
+}
+
+function typeChildrenOfOptionalNode(
+  machine: ResolverMachine,
+  nodeId: Int
+): Int[] {
+  if (nodeId < 0) {
+    return [];
+  }
+  return filteredChildren(
+    machine.context.moduleValue.nodes,
+    machine.context.moduleValue.nodes[nodeId],
+    2
+  );
+}
+
+function expandFunctionType(
+  machine: ResolverMachine,
+  functionTypeId: Int
+): ResolverMachine {
+  const node = machine.context.moduleValue.nodes[functionTypeId];
+  const parameterListId = childOfKind(
+    machine.context.moduleValue.nodes,
+    node,
+    41
+  );
+  const parameterIds = childrenOfOptionalKind(
+    machine,
+    parameterListId,
+    42
+  );
+  const returnTypes = filteredChildren(
+    machine.context.moduleValue.nodes,
+    node,
+    2
+  );
+  const tasks = parameterTaskRange(
+    machine.context.moduleValue,
+    parameterIds,
+    false,
+    0,
+    parameterIds.length
+  ).concat(typeTaskRange(returnTypes, 0, returnTypes.length));
+  return pushTasks(machine, tasks);
+}
+
+function childrenOfOptionalKind(
+  machine: ResolverMachine,
+  nodeId: Int,
+  kind: Int
+): Int[] {
+  if (nodeId < 0) {
+    return [];
+  }
+  return filteredChildren(
+    machine.context.moduleValue.nodes,
+    machine.context.moduleValue.nodes[nodeId],
+    kind
+  );
+}
+
+function expandResolveStatement(
+  machine: ResolverMachine,
+  nodeId: Int
+): ResolverMachine {
+  if (nodeId < 0) {
+    return invalidateMachine(machine);
+  }
+  const node = machine.context.moduleValue.nodes[nodeId];
+  if (node.kind === 45 || node.kind === 46) {
+    return expandBindingStatement(machine, nodeId, node.kind === 46);
+  }
+  if (node.kind === 47) {
+    return expandAssignmentStatement(machine, nodeId);
+  }
+  if (node.kind === 48) {
+    return expandIfStatement(machine, nodeId);
+  }
+  if (node.kind === 50) {
+    return expandWhileStatement(machine, nodeId);
+  }
+  if (node.kind === 105) {
+    return expandForStatement(machine, nodeId);
+  }
+  if (node.kind === 53 || node.kind === 54) {
+    const expressions = filteredChildren(
+      machine.context.moduleValue.nodes,
+      node,
+      0
+    );
+    return pushTasks(
+      machine,
+      expressionTaskRange(expressions, 0, expressions.length)
+    );
+  }
+  if (node.kind === 51 || node.kind === 52) {
+    return machine;
+  }
+  return invalidateMachine(machine);
+}
+
+function expandBindingStatement(
+  machine: ResolverMachine,
+  nodeId: Int,
+  mutableBinding: Bool
+): ResolverMachine {
+  const node = machine.context.moduleValue.nodes[nodeId];
+  const token = directToken(node, 0);
+  const types = filteredChildren(machine.context.moduleValue.nodes, node, 2);
+  const expressions = filteredChildren(
+    machine.context.moduleValue.nodes,
+    node,
+    0
+  );
+  if (token.kind < 0 || expressions.length === 0) {
+    return invalidateMachine(machine);
+  }
+  const tasks = typeTaskRange(types, 0, types.length)
+    .concat(expressionTaskRange(expressions, 0, expressions.length))
+    .append(
+      ResolveTask.Bind(
+        nameRef(machine.context.moduleValue, token),
+        mutableBinding
+      )
+    );
+  return pushTasks(machine, tasks);
+}
+
+function expandAssignmentStatement(
+  machine: ResolverMachine,
+  nodeId: Int
+): ResolverMachine {
+  const node = machine.context.moduleValue.nodes[nodeId];
+  const token = directToken(node, 0);
+  const expressions = filteredChildren(
+    machine.context.moduleValue.nodes,
+    node,
+    0
+  );
+  if (token.kind < 0 || expressions.length === 0) {
+    return invalidateMachine(machine);
+  }
+  return pushTasks(
+    machine,
+    [ResolveTask.ResolveValueName(nameRef(machine.context.moduleValue, token))]
+      .concat(expressionTaskRange(expressions, 0, expressions.length))
+  );
+}
+
+function expandIfStatement(
+  machine: ResolverMachine,
+  nodeId: Int
+): ResolverMachine {
+  const node = machine.context.moduleValue.nodes[nodeId];
+  const expressions = filteredChildren(
+    machine.context.moduleValue.nodes,
+    node,
+    0
+  );
+  const thenId = childOfKind(machine.context.moduleValue.nodes, node, 44);
+  const elseId = childOfKind(machine.context.moduleValue.nodes, node, 49);
+  const elseBlockId = blockOfOptionalNode(machine, elseId);
+  if (expressions.length === 0 || thenId < 0) {
+    return invalidateMachine(machine);
+  }
+  const tasks = expressionTaskRange(expressions, 0, expressions.length)
+    .append(ResolveTask.ResolveBlock(thenId, true));
+  return pushTasks(machine, appendOptionalBlockTask(tasks, elseBlockId, true));
+}
+
+function blockOfOptionalNode(machine: ResolverMachine, nodeId: Int): Int {
+  if (nodeId < 0) {
+    return -1;
+  }
+  return childOfKind(
+    machine.context.moduleValue.nodes,
+    machine.context.moduleValue.nodes[nodeId],
+    44
+  );
+}
+
+function appendOptionalBlockTask(
+  tasks: ResolveTask[],
+  nodeId: Int,
+  createsScope: Bool
+): ResolveTask[] {
+  if (nodeId < 0) {
+    return tasks;
+  }
+  return tasks.append(ResolveTask.ResolveBlock(nodeId, createsScope));
+}
+
+function expandWhileStatement(
+  machine: ResolverMachine,
+  nodeId: Int
+): ResolverMachine {
+  const node = machine.context.moduleValue.nodes[nodeId];
+  const expressions = filteredChildren(
+    machine.context.moduleValue.nodes,
+    node,
+    0
+  );
+  const bodyId = childOfKind(machine.context.moduleValue.nodes, node, 44);
+  if (expressions.length === 0 || bodyId < 0) {
+    return invalidateMachine(machine);
+  }
+  return pushTasks(
+    machine,
+    expressionTaskRange(expressions, 0, expressions.length).append(
+      ResolveTask.ResolveBlock(bodyId, true)
+    )
+  );
+}
+
+function expandForStatement(
+  machine: ResolverMachine,
+  nodeId: Int
+): ResolverMachine {
+  const node = machine.context.moduleValue.nodes[nodeId];
+  const expressions = filteredChildren(
+    machine.context.moduleValue.nodes,
+    node,
+    0
+  );
+  const bindingId = childOfKind(
+    machine.context.moduleValue.nodes,
+    node,
+    106
+  );
+  const bodyId = childOfKind(machine.context.moduleValue.nodes, node, 44);
+  if (expressions.length === 0 || bindingId < 0 || bodyId < 0) {
+    return invalidateMachine(machine);
+  }
+  const token = directToken(machine.context.moduleValue.nodes[bindingId], 0);
+  if (token.kind < 0) {
+    return invalidateMachine(machine);
+  }
+  const tasks = expressionTaskRange(expressions, 0, expressions.length)
+    .append(ResolveTask.PushScope(2, bodyId))
+    .append(
+      ResolveTask.Bind(nameRef(machine.context.moduleValue, token), false)
+    )
+    .append(ResolveTask.ResolveBlock(bodyId, false))
+    .append(ResolveTask.PopScope());
+  return pushTasks(machine, tasks);
+}
+
+function nestedExpressionTaskRange(
+  machine: ResolverMachine,
+  nodeIds: Int[],
+  start: Int,
+  end: Int
+): ResolveTask[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    const node = machine.context.moduleValue.nodes[nodeIds[start]];
+    const expressions = filteredChildren(
+      machine.context.moduleValue.nodes,
+      node,
+      0
+    );
+    return expressionTaskRange(expressions, 0, expressions.length);
+  }
+  const middle = start + (end - start) / 2;
+  return nestedExpressionTaskRange(machine, nodeIds, start, middle).concat(
+    nestedExpressionTaskRange(machine, nodeIds, middle, end)
+  );
+}
+
+function expandResolveExpression(
+  machine: ResolverMachine,
+  nodeId: Int
+): ResolverMachine {
+  if (nodeId < 0) {
+    return invalidateMachine(machine);
+  }
+  const node = machine.context.moduleValue.nodes[nodeId];
+  if (node.kind === 59 || node.kind === 60 || node.kind === 69) {
+    return machine;
+  }
+  if (node.kind === 58) {
+    const token = directToken(node, 0);
+    if (token.kind < 0) {
+      return invalidateMachine(machine);
+    }
+    return resolveValueName(
+      machine,
+      nameRef(machine.context.moduleValue, token)
+    );
+  }
+  if (
+    node.kind === 55 || node.kind === 56 || node.kind === 61 ||
+    node.kind === 71 || node.kind === 72
+  ) {
+    const expressions = filteredChildren(
+      machine.context.moduleValue.nodes,
+      node,
+      0
+    );
+    return pushTasks(
+      machine,
+      expressionTaskRange(expressions, 0, expressions.length)
+    );
+  }
+  if (node.kind === 78) {
+    const fields = filteredChildren(
+      machine.context.moduleValue.nodes,
+      node,
+      79
+    );
+    return pushTasks(
+      machine,
+      nestedExpressionTaskRange(machine, fields, 0, fields.length)
+    );
+  }
+  if (node.kind === 88) {
+    return expandMatchExpression(machine, nodeId);
+  }
+  if (node.kind === 73) {
+    const expressions = filteredChildren(
+      machine.context.moduleValue.nodes,
+      node,
+      0
+    );
+    return pushTasks(
+      machine,
+      expressionTaskRange(expressions, 0, expressions.length)
+    );
+  }
+  if (node.kind === 57) {
+    return expandCallExpression(machine, nodeId);
+  }
+  if (node.kind === 103) {
+    return expandArrowExpression(machine, nodeId);
+  }
+  return invalidateMachine(machine);
+}
+
+function expandMatchExpression(
+  machine: ResolverMachine,
+  nodeId: Int
+): ResolverMachine {
+  const node = machine.context.moduleValue.nodes[nodeId];
+  const expressions = filteredChildren(
+    machine.context.moduleValue.nodes,
+    node,
+    0
+  );
+  const arms = filteredChildren(machine.context.moduleValue.nodes, node, 89);
+  if (expressions.length === 0) {
+    return invalidateMachine(machine);
+  }
+  return pushTasks(
+    machine,
+    expressionTaskRange(expressions, 0, expressions.length).concat(
+      matchArmTaskRange(arms, 0, arms.length)
+    )
+  );
+}
+
+function expandCallExpression(
+  machine: ResolverMachine,
+  nodeId: Int
+): ResolverMachine {
+  const node = machine.context.moduleValue.nodes[nodeId];
+  const callees = filteredChildren(
+    machine.context.moduleValue.nodes,
+    node,
+    0
+  );
+  if (callees.length === 0) {
+    return invalidateMachine(machine);
+  }
+  const argumentsId = childOfKind(
+    machine.context.moduleValue.nodes,
+    node,
+    62
+  );
+  const arguments = expressionChildrenOfOptionalNode(machine, argumentsId);
+  return pushTasks(
+    machine,
+    [ResolveTask.ResolveCallable(callees[0])].concat(
+      expressionTaskRange(arguments, 0, arguments.length)
+    )
+  );
+}
+
+function expressionChildrenOfOptionalNode(
+  machine: ResolverMachine,
+  nodeId: Int
+): Int[] {
+  if (nodeId < 0) {
+    return [];
+  }
+  return filteredChildren(
+    machine.context.moduleValue.nodes,
+    machine.context.moduleValue.nodes[nodeId],
+    0
+  );
+}
+
+function expandResolveCallable(
+  machine: ResolverMachine,
+  nodeId: Int
+): ResolverMachine {
+  const node = machine.context.moduleValue.nodes[nodeId];
+  if (node.kind === 58) {
+    const token = directToken(node, 0);
+    if (token.kind < 0) {
+      return invalidateMachine(machine);
+    }
+    return resolveCallableName(
+      machine,
+      nameRef(machine.context.moduleValue, token)
+    );
+  }
+  if (node.kind === 73) {
+    return expandMemberCallable(machine, nodeId);
+  }
+  return pushTasks(machine, [ResolveTask.ResolveExpression(nodeId)]);
+}
+
+function expandMemberCallable(
+  machine: ResolverMachine,
+  nodeId: Int
+): ResolverMachine {
+  const node = machine.context.moduleValue.nodes[nodeId];
+  const objects = filteredChildren(
+    machine.context.moduleValue.nodes,
+    node,
+    0
+  );
+  const memberToken = directToken(node, 0);
+  if (objects.length === 0 || memberToken.kind < 0) {
+    return invalidateMachine(machine);
+  }
+  const object = machine.context.moduleValue.nodes[objects[0]];
+  if (!(object.kind === 58)) {
+    return pushTasks(
+      machine,
+      [ResolveTask.ResolveExpression(objects[0])]
+    );
+  }
+  const qualifierToken = directToken(object, 0);
+  if (qualifierToken.kind < 0) {
+    return invalidateMachine(machine);
+  }
+  return resolveQualifiedCall(
+    machine,
+    nameRef(machine.context.moduleValue, qualifierToken),
+    nameRef(machine.context.moduleValue, memberToken)
+  );
+}
+
+function expandArrowExpression(
+  machine: ResolverMachine,
+  nodeId: Int
+): ResolverMachine {
+  const node = machine.context.moduleValue.nodes[nodeId];
+  const parameterListId = childOfKind(
+    machine.context.moduleValue.nodes,
+    node,
+    41
+  );
+  const parameterIds = childrenOfOptionalKind(
+    machine,
+    parameterListId,
+    42
+  );
+  const returnTypes = filteredChildren(
+    machine.context.moduleValue.nodes,
+    node,
+    2
+  );
+  const bodyId = childOfKind(
+    machine.context.moduleValue.nodes,
+    node,
+    104
+  );
+  if (bodyId < 0) {
+    return invalidateMachine(machine);
+  }
+  const body = machine.context.moduleValue.nodes[bodyId];
+  if (body.childIds.length === 0) {
+    return invalidateMachine(machine);
+  }
+  const bodyNodeId = body.childIds[0];
+  const bodyTask = arrowBodyTask(machine, bodyNodeId);
+  const tasks = [ResolveTask.PushScope(4, nodeId)]
+    .concat(parameterTaskRange(
+      machine.context.moduleValue,
+      parameterIds,
+      true,
+      0,
+      parameterIds.length
+    ))
+    .concat(typeTaskRange(returnTypes, 0, returnTypes.length))
+    .append(bodyTask)
+    .append(ResolveTask.PopScope());
+  return pushTasks(machine, tasks);
+}
+
+function arrowBodyTask(
+  machine: ResolverMachine,
+  nodeId: Int
+): ResolveTask {
+  if (machine.context.moduleValue.nodes[nodeId].kind === 44) {
+    return ResolveTask.ResolveBlock(nodeId, false);
+  }
+  return ResolveTask.ResolveExpression(nodeId);
+}
+
+function expandResolveMatchArm(
+  machine: ResolverMachine,
+  nodeId: Int
+): ResolverMachine {
+  const node = machine.context.moduleValue.nodes[nodeId];
+  const expressions = filteredChildren(
+    machine.context.moduleValue.nodes,
+    node,
+    0
+  );
+  if (expressions.length === 0) {
+    return invalidateMachine(machine);
+  }
+  const patternId = childOfKind(
+    machine.context.moduleValue.nodes,
+    node,
+    90
+  );
+  const patternTasks = matchPatternTasks(machine, patternId);
+  const tasks = [ResolveTask.PushScope(3, nodeId)]
+    .concat(patternTasks)
+    .concat(expressionTaskRange(expressions, 0, expressions.length))
+    .append(ResolveTask.PopScope());
+  return pushTasks(machine, tasks);
+}
+
+function matchPatternTasks(
+  machine: ResolverMachine,
+  patternId: Int
+): ResolveTask[] {
+  if (patternId < 0) {
+    return [];
+  }
+  const pattern = machine.context.moduleValue.nodes[patternId];
+  const names = tokenKindRange(
+    pattern.directTokens,
+    0,
+    0,
+    pattern.directTokens.length
+  );
+  if (names.length < 2) {
+    return [];
+  }
+  const bindingListId = childOfKind(
+    machine.context.moduleValue.nodes,
+    pattern,
+    91
+  );
+  const bindings = directNamesOfOptionalNode(machine, bindingListId);
+  return [ResolveTask.ResolveVariantName(
+    nameRef(machine.context.moduleValue, names[0]),
+    nameRef(machine.context.moduleValue, names[1])
+  )].concat(bindingTaskRange(
+    machine.context.moduleValue,
+    bindings,
+    0,
+    bindings.length
+  ));
+}
+
+function directNamesOfOptionalNode(
+  machine: ResolverMachine,
+  nodeId: Int
+): CstToken[] {
+  if (nodeId < 0) {
+    return [];
+  }
+  const node = machine.context.moduleValue.nodes[nodeId];
+  return tokenKindRange(node.directTokens, 0, 0, node.directTokens.length);
+}
+
+function bindingTaskRange(
+  moduleValue: ParsedModule,
+  tokens: CstToken[],
+  start: Int,
+  end: Int
+): ResolveTask[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [ResolveTask.Bind(nameRef(moduleValue, tokens[start]), false)];
+  }
+  const middle = start + (end - start) / 2;
+  return bindingTaskRange(moduleValue, tokens, start, middle).concat(
+    bindingTaskRange(moduleValue, tokens, middle, end)
+  );
+}
+
+function resolveVariantName(
+  machine: ResolverMachine,
+  qualifier: NameRef,
+  member: NameRef
+): ResolverMachine {
+  const local = findLocal(machine, qualifier);
+  return match (local) {
+    case LocalLookup.FoundLocal(entry) => machine;
+    case LocalLookup.NoLocal() =>
+      resolveVariantNonLocal(machine, qualifier, member);
+  };
+}
+
+function resolveVariantNonLocal(
+  machine: ResolverMachine,
+  qualifier: NameRef,
+  member: NameRef
+): ResolverMachine {
+  const parameter = findTypeParameter(machine, qualifier);
+  return match (parameter) {
+    case TypeParameterLookup.FoundTypeParameter(entry) =>
+      recordResolvedName(
+        machine,
+        qualifier,
+        typeParameterTarget(machine, entry)
+      );
+    case TypeParameterLookup.NoTypeParameter() =>
+      resolveVariantDefinition(machine, qualifier, member);
+  };
+}
+
+function resolveVariantDefinition(
+  machine: ResolverMachine,
+  qualifier: NameRef,
+  member: NameRef
+): ResolverMachine {
+  const definition = findEnvironmentEntry(
+    machine.context.environment.types,
+    qualifier
+  );
+  return match (definition) {
+    case EnvironmentLookup.NoEnvironmentEntry() => machine;
+    case EnvironmentLookup.FoundEnvironmentEntry(entry) =>
+      resolveQualifiedEnvironment(machine, qualifier, member, entry);
+  };
+}
+
+function stepResolverMachine(machine: ResolverMachine): ResolverMachine {
+  if (!machine.valid || machine.tasks.length === 0) {
+    return machine;
+  }
+  const task = machine.tasks[machine.tasks.length - 1];
+  const current = popTask(machine);
+  return match (task) {
+    case ResolveTask.ResolveType(nodeId) =>
+      expandResolveType(current, nodeId);
+    case ResolveTask.ResolveExpression(nodeId) =>
+      expandResolveExpression(current, nodeId);
+    case ResolveTask.ResolveStatement(nodeId) =>
+      expandResolveStatement(current, nodeId);
+    case ResolveTask.ResolveBlock(nodeId, createsScope) =>
+      expandResolveBlock(current, nodeId, createsScope);
+    case ResolveTask.ResolveMatchArm(nodeId) =>
+      expandResolveMatchArm(current, nodeId);
+    case ResolveTask.ResolveCallable(nodeId) =>
+      expandResolveCallable(current, nodeId);
+    case ResolveTask.ResolveValueName(name) =>
+      resolveValueName(current, name);
+    case ResolveTask.ResolveTypeName(name) =>
+      resolveTypeName(current, name);
+    case ResolveTask.ResolveQualifiedCall(qualifier, member) =>
+      resolveQualifiedCall(current, qualifier, member);
+    case ResolveTask.ResolveVariantName(qualifier, member) =>
+      resolveVariantName(current, qualifier, member);
+    case ResolveTask.PushScope(scopeKind, nodeId) =>
+      pushResolverScope(current, scopeKind, nodeId);
+    case ResolveTask.PopScope() => popResolverScope(current);
+    case ResolveTask.Bind(name, mutableBinding) =>
+      bindLocal(current, name, mutableBinding);
+  };
+}
+
+function runResolverMachineRange(
+  machine: ResolverMachine,
+  start: Int,
+  end: Int
+): ResolverMachine {
+  if (!machine.valid || machine.tasks.length === 0 || start >= end) {
+    return machine;
+  }
+  if (end - start === 1) {
+    return stepResolverMachine(machine);
+  }
+  const middle = start + (end - start) / 2;
+  const left = runResolverMachineRange(machine, start, middle);
+  return runResolverMachineRange(left, middle, end);
+}
+
+function runResolverMachine(machine: ResolverMachine): ResolverMachine {
+  const budget = machine.context.moduleValue.nodes.length * 64 + 256;
+  return runResolverMachineRange(machine, 0, budget);
+}
+
+function emptyResolverOutput(): ResolverOutput {
+  return {
+    scopes: { chunks: [], tail: [], length: 0 },
+    bindings: { chunks: [], tail: [], length: 0 },
+    names: { chunks: [], tail: [], length: 0 },
+    diagnostics: { chunks: [], tail: [], length: 0 }
+  };
+}
+
+function initialResolverMachine(
+  moduleValue: ParsedModule,
+  modules: ParsedModule[],
+  environment: ModuleEnvironment,
+  ownerKind: Int,
+  ownerIndex: Int
+): ResolverMachine {
+  const context: ResolverContext = {
+    moduleValue: moduleValue,
+    modules: modules,
+    environment: environment,
+    ownerKind: ownerKind,
+    ownerIndex: ownerIndex
+  };
+  return {
+    context: context,
+    output: emptyResolverOutput(),
+    scopeStack: [],
+    typeParameters: [],
+    tasks: [],
+    nextScope: 0,
+    nextLocal: 0,
+    valid: true
+  };
+}
+
+function addTypeParameter(
+  machine: ResolverMachine,
+  name: NameRef,
+  index: Int
+): ResolverMachine {
+  const entry: TypeParameterEntry = {
+    name: name,
+    index: index,
+    span: spanOfName(name)
+  };
+  const observed = recordResolvedName(
+    machine,
+    name,
+    typeParameterTarget(machine, entry)
+  );
+  const previous = typeParameterRange(
+    machine.typeParameters,
+    name,
+    0,
+    machine.typeParameters.length
+  );
+  return match (previous) {
+    case TypeParameterLookup.FoundTypeParameter(existing) =>
+      recordResolverDiagnostic(
+        observed,
+        twoLabelDiagnostic(1, spanOfName(name), existing.span)
+      );
+    case TypeParameterLookup.NoTypeParameter() =>
+      acceptTypeParameter(observed, entry);
+  };
+}
+
+function acceptTypeParameter(
+  machine: ResolverMachine,
+  entry: TypeParameterEntry
+): ResolverMachine {
+  return replaceMachine(
+    machine,
+    machine.output,
+    machine.scopeStack,
+    machine.typeParameters.append(entry),
+    machine.tasks,
+    machine.nextScope,
+    machine.nextLocal,
+    machine.valid
+  );
+}
+
+function addTypeParameterRange(
+  machine: ResolverMachine,
+  parameterIds: Int[],
+  start: Int,
+  end: Int
+): ResolverMachine {
+  if (!machine.valid || start >= end) {
+    return machine;
+  }
+  if (end - start === 1) {
+    const node = machine.context.moduleValue.nodes[parameterIds[start]];
+    const token = directToken(node, 0);
+    if (token.kind < 0) {
+      return invalidateMachine(machine);
+    }
+    return addTypeParameter(
+      machine,
+      nameRef(machine.context.moduleValue, token),
+      start
+    );
+  }
+  const middle = start + (end - start) / 2;
+  const left = addTypeParameterRange(machine, parameterIds, start, middle);
+  return addTypeParameterRange(left, parameterIds, middle, end);
+}
+
+function parameterBindingTaskRange(
+  moduleValue: ParsedModule,
+  parameterIds: Int[],
+  start: Int,
+  end: Int
+): ResolveTask[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    const token = directToken(moduleValue.nodes[parameterIds[start]], 0);
+    if (token.kind < 0) {
+      return [];
+    }
+    return [ResolveTask.Bind(nameRef(moduleValue, token), false)];
+  }
+  const middle = start + (end - start) / 2;
+  return parameterBindingTaskRange(
+    moduleValue,
+    parameterIds,
+    start,
+    middle
+  ).concat(parameterBindingTaskRange(
+    moduleValue,
+    parameterIds,
+    middle,
+    end
+  ));
+}
+
+function resolveFunctionDefinition(
+  moduleValue: ParsedModule,
+  modules: ParsedModule[],
+  environment: ModuleEnvironment,
+  definition: Definition
+): ResolverMachine {
+  const node = moduleValue.nodes[definition.nodeId];
+  const typeParameterListId = childOfKind(moduleValue.nodes, node, 98);
+  const typeParameterIds = childrenOfNodeKind(
+    moduleValue,
+    typeParameterListId,
+    99
+  );
+  const parameterListId = childOfKind(moduleValue.nodes, node, 41);
+  const parameterIds = childrenOfNodeKind(
+    moduleValue,
+    parameterListId,
+    42
+  );
+  const returnTypes = filteredChildren(moduleValue.nodes, node, 2);
+  const bodyId = childOfKind(moduleValue.nodes, node, 44);
+  const initial = initialResolverMachine(
+    moduleValue,
+    modules,
+    environment,
+    0,
+    definition.definitionIndex
+  );
+  const typed = addTypeParameterRange(
+    initial,
+    typeParameterIds,
+    0,
+    typeParameterIds.length
+  );
+  if (!typed.valid || bodyId < 0) {
+    return invalidateMachine(typed);
+  }
+  const tasks = parameterTaskRange(
+    moduleValue,
+    parameterIds,
+    false,
+    0,
+    parameterIds.length
+  ).concat(typeTaskRange(returnTypes, 0, returnTypes.length))
+    .append(ResolveTask.PushScope(0, bodyId))
+    .concat(parameterBindingTaskRange(
+      moduleValue,
+      parameterIds,
+      0,
+      parameterIds.length
+    ))
+    .append(ResolveTask.ResolveBlock(bodyId, false))
+    .append(ResolveTask.PopScope());
+  return runResolverMachine(pushTasks(typed, tasks));
+}
+
+function childrenOfNodeKind(
+  moduleValue: ParsedModule,
+  nodeId: Int,
+  kind: Int
+): Int[] {
+  if (nodeId < 0) {
+    return [];
+  }
+  return filteredChildren(
+    moduleValue.nodes,
+    moduleValue.nodes[nodeId],
+    kind
+  );
+}
+
+function appendMachineOutput(
+  state: SemanticBuildState,
+  machine: ResolverMachine
+): SemanticBuildState {
+  const complete = machine.valid && machine.tasks.length === 0 &&
+    machine.scopeStack.length === 0;
+  return {
+    scopes: appendSequenceValues(state.scopes, toArray(machine.output.scopes)),
+    bindings: appendSequenceValues(
+      state.bindings,
+      toArray(machine.output.bindings)
+    ),
+    names: appendSequenceValues(state.names, toArray(machine.output.names)),
+    diagnostics: appendSequenceValues(
+      state.diagnostics,
+      toArray(machine.output.diagnostics)
+    ),
+    valid: state.valid && complete
+  };
+}
+
+function resolveFunctionRange(
+  moduleValue: ParsedModule,
+  modules: ParsedModule[],
+  environment: ModuleEnvironment,
+  definitions: Definition[],
+  start: Int,
+  end: Int,
+  state: SemanticBuildState
+): SemanticBuildState {
+  if (!state.valid || start >= end) {
+    return state;
+  }
+  if (end - start === 1) {
+    const definition = definitions[start];
+    if (!(definition.kind === 0)) {
+      return state;
+    }
+    return appendMachineOutput(
+      state,
+      resolveFunctionDefinition(
+        moduleValue,
+        modules,
+        environment,
+        definition
+      )
+    );
+  }
+  const middle = start + (end - start) / 2;
+  const left = resolveFunctionRange(
+    moduleValue,
+    modules,
+    environment,
+    definitions,
+    start,
+    middle,
+    state
+  );
+  return resolveFunctionRange(
+    moduleValue,
+    modules,
+    environment,
+    definitions,
+    middle,
+    end,
+    left
+  );
+}
+
+function resolveSemanticModuleRange(
+  modules: ParsedModule[],
+  catalogs: ModuleCatalog[],
+  environments: ModuleEnvironment[],
+  start: Int,
+  end: Int,
+  state: SemanticBuildState
+): SemanticBuildState {
+  if (!state.valid || start >= end) {
+    return state;
+  }
+  if (end - start === 1) {
+    const data = resolveDataDefinitionRange(
+      modules[start],
+      modules,
+      environments[start],
+      catalogs[start].definitions,
+      0,
+      catalogs[start].definitions.length,
+      state
+    );
+    return resolveFunctionRange(
+      modules[start],
+      modules,
+      environments[start],
+      catalogs[start].definitions,
+      0,
+      catalogs[start].definitions.length,
+      data
+    );
+  }
+  const middle = start + (end - start) / 2;
+  const left = resolveSemanticModuleRange(
+    modules,
+    catalogs,
+    environments,
+    start,
+    middle,
+    state
+  );
+  return resolveSemanticModuleRange(
+    modules,
+    catalogs,
+    environments,
+    middle,
+    end,
+    left
+  );
+}
+
+function dataTypeParameterNames(
+  moduleValue: ParsedModule,
+  declaration: CstNode,
+  ownerKind: Int,
+  ownerIndex: Int
+): ResolverName[] {
+  const parameterListId = childOfKind(
+    moduleValue.nodes,
+    declaration,
+    98
+  );
+  const parameterIds = childrenOfNodeKind(
+    moduleValue,
+    parameterListId,
+    99
+  );
+  return dataTypeParameterNameRange(
+    moduleValue,
+    parameterIds,
+    ownerKind,
+    ownerIndex,
+    0,
+    parameterIds.length
+  );
+}
+
+function dataTypeParameterNameRange(
+  moduleValue: ParsedModule,
+  parameterIds: Int[],
+  ownerKind: Int,
+  ownerIndex: Int,
+  start: Int,
+  end: Int
+): ResolverName[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    const token = directToken(moduleValue.nodes[parameterIds[start]], 0);
+    if (token.kind < 0) {
+      return [];
+    }
+    return [{
+      span: { source: moduleValue.id, start: token.start, end: token.end },
+      target: ResolverTarget.TypeParameter(
+        ownerKind,
+        moduleValue.id,
+        ownerIndex,
+        start
+      )
+    }];
+  }
+  const middle = start + (end - start) / 2;
+  return dataTypeParameterNameRange(
+    moduleValue,
+    parameterIds,
+    ownerKind,
+    ownerIndex,
+    start,
+    middle
+  ).concat(dataTypeParameterNameRange(
+    moduleValue,
+    parameterIds,
+    ownerKind,
+    ownerIndex,
+    middle,
+    end
+  ));
+}
+
+function dataFieldNameRange(
+  moduleValue: ParsedModule,
+  fieldIds: Int[],
+  recordIndex: Int,
+  start: Int,
+  end: Int
+): ResolverName[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    const token = directToken(moduleValue.nodes[fieldIds[start]], 0);
+    if (token.kind < 0) {
+      return [];
+    }
+    return [{
+      span: { source: moduleValue.id, start: token.start, end: token.end },
+      target: ResolverTarget.Field(moduleValue.id, recordIndex, start)
+    }];
+  }
+  const middle = start + (end - start) / 2;
+  return dataFieldNameRange(
+    moduleValue,
+    fieldIds,
+    recordIndex,
+    start,
+    middle
+  ).concat(dataFieldNameRange(
+    moduleValue,
+    fieldIds,
+    recordIndex,
+    middle,
+    end
+  ));
+}
+
+function dataPayloadNameRange(
+  moduleValue: ParsedModule,
+  payloadTokens: CstToken[],
+  unionIndex: Int,
+  variantIndex: Int,
+  start: Int,
+  end: Int
+): ResolverName[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    const token = payloadTokens[start];
+    if (token.kind < 0) {
+      return [];
+    }
+    return [{
+      span: { source: moduleValue.id, start: token.start, end: token.end },
+      target: ResolverTarget.Payload(
+        moduleValue.id,
+        unionIndex,
+        variantIndex,
+        start
+      )
+    }];
+  }
+  const middle = start + (end - start) / 2;
+  return dataPayloadNameRange(
+    moduleValue,
+    payloadTokens,
+    unionIndex,
+    variantIndex,
+    start,
+    middle
+  ).concat(dataPayloadNameRange(
+    moduleValue,
+    payloadTokens,
+    unionIndex,
+    variantIndex,
+    middle,
+    end
+  ));
+}
+
+function dataVariantNameRange(
+  moduleValue: ParsedModule,
+  variantIds: Int[],
+  unionIndex: Int,
+  start: Int,
+  end: Int
+): ResolverName[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    const variant = moduleValue.nodes[variantIds[start]];
+    const variantToken = directToken(variant, 0);
+    if (variantToken.kind >= 0) {
+      const names: ResolverName[] = [{
+        span: {
+          source: moduleValue.id,
+          start: variantToken.start,
+          end: variantToken.end
+        },
+        target: ResolverTarget.Variant(moduleValue.id, unionIndex, start)
+      }];
+      const payloadId = childOfKind(moduleValue.nodes, variant, 87);
+      const payload = moduleValue.nodes[payloadId];
+      const payloadTokens = tokenKindRange(
+        payload.directTokens,
+        0,
+        0,
+        payload.directTokens.length
+      );
+      return names.concat(dataPayloadNameRange(
+        moduleValue,
+        payloadTokens,
+        unionIndex,
+        start,
+        0,
+        payloadTokens.length
+      ));
+    }
+    const payloadId = childOfKind(moduleValue.nodes, variant, 87);
+    const payload = moduleValue.nodes[payloadId];
+    const payloadTokens = tokenKindRange(
+      payload.directTokens,
+      0,
+      0,
+      payload.directTokens.length
+    );
+    return dataPayloadNameRange(
+      moduleValue,
+      payloadTokens,
+      unionIndex,
+      start,
+      0,
+      payloadTokens.length
+    );
+  }
+  const middle = start + (end - start) / 2;
+  return dataVariantNameRange(
+    moduleValue,
+    variantIds,
+    unionIndex,
+    start,
+    middle
+  ).concat(dataVariantNameRange(
+    moduleValue,
+    variantIds,
+    unionIndex,
+    middle,
+    end
+  ));
+}
+
+function dataDeclarationNameRange(
+  moduleValue: ParsedModule,
+  definitions: Definition[],
+  start: Int,
+  end: Int
+): ResolverName[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    const definition = definitions[start];
+    if (definition.kind === 1) {
+      const declaration = moduleValue.nodes[definition.nodeId];
+      const bodyId = childOfKind(moduleValue.nodes, declaration, 76);
+      const fields = childrenOfNodeKind(moduleValue, bodyId, 77);
+      return dataFieldNameRange(
+        moduleValue,
+        fields,
+        definition.definitionIndex,
+        0,
+        fields.length
+      );
+    }
+    if (definition.kind === 2) {
+      const declaration = moduleValue.nodes[definition.nodeId];
+      const variants = filteredChildren(
+        moduleValue.nodes,
+        declaration,
+        86
+      );
+      return dataVariantNameRange(
+        moduleValue,
+        variants,
+        definition.definitionIndex,
+        0,
+        variants.length
+      );
+    }
+    return [];
+  }
+  const middle = start + (end - start) / 2;
+  return dataDeclarationNameRange(
+    moduleValue,
+    definitions,
+    start,
+    middle
+  ).concat(dataDeclarationNameRange(
+    moduleValue,
+    definitions,
+    middle,
+    end
+  ));
+}
+
+function dataDeclarationNames(
+  moduleValue: ParsedModule,
+  definitions: Definition[]
+): ResolverName[] {
+  return dataDeclarationNameRange(
+    moduleValue,
+    definitions,
+    0,
+    definitions.length
+  );
+}
+
+function dataDeclarationNamesForModuleRange(
+  modules: ParsedModule[],
+  catalogs: ModuleCatalog[],
+  start: Int,
+  end: Int,
+  names: ResolverName[]
+): ResolverName[] {
+  if (start >= end) {
+    return names;
+  }
+  if (end - start === 1) {
+    return names.concat(dataDeclarationNames(
+      modules[start],
+      catalogs[start].definitions
+    ));
+  }
+  const middle = start + (end - start) / 2;
+  const left = dataDeclarationNamesForModuleRange(
+    modules,
+    catalogs,
+    start,
+    middle,
+    names
+  );
+  return dataDeclarationNamesForModuleRange(
+    modules,
+    catalogs,
+    middle,
+    end,
+    left
+  );
+}
+
+function dataFieldTypeRange(
+  moduleValue: ParsedModule,
+  fieldIds: Int[],
+  start: Int,
+  end: Int
+): Int[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return filteredChildren(
+      moduleValue.nodes,
+      moduleValue.nodes[fieldIds[start]],
+      2
+    );
+  }
+  const middle = start + (end - start) / 2;
+  return dataFieldTypeRange(
+    moduleValue,
+    fieldIds,
+    start,
+    middle
+  ).concat(dataFieldTypeRange(
+    moduleValue,
+    fieldIds,
+    middle,
+    end
+  ));
+}
+
+function dataVariantTypeRange(
+  moduleValue: ParsedModule,
+  variantIds: Int[],
+  start: Int,
+  end: Int
+): Int[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    const variant = moduleValue.nodes[variantIds[start]];
+    const payloadId = childOfKind(moduleValue.nodes, variant, 87);
+    if (payloadId < 0) {
+      return [];
+    }
+    return filteredChildren(moduleValue.nodes, moduleValue.nodes[payloadId], 2);
+  }
+  const middle = start + (end - start) / 2;
+  return dataVariantTypeRange(
+    moduleValue,
+    variantIds,
+    start,
+    middle
+  ).concat(dataVariantTypeRange(
+    moduleValue,
+    variantIds,
+    middle,
+    end
+  ));
+}
+
+function dataDefinitionTypeRange(
+  moduleValue: ParsedModule,
+  definition: Definition
+): Int[] {
+  const declaration = moduleValue.nodes[definition.nodeId];
+  if (definition.kind === 1) {
+    const bodyId = childOfKind(moduleValue.nodes, declaration, 76);
+    const fields = childrenOfNodeKind(moduleValue, bodyId, 77);
+    return dataFieldTypeRange(moduleValue, fields, 0, fields.length);
+  }
+  if (definition.kind === 2) {
+    const variants = filteredChildren(moduleValue.nodes, declaration, 86);
+    return dataVariantTypeRange(moduleValue, variants, 0, variants.length);
+  }
+  return [];
+}
+
+function resolveDataDefinition(
+  moduleValue: ParsedModule,
+  modules: ParsedModule[],
+  environment: ModuleEnvironment,
+  definition: Definition
+): ResolverMachine {
+  const declaration = moduleValue.nodes[definition.nodeId];
+  const parameterListId = childOfKind(moduleValue.nodes, declaration, 98);
+  const parameterIds = childrenOfNodeKind(moduleValue, parameterListId, 99);
+  const initial = initialResolverMachine(
+    moduleValue,
+    modules,
+    environment,
+    definition.kind,
+    definition.definitionIndex
+  );
+  const typed = addTypeParameterRange(
+    initial,
+    parameterIds,
+    0,
+    parameterIds.length
+  );
+  const typeNodes = dataDefinitionTypeRange(moduleValue, definition);
+  return runResolverMachine(pushTasks(
+    typed,
+    typeTaskRange(typeNodes, 0, typeNodes.length)
+  ));
+}
+
+function resolveDataDefinitionRange(
+  moduleValue: ParsedModule,
+  modules: ParsedModule[],
+  environment: ModuleEnvironment,
+  definitions: Definition[],
+  start: Int,
+  end: Int,
+  state: SemanticBuildState
+): SemanticBuildState {
+  if (!state.valid || start >= end) {
+    return state;
+  }
+  if (end - start === 1) {
+    const definition = definitions[start];
+    if (definition.kind === 1 || definition.kind === 2) {
+      return appendMachineOutput(
+        state,
+        resolveDataDefinition(moduleValue, modules, environment, definition)
+      );
+    }
+    return state;
+  }
+  const middle = start + (end - start) / 2;
+  const left = resolveDataDefinitionRange(
+    moduleValue,
+    modules,
+    environment,
+    definitions,
+    start,
+    middle,
+    state
+  );
+  return resolveDataDefinitionRange(
+    moduleValue,
+    modules,
+    environment,
+    definitions,
+    middle,
+    end,
+    left
+  );
+}
+
+function spanIsBefore(left: ResolverSpan, right: ResolverSpan): Bool {
+  if (left.source < right.source) {
+    return true;
+  }
+  if (left.source > right.source) {
+    return false;
+  }
+  if (left.start < right.start) {
+    return true;
+  }
+  if (left.start > right.start) {
+    return false;
+  }
+  return left.end < right.end;
+}
+
+function nameInsertionIndex(
+  values: ResolverName[],
+  value: ResolverName,
+  start: Int,
+  end: Int
+): Int {
+  if (start >= end) {
+    return start;
+  }
+  const middle = start + (end - start) / 2;
+  if (spanIsBefore(values[middle].span, value.span)) {
+    return nameInsertionIndex(values, value, middle + 1, end);
+  }
+  return nameInsertionIndex(values, value, start, middle);
+}
+
+function insertName(
+  values: ResolverName[],
+  value: ResolverName
+): ResolverName[] {
+  const index = nameInsertionIndex(values, value, 0, values.length);
+  return arrayRange(values, 0, index)
+    .append(value)
+    .concat(arrayRange(values, index, values.length));
+}
+
+function sortNameRange(
+  values: ResolverName[],
+  start: Int,
+  end: Int,
+  sorted: ResolverName[]
+): ResolverName[] {
+  if (start >= end) {
+    return sorted;
+  }
+  if (end - start === 1) {
+    return insertName(sorted, values[start]);
+  }
+  const middle = start + (end - start) / 2;
+  const left = sortNameRange(values, start, middle, sorted);
+  return sortNameRange(values, middle, end, left);
+}
+
+function diagnosticIsBefore(
+  left: ResolverDiagnostic,
+  right: ResolverDiagnostic
+): Bool {
+  const leftSpan = left.labels[0].span;
+  const rightSpan = right.labels[0].span;
+  if (spanIsBefore(leftSpan, rightSpan)) {
+    return true;
+  }
+  if (spanIsBefore(rightSpan, leftSpan)) {
+    return false;
+  }
+  return left.code < right.code;
+}
+
+function diagnosticInsertionIndex(
+  values: ResolverDiagnostic[],
+  value: ResolverDiagnostic,
+  start: Int,
+  end: Int
+): Int {
+  if (start >= end) {
+    return start;
+  }
+  const middle = start + (end - start) / 2;
+  if (diagnosticIsBefore(values[middle], value)) {
+    return diagnosticInsertionIndex(values, value, middle + 1, end);
+  }
+  return diagnosticInsertionIndex(values, value, start, middle);
+}
+
+function insertDiagnostic(
+  values: ResolverDiagnostic[],
+  value: ResolverDiagnostic
+): ResolverDiagnostic[] {
+  const index = diagnosticInsertionIndex(values, value, 0, values.length);
+  return arrayRange(values, 0, index)
+    .append(value)
+    .concat(arrayRange(values, index, values.length));
+}
+
+function sortDiagnosticRange(
+  values: ResolverDiagnostic[],
+  start: Int,
+  end: Int,
+  sorted: ResolverDiagnostic[]
+): ResolverDiagnostic[] {
+  if (start >= end) {
+    return sorted;
+  }
+  if (end - start === 1) {
+    return insertDiagnostic(sorted, values[start]);
+  }
+  const middle = start + (end - start) / 2;
+  const left = sortDiagnosticRange(values, start, middle, sorted);
+  return sortDiagnosticRange(values, middle, end, left);
+}
+
+function replaceIntAt(values: Int[], index: Int, value: Int): Int[] {
+  return arrayRange(values, 0, index)
+    .append(value)
+    .concat(arrayRange(values, index + 1, values.length));
+}
+
+function markCycleVisit(
+  state: CycleState,
+  moduleId: Int,
+  visit: Int
+): CycleState {
+  return {
+    visits: replaceIntAt(state.visits, moduleId, visit),
+    parents: state.parents,
+    backEdges: state.backEdges
+  };
+}
+
+function setCycleParent(
+  state: CycleState,
+  moduleId: Int,
+  edgeIndex: Int
+): CycleState {
+  return {
+    visits: state.visits,
+    parents: replaceIntAt(state.parents, moduleId, edgeIndex),
+    backEdges: state.backEdges
+  };
+}
+
+function appendBackEdge(state: CycleState, edgeIndex: Int): CycleState {
+  return {
+    visits: state.visits,
+    parents: state.parents,
+    backEdges: state.backEdges.append(edgeIndex)
+  };
+}
+
+function discoverCycleEdges(
+  moduleId: Int,
+  edges: ResolverEdgeInput[],
+  position: Int,
+  state: CycleState
+): CycleState {
+  if (position >= edges.length) {
+    return markCycleVisit(state, moduleId, 2);
+  }
+  const edge = edges[position];
+  if (!(edge.importer === moduleId)) {
+    return discoverCycleEdges(moduleId, edges, position + 1, state);
+  }
+  const targetVisit = state.visits[edge.imported];
+  if (targetVisit === 0) {
+    const descended = discoverCycleEdges(
+      edge.imported,
+      edges,
+      0,
+      setCycleParent(
+        markCycleVisit(state, edge.imported, 1),
+        edge.imported,
+        position
+      )
+    );
+    return discoverCycleEdges(moduleId, edges, position + 1, descended);
+  }
+  if (targetVisit === 1) {
+    return discoverCycleEdges(
+      moduleId,
+      edges,
+      position + 1,
+      appendBackEdge(state, position)
+    );
+  }
+  return discoverCycleEdges(moduleId, edges, position + 1, state);
+}
+
+function discoverCycleRoots(
+  moduleCount: Int,
+  edges: ResolverEdgeInput[],
+  moduleId: Int,
+  state: CycleState
+): CycleState {
+  if (moduleId >= moduleCount) {
+    return state;
+  }
+  if (state.visits[moduleId] === 0) {
+    const descended = discoverCycleEdges(
+      moduleId,
+      edges,
+      0,
+      markCycleVisit(state, moduleId, 1)
+    );
+    return discoverCycleRoots(moduleCount, edges, moduleId + 1, descended);
+  }
+  return discoverCycleRoots(moduleCount, edges, moduleId + 1, state);
+}
+
+function cyclePathEdgeRange(
+  parents: Int[],
+  edges: ResolverEdgeInput[],
+  ancestor: Int,
+  current: Int,
+  remaining: Int,
+  reversed: Int[]
+): Int[] {
+  if (current === ancestor || remaining <= 0) {
+    return reverseArrayRange(reversed, 0, reversed.length);
+  }
+  const parentEdge = parents[current];
+  if (parentEdge < 0 || parentEdge >= edges.length) {
+    return [];
+  }
+  return cyclePathEdgeRange(
+    parents,
+    edges,
+    ancestor,
+    edges[parentEdge].importer,
+    remaining - 1,
+    reversed.append(parentEdge)
+  );
+}
+
+function cyclePathLabels(
+  parents: Int[],
+  edges: ResolverEdgeInput[],
+  ancestor: Int,
+  current: Int,
+  moduleCount: Int
+): ResolverLabel[] {
+  const path = cyclePathEdgeRange(
+    parents,
+    edges,
+    ancestor,
+    current,
+    moduleCount + 1,
+    []
+  );
+  return cyclePathLabelRange(edges, path, 0, path.length);
+}
+
+function cyclePathLabelRange(
+  edges: ResolverEdgeInput[],
+  path: Int[],
+  start: Int,
+  end: Int
+): ResolverLabel[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    const edge = edges[path[start]];
+    return [secondaryLabel({
+      source: edge.importer,
+      start: edge.pathStart,
+      end: edge.pathEnd
+    })];
+  }
+  const middle = start + (end - start) / 2;
+  return cyclePathLabelRange(edges, path, start, middle).concat(
+    cyclePathLabelRange(edges, path, middle, end)
+  );
+}
+
+function cycleDiagnostic(
+  parents: Int[],
+  edges: ResolverEdgeInput[],
+  backEdgeIndex: Int,
+  moduleCount: Int
+): ResolverDiagnostic {
+  const closing = edges[backEdgeIndex];
+  const primary = primaryLabel({
+    source: closing.importer,
+    start: closing.pathStart,
+    end: closing.pathEnd
+  });
+  return {
+    code: 2,
+    labels: [primary].concat(cyclePathLabels(
+      parents,
+      edges,
+      closing.imported,
+      closing.importer,
+      moduleCount
+    ))
+  };
+}
+
+function cycleDiagnosticRange(
+  state: CycleState,
+  edges: ResolverEdgeInput[],
+  moduleCount: Int,
+  start: Int,
+  end: Int
+): ResolverDiagnostic[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [cycleDiagnostic(
+      state.parents,
+      edges,
+      state.backEdges[start],
+      moduleCount
+    )];
+  }
+  const middle = start + (end - start) / 2;
+  return cycleDiagnosticRange(state, edges, moduleCount, start, middle).concat(
+    cycleDiagnosticRange(state, edges, moduleCount, middle, end)
+  );
+}
+
+function cycleDiagnostics(
+  moduleCount: Int,
+  edges: ResolverEdgeInput[]
+): ResolverDiagnostic[] {
+  const initial: CycleState = {
+    visits: arrayRangeInt(moduleCount, 0),
+    parents: arrayRangeInt(moduleCount, -1),
+    backEdges: []
+  };
+  const state = discoverCycleRoots(moduleCount, edges, 0, initial);
+  return cycleDiagnosticRange(
+    state,
+    edges,
+    moduleCount,
+    0,
+    state.backEdges.length
+  );
+}
+
+function arrayRangeInt(length: Int, value: Int): Int[] {
+  if (length <= 0) {
+    return [];
+  }
+  if (length === 1) {
+    return [value];
+  }
+  const middle = length / 2;
+  return arrayRangeInt(middle, value).concat(
+    arrayRangeInt(length - middle, value)
+  );
+}
+
+function validModuleRange(
+  modules: ResolverModuleInput[],
+  start: Int,
+  end: Int
+): Bool {
+  if (start >= end) {
+    return true;
+  }
+  if (end - start === 1) {
+    const module = modules[start];
+    return module.id === start &&
+      module.source.byteLength >= 0 &&
+      module.source.codePoints.length + 1 === module.source.byteOffsets.length;
+  }
+  const middle = start + (end - start) / 2;
+  return validModuleRange(modules, start, middle) &&
+    validModuleRange(modules, middle, end);
+}
+
+function validEdgeRange(
+  edges: ResolverEdgeInput[],
+  modules: ResolverModuleInput[],
+  start: Int,
+  end: Int
+): Bool {
+  if (start >= end) {
+    return true;
+  }
+  if (end - start === 1) {
+    const edge = edges[start];
+    if (
+      edge.importer < 0 || edge.importer >= modules.length ||
+      edge.imported < 0 || edge.imported >= modules.length ||
+      edge.pathStart < 0 || edge.pathEnd < edge.pathStart
+    ) {
+      return false;
+    }
+    return edge.pathEnd <= modules[edge.importer].source.byteLength;
+  }
+  const middle = start + (end - start) / 2;
+  return validEdgeRange(edges, modules, start, middle) &&
+    validEdgeRange(edges, modules, middle, end);
+}
+
+function inputIsValid(input: ResolverInput): Bool {
+  return input.modules.length > 0 &&
+    validModuleRange(input.modules, 0, input.modules.length) &&
+    validEdgeRange(input.edges, input.modules, 0, input.edges.length);
+}
+
+export function resolve(input: ResolverInput): ResolverOutcome {
+  if (!inputIsValid(input)) {
+    return ResolverOutcome.InvalidInput();
+  }
+  const initial: ParsedModulesState = {
+    modules: { chunks: [], tail: [], length: 0 },
+    valid: true
+  };
+  const parsed = parseModuleRange(
+    input.modules,
+    0,
+    input.modules.length,
+    initial
+  );
+  if (!parsed.valid) {
+    return ResolverOutcome.ParserInvalid();
+  }
+  const modules = toArray(parsed.modules);
+  const catalogInitial: CatalogBuildState = {
+    catalogs: { chunks: [], tail: [], length: 0 },
+    symbols: { chunks: [], tail: [], length: 0 },
+    valid: true
+  };
+  const builtCatalogs = buildCatalogRange(
+    modules,
+    0,
+    modules.length,
+    catalogInitial
+  );
+  if (!builtCatalogs.valid) {
+    return ResolverOutcome.ParserInvalid();
+  }
+  const catalogs = toArray(builtCatalogs.catalogs);
+  const environmentInitial: EnvironmentsBuildState = {
+    environments: { chunks: [], tail: [], length: 0 },
+    names: { chunks: [], tail: [], length: 0 },
+    diagnostics: { chunks: [], tail: [], length: 0 },
+    valid: true
+  };
+  const builtEnvironments = buildEnvironmentRange(
+    modules,
+    catalogs,
+    input.edges,
+    0,
+    modules.length,
+    environmentInitial
+  );
+  if (!builtEnvironments.valid) {
+    return ResolverOutcome.InvalidInput();
+  }
+  const environments = toArray(builtEnvironments.environments);
+  const semanticInitial: SemanticBuildState = {
+    scopes: { chunks: [], tail: [], length: 0 },
+    bindings: { chunks: [], tail: [], length: 0 },
+    names: { chunks: [], tail: [], length: 0 },
+    diagnostics: { chunks: [], tail: [], length: 0 },
+    valid: true
+  };
+  const semantics = resolveSemanticModuleRange(
+    modules,
+    catalogs,
+    environments,
+    0,
+    modules.length,
+    semanticInitial
+  );
+  if (!semantics.valid) {
+    return ResolverOutcome.ParserInvalid();
+  }
+  const allDeclarationNames = dataDeclarationNamesForModuleRange(
+    modules,
+    catalogs,
+    0,
+    modules.length,
+    []
+  );
+  const allNames = toArray(builtEnvironments.names)
+    .concat(toArray(semantics.names))
+    .concat(allDeclarationNames);
+  const allDiagnostics = toArray(builtEnvironments.diagnostics).concat(
+    toArray(semantics.diagnostics)
+  ).concat(cycleDiagnostics(input.modules.length, input.edges));
+  const result: ResolverResult = {
+    symbols: toArray(builtCatalogs.symbols),
+    scopes: toArray(semantics.scopes),
+    bindings: toArray(semantics.bindings),
+    names: sortNameRange(allNames, 0, allNames.length, []),
+    diagnostics: sortDiagnosticRange(
+      allDiagnostics,
+      0,
+      allDiagnostics.length,
+      []
+    )
+  };
+  return ResolverOutcome.Resolved(result);
+}

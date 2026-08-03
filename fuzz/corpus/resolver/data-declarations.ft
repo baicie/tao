@@ -1,0 +1,15 @@
+type Pair<T> = {
+  left: T;
+  right: T;
+};
+
+type Choice<T> =
+  | Some(value: T)
+  | None();
+
+function main<T>(value: T): T {
+  match (value) {
+    case Choice.Some(payload) => payload;
+    default => value;
+  };
+}

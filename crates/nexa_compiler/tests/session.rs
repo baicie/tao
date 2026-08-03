@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use nexa_compiler::{CompilerSession, SessionBuildError};
+use nexa_compiler::{check_session, CheckResult, CompilerSession, SessionBuildError};
 use nexa_diagnostics::LabelStyle;
 use nexa_source::{
     MemorySourceProvider, ProvidedSource, SourceKey, SourceLoadError, SourceProvider, SourceRequest,
@@ -286,7 +286,7 @@ import { B } from "./b.nexa";
 }
 
 #[test]
-fn session_emits_one_primary_only_cycle_diagnostic_for_a_self_import(
+fn resolver_emits_one_primary_only_cycle_diagnostic_for_a_self_import(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut provider = CountingProvider::default();
     let entry = provider.insert(
@@ -295,7 +295,8 @@ fn session_emits_one_primary_only_cycle_diagnostic_for_a_self_import(
     );
 
     let session = CompilerSession::build(provider, entry.as_path())?;
-    let diagnostic = one_cycle(&session)?;
+    let checked = check_session(&session);
+    let diagnostic = one_cycle(&checked)?;
 
     assert_eq!(diagnostic.labels().len(), 1);
     assert_eq!(diagnostic.labels()[0].style(), LabelStyle::Primary);
@@ -305,7 +306,7 @@ fn session_emits_one_primary_only_cycle_diagnostic_for_a_self_import(
 }
 
 #[test]
-fn session_emits_the_dfs_tree_witness_for_a_two_module_cycle(
+fn resolver_emits_the_dfs_tree_witness_for_a_two_module_cycle(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut provider = CountingProvider::default();
     let entry = provider.insert(
@@ -318,7 +319,8 @@ fn session_emits_the_dfs_tree_witness_for_a_two_module_cycle(
     );
 
     let session = CompilerSession::build(provider, entry.as_path())?;
-    let diagnostic = one_cycle(&session)?;
+    let checked = check_session(&session);
+    let diagnostic = one_cycle(&checked)?;
     let labels = diagnostic
         .labels()
         .iter()
@@ -334,7 +336,30 @@ fn session_emits_the_dfs_tree_witness_for_a_two_module_cycle(
 }
 
 #[test]
-fn session_emits_one_complete_witness_for_a_three_module_cycle(
+fn resolver_keeps_cycle_diagnostics_when_one_module_has_a_parse_error(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut provider = CountingProvider::default();
+    let entry = provider.insert(
+        path(&["cycle-error", "main.nexa"]),
+        br#"import { A } from "./a.nexa";"#,
+    );
+    provider.insert(
+        path(&["cycle-error", "a.nexa"]),
+        br#"import { Main } from "./main.nexa";
+@"#,
+    );
+
+    let session = CompilerSession::build(provider, entry.as_path())?;
+    let checked = check_session(&session);
+
+    assert_eq!(check_diagnostic_count(&checked, "E1001"), 1);
+    assert_eq!(check_diagnostic_count(&checked, "E4002"), 1);
+
+    Ok(())
+}
+
+#[test]
+fn resolver_emits_one_complete_witness_for_a_three_module_cycle(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut provider = CountingProvider::default();
     let entry = provider.insert(
@@ -351,7 +376,8 @@ fn session_emits_one_complete_witness_for_a_three_module_cycle(
     );
 
     let session = CompilerSession::build(provider, entry.as_path())?;
-    let diagnostic = one_cycle(&session)?;
+    let checked = check_session(&session);
+    let diagnostic = one_cycle(&checked)?;
     let files = diagnostic
         .labels()
         .iter()
@@ -364,7 +390,7 @@ fn session_emits_one_complete_witness_for_a_three_module_cycle(
 }
 
 #[test]
-fn session_emits_one_diagnostic_for_each_disjoint_reachable_cycle(
+fn resolver_emits_one_diagnostic_for_each_disjoint_reachable_cycle(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut provider = CountingProvider::default();
     let entry = provider.insert(
@@ -386,8 +412,9 @@ import { B } from "./b.nexa";"#,
     );
 
     let session = CompilerSession::build(provider, entry.as_path())?;
+    let checked = check_session(&session);
 
-    assert_eq!(diagnostic_count(&session, "E4002"), 2);
+    assert_eq!(check_diagnostic_count(&checked, "E4002"), 2);
 
     Ok(())
 }
@@ -408,10 +435,16 @@ fn diagnostic_count<P>(session: &CompilerSession<P>, code: &str) -> usize {
         .count()
 }
 
-fn one_cycle<P>(
-    session: &CompilerSession<P>,
-) -> Result<&nexa_diagnostics::Diagnostic, std::io::Error> {
-    let mut cycles = session
+fn check_diagnostic_count(checked: &CheckResult, code: &str) -> usize {
+    checked
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.code().as_str() == code)
+        .count()
+}
+
+fn one_cycle(checked: &CheckResult) -> Result<&nexa_diagnostics::Diagnostic, std::io::Error> {
+    let mut cycles = checked
         .diagnostics()
         .iter()
         .filter(|diagnostic| diagnostic.code().as_str() == "E4002");

@@ -1,0 +1,5 @@
+import { main } from "./main.ft";
+
+function Hidden(): Int {
+  return main();
+}

@@ -88,6 +88,7 @@ export default defineConfig({
             { text: "0.0.7 Lexer Differential", link: "/implementation/futao-lexer-differential-0.0.7" },
             { text: "0.0.8 Parser Differential", link: "/implementation/futao-parser-differential-0.0.8" },
             { text: "0.0.8 Parser Self-Graph", link: "/implementation/futao-parser-self-graph-scalability-0.0.8" },
+            { text: "0.0.9 Resolver Differential", link: "/implementation/futao-resolver-differential-0.0.9" },
           ],
         },
         {

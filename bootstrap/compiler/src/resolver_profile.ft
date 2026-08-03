@@ -1,0 +1,5 @@
+import { resolveEncoded } from "./resolver_bridge.ft";
+
+function main(arguments: String[]): Unit {
+  const result = resolveEncoded(arguments);
+}

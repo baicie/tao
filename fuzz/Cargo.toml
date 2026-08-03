@@ -28,5 +28,12 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "resolver"
+path = "fuzz_targets/resolver.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]
 members = ["."]

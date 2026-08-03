@@ -5,17 +5,17 @@ start Futao self-hosting. It records the exact `nexac 0.0.1` commit, canonical
 Git archive and `Cargo.lock` SHA-256 digests, Rust 1.80 toolchain, and locked
 release build recipe.
 
-Milestone `0.0.8` binds Futao bootstrap compiler source version `0.0.2`. Its
-manifest records all nine lexer/parser/storage source files, the source-tree digest,
-both snapshot schemas, the 11-case lexer and 21-case parser differential
-corpora, implemented `lexer` and `parser` phases, and the Rust-reference
-default-path boundary. The top-level contract repeats these values and rejects
-any mismatch.
+Milestone `0.0.9` binds Futao bootstrap compiler source version `0.0.3`. Its
+manifest records the lexer, parser, and resolver source files, the source-tree
+digest, three snapshot schemas, the 11-case lexer, 21-case parser, and 6-case
+resolver differential corpora, implemented `lexer`, `parser`, and `resolver`
+phases, and the Rust-reference default-path boundary. The top-level contract
+repeats these values and rejects any mismatch.
 
 The compiler source tree digest for this milestone is:
 
 ```text
-sha256:fc654f1177071faabea6fec294ff7b768391b551102555611f6679d6e301c51b
+sha256:c0eb83d8736893cc82ce38f96dbea4265136af23696ca5ed540d3ffdc77129c2
 ```
 
 Validate the manifest, referenced bootstrap inputs, Git objects, and digests:
@@ -40,6 +40,12 @@ Run the executable Rust/Futao parser comparison independently with:
 
 ```bash
 cargo xtask parser-differential
+```
+
+Run the executable Rust/Futao resolver comparison independently with:
+
+```bash
+cargo xtask resolver-differential
 ```
 
 The fixed `nexac 0.0.1` predates the Futao rename and accepts only `.nexa`

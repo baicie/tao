@@ -1,0 +1,7 @@
+import { identity } from "./math.ft";
+
+export type Box = { value: Int; };
+
+export function makeBox(value: Int): Box {
+  return { value: identity(value) };
+}

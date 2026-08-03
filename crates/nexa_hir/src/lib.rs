@@ -8,6 +8,7 @@
 mod check;
 mod hir;
 mod lower;
+mod resolve;
 
 pub use check::{
     type_check, type_check_modules, Analysis, Builtin, CallFacts, ClosureFacts, FunctionFacts,
@@ -26,3 +27,7 @@ pub use hir::{
     VariantPayloadDeclaration, Visibility, WhileStatement,
 };
 pub use lower::{lower, lower_module, LoweringError};
+pub use resolve::{
+    resolve_modules, Resolution, ResolvedBinding, ResolvedName, ResolverScope, ResolverScopeId,
+    ResolverScopeKind, ResolverSymbol,
+};

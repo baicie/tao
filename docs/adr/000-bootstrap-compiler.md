@@ -1176,6 +1176,7 @@ Performance regression
 ```text
 Lexer differential
 Parser differential
+Resolver differential
 Type checker differential
 HIR differential
 MIR differential

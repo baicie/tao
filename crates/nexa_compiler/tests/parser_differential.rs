@@ -656,7 +656,17 @@ fn futao_parser_can_process_its_sorted_full_source_graph_for_the_resolver(
         .map(|(identity, _)| format!("src/{identity}"))
         .collect::<Vec<_>>();
 
-    assert_eq!(manifest.source_files, embedded_sources);
+    let manifest_parser_sources = manifest
+        .source_files
+        .iter()
+        .filter(|path| !path.starts_with("src/resolver"))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(manifest_parser_sources, embedded_sources);
+    assert!(manifest
+        .source_files
+        .windows(2)
+        .all(|pair| pair[0] < pair[1]));
     assert!(FUTAO_COMPILER_SOURCES
         .windows(2)
         .all(|pair| pair[0].0 < pair[1].0));

@@ -5,6 +5,7 @@ mod bootstrap_profile;
 mod conformance;
 mod lexer_differential;
 mod parser_differential;
+mod resolver_differential;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -64,6 +65,8 @@ enum Task {
     LexerDifferential,
     /// Compare the Rust and Futao parsers over the checked-in corpus.
     ParserDifferential,
+    /// Compare the Rust and Futao resolvers over the checked-in graph corpus.
+    ResolverDifferential,
 }
 
 fn main() -> Result<()> {
@@ -99,6 +102,7 @@ fn main() -> Result<()> {
         Task::BootstrapProfile => bootstrap_profile::run()?,
         Task::LexerDifferential => lexer_differential::run()?,
         Task::ParserDifferential => parser_differential::run()?,
+        Task::ResolverDifferential => resolver_differential::run()?,
     }
 
     Ok(())
@@ -112,7 +116,8 @@ fn check() -> Result<()> {
     bootstrap::run(&bootstrap::default_manifest_path(), false)?;
     bootstrap_profile::run()?;
     lexer_differential::run()?;
-    parser_differential::run()
+    parser_differential::run()?;
+    resolver_differential::run()
 }
 
 fn lint() -> Result<()> {

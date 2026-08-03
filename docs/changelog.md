@@ -1,5 +1,19 @@
 # Changelog
 
+## Compiler Package 0.0.9 (Futao Resolver Differential)
+
+- Added the third executable Futao-written compiler phase: deterministic module
+  graph construction and name resolution under Bootstrap Profile v1.
+- Froze resolver snapshot schema 1 for module graph, symbols, scopes, bindings,
+  resolved names, and source-aware diagnostics, including deterministic cycle
+  witnesses.
+- Compared one accepted graph, one rejected graph, and four resolver fuzz seeds
+  through real Rust and Futao adapters with no suppression or expected divergence.
+- Bound resolver source, protocol, schema, corpus counts, and tree digest into
+  the Stage 0 bootstrap contract; malformed output and mismatches fail closed.
+- Kept the Rust resolver as the default path until type checking, lowering, and
+  the ADR-011 self-hosting gate are complete.
+
 ## Compiler Package 0.0.8 (Futao Parser Differential)
 
 - Added the pure Futao parser as the second executable compiler phase, consuming

@@ -1,0 +1,200 @@
+import { LexerInput } from "./lexer.ft";
+import {
+  ResolverEdgeInput,
+  ResolverInput,
+  ResolverModuleInput,
+  ResolverOutcome,
+  resolve
+} from "./resolver.ft";
+import { Sequence, append, toArray } from "./sequence.ft";
+
+type ModuleDecodeState = {
+  position: Int;
+  modules: Sequence<ResolverModuleInput>;
+  valid: Bool;
+};
+
+type EdgeDecodeState = {
+  position: Int;
+  edges: Sequence<ResolverEdgeInput>;
+  valid: Bool;
+};
+
+function parseRange(values: String[], start: Int, end: Int): Int[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [parseInt(values[start])];
+  }
+  const middle = start + (end - start) / 2;
+  return parseRange(values, start, middle).concat(
+    parseRange(values, middle, end)
+  );
+}
+
+function codePointRange(
+  values: Int[],
+  base: Int,
+  start: Int,
+  end: Int
+): Int[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [values[base + start * 2]];
+  }
+  const middle = start + (end - start) / 2;
+  return codePointRange(values, base, start, middle).concat(
+    codePointRange(values, base, middle, end)
+  );
+}
+
+function byteOffsetRange(
+  values: Int[],
+  base: Int,
+  start: Int,
+  end: Int
+): Int[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [values[base + start * 2 + 1]];
+  }
+  const middle = start + (end - start) / 2;
+  return byteOffsetRange(values, base, start, middle).concat(
+    byteOffsetRange(values, base, middle, end)
+  );
+}
+
+function stepModuleDecode(
+  values: Int[],
+  state: ModuleDecodeState
+): ModuleDecodeState {
+  if (!state.valid || state.position + 3 > values.length) {
+    return { position: state.position, modules: state.modules, valid: false };
+  }
+  const id = values[state.position];
+  const byteLength = values[state.position + 1];
+  const pairCount = values[state.position + 2];
+  const base = state.position + 3;
+  if (
+    id < 0 || byteLength < 0 || pairCount < 0 ||
+    base + pairCount * 2 > values.length
+  ) {
+    return { position: state.position, modules: state.modules, valid: false };
+  }
+  const codePoints = codePointRange(values, base, 0, pairCount);
+  const byteOffsets = byteOffsetRange(values, base, 0, pairCount)
+    .append(byteLength);
+  const source: LexerInput = {
+    codePoints: codePoints,
+    byteOffsets: byteOffsets,
+    byteLength: byteLength
+  };
+  return {
+    position: base + pairCount * 2,
+    modules: append(state.modules, { id: id, source: source }),
+    valid: true
+  };
+}
+
+function decodeModuleRange(
+  values: Int[],
+  start: Int,
+  end: Int,
+  state: ModuleDecodeState
+): ModuleDecodeState {
+  if (!state.valid || start >= end) {
+    return state;
+  }
+  if (end - start === 1) {
+    return stepModuleDecode(values, state);
+  }
+  const middle = start + (end - start) / 2;
+  const left = decodeModuleRange(values, start, middle, state);
+  return decodeModuleRange(values, middle, end, left);
+}
+
+function stepEdgeDecode(
+  values: Int[],
+  state: EdgeDecodeState
+): EdgeDecodeState {
+  if (!state.valid || state.position + 4 > values.length) {
+    return { position: state.position, edges: state.edges, valid: false };
+  }
+  return {
+    position: state.position + 4,
+    edges: append(state.edges, {
+      importer: values[state.position],
+      imported: values[state.position + 1],
+      pathStart: values[state.position + 2],
+      pathEnd: values[state.position + 3]
+    }),
+    valid: true
+  };
+}
+
+function decodeEdgeRange(
+  values: Int[],
+  start: Int,
+  end: Int,
+  state: EdgeDecodeState
+): EdgeDecodeState {
+  if (!state.valid || start >= end) {
+    return state;
+  }
+  if (end - start === 1) {
+    return stepEdgeDecode(values, state);
+  }
+  const middle = start + (end - start) / 2;
+  const left = decodeEdgeRange(values, start, middle, state);
+  return decodeEdgeRange(values, middle, end, left);
+}
+
+export function resolveEncoded(arguments: String[]): ResolverOutcome {
+  const values = parseRange(arguments, 0, arguments.length);
+  if (values.length === 0 || values[0] <= 0) {
+    return ResolverOutcome.InvalidInput();
+  }
+  const moduleCount = values[0];
+  const moduleInitial: ModuleDecodeState = {
+    position: 1,
+    modules: { chunks: [], tail: [], length: 0 },
+    valid: true
+  };
+  const decodedModules = decodeModuleRange(
+    values,
+    0,
+    moduleCount,
+    moduleInitial
+  );
+  if (!decodedModules.valid || decodedModules.position >= values.length) {
+    return ResolverOutcome.InvalidInput();
+  }
+  const edgeCount = values[decodedModules.position];
+  if (edgeCount < 0) {
+    return ResolverOutcome.InvalidInput();
+  }
+  const edgeInitial: EdgeDecodeState = {
+    position: decodedModules.position + 1,
+    edges: { chunks: [], tail: [], length: 0 },
+    valid: true
+  };
+  const decodedEdges = decodeEdgeRange(
+    values,
+    0,
+    edgeCount,
+    edgeInitial
+  );
+  if (!decodedEdges.valid || !(decodedEdges.position === values.length)) {
+    return ResolverOutcome.InvalidInput();
+  }
+  const input: ResolverInput = {
+    modules: toArray(decodedModules.modules),
+    edges: toArray(decodedEdges.edges)
+  };
+  return resolve(input);
+}
