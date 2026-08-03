@@ -683,7 +683,9 @@ fn compile_session_with_options<P>(
     })
 }
 
-fn validated_sources(input: &CompilerInput) -> Result<Vec<&CompilerSource>, CompileError> {
+pub(crate) fn validated_sources(
+    input: &CompilerInput,
+) -> Result<Vec<&CompilerSource>, CompileError> {
     validate_identity(input.entry())?;
     let mut sources = input.sources().iter().collect::<Vec<_>>();
     sources.sort_by(|left, right| left.identity().cmp(right.identity()));

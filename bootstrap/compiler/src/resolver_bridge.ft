@@ -1,22 +1,15 @@
 import { LexerInput } from "./lexer.ft";
 import {
-  ResolverEdgeInput,
   ResolverInput,
-  ResolverModuleInput,
+  ResolverSourceInput,
   ResolverOutcome,
   resolve
 } from "./resolver.ft";
 import { Sequence, append, toArray } from "./sequence.ft";
 
-type ModuleDecodeState = {
+type SourceDecodeState = {
   position: Int;
-  modules: Sequence<ResolverModuleInput>;
-  valid: Bool;
-};
-
-type EdgeDecodeState = {
-  position: Int;
-  edges: Sequence<ResolverEdgeInput>;
+  sources: Sequence<ResolverSourceInput>;
   valid: Bool;
 };
 
@@ -33,7 +26,24 @@ function parseRange(values: String[], start: Int, end: Int): Int[] {
   );
 }
 
-function codePointRange(
+function valueRange(
+  values: Int[],
+  start: Int,
+  end: Int
+): Int[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [values[start]];
+  }
+  const middle = start + (end - start) / 2;
+  return valueRange(values, start, middle).concat(
+    valueRange(values, middle, end)
+  );
+}
+
+function codePointPairRange(
   values: Int[],
   base: Int,
   start: Int,
@@ -46,12 +56,12 @@ function codePointRange(
     return [values[base + start * 2]];
   }
   const middle = start + (end - start) / 2;
-  return codePointRange(values, base, start, middle).concat(
-    codePointRange(values, base, middle, end)
+  return codePointPairRange(values, base, start, middle).concat(
+    codePointPairRange(values, base, middle, end)
   );
 }
 
-function byteOffsetRange(
+function byteOffsetPairRange(
   values: Int[],
   base: Int,
   start: Int,
@@ -64,137 +74,93 @@ function byteOffsetRange(
     return [values[base + start * 2 + 1]];
   }
   const middle = start + (end - start) / 2;
-  return byteOffsetRange(values, base, start, middle).concat(
-    byteOffsetRange(values, base, middle, end)
+  return byteOffsetPairRange(values, base, start, middle).concat(
+    byteOffsetPairRange(values, base, middle, end)
   );
 }
 
-function stepModuleDecode(
+function stepSourceDecode(
   values: Int[],
-  state: ModuleDecodeState
-): ModuleDecodeState {
+  state: SourceDecodeState
+): SourceDecodeState {
   if (!state.valid || state.position + 3 > values.length) {
-    return { position: state.position, modules: state.modules, valid: false };
+    return { position: state.position, sources: state.sources, valid: false };
   }
-  const id = values[state.position];
-  const byteLength = values[state.position + 1];
-  const pairCount = values[state.position + 2];
-  const base = state.position + 3;
+  const identityCount = values[state.position];
+  const identityStart = state.position + 1;
+  const identityEnd = identityStart + identityCount;
+  if (identityCount < 0 || identityEnd + 2 > values.length) {
+    return { position: state.position, sources: state.sources, valid: false };
+  }
+  const byteLength = values[identityEnd];
+  const pairCount = values[identityEnd + 1];
+  const base = identityEnd + 2;
   if (
-    id < 0 || byteLength < 0 || pairCount < 0 ||
+    byteLength < 0 || pairCount < 0 ||
     base + pairCount * 2 > values.length
   ) {
-    return { position: state.position, modules: state.modules, valid: false };
+    return { position: state.position, sources: state.sources, valid: false };
   }
-  const codePoints = codePointRange(values, base, 0, pairCount);
-  const byteOffsets = byteOffsetRange(values, base, 0, pairCount)
+  const sourceCodePoints = codePointPairRange(values, base, 0, pairCount);
+  const byteOffsets = byteOffsetPairRange(values, base, 0, pairCount)
     .append(byteLength);
   const source: LexerInput = {
-    codePoints: codePoints,
+    codePoints: sourceCodePoints,
     byteOffsets: byteOffsets,
     byteLength: byteLength
   };
   return {
     position: base + pairCount * 2,
-    modules: append(state.modules, { id: id, source: source }),
-    valid: true
-  };
-}
-
-function decodeModuleRange(
-  values: Int[],
-  start: Int,
-  end: Int,
-  state: ModuleDecodeState
-): ModuleDecodeState {
-  if (!state.valid || start >= end) {
-    return state;
-  }
-  if (end - start === 1) {
-    return stepModuleDecode(values, state);
-  }
-  const middle = start + (end - start) / 2;
-  const left = decodeModuleRange(values, start, middle, state);
-  return decodeModuleRange(values, middle, end, left);
-}
-
-function stepEdgeDecode(
-  values: Int[],
-  state: EdgeDecodeState
-): EdgeDecodeState {
-  if (!state.valid || state.position + 4 > values.length) {
-    return { position: state.position, edges: state.edges, valid: false };
-  }
-  return {
-    position: state.position + 4,
-    edges: append(state.edges, {
-      importer: values[state.position],
-      imported: values[state.position + 1],
-      pathStart: values[state.position + 2],
-      pathEnd: values[state.position + 3]
+    sources: append(state.sources, {
+      identity: valueRange(values, identityStart, identityEnd),
+      source: source
     }),
     valid: true
   };
 }
 
-function decodeEdgeRange(
+function decodeSourceRange(
   values: Int[],
-  start: Int,
-  end: Int,
-  state: EdgeDecodeState
-): EdgeDecodeState {
-  if (!state.valid || start >= end) {
+  remaining: Int,
+  state: SourceDecodeState
+): SourceDecodeState {
+  if (!state.valid || remaining <= 0) {
     return state;
   }
-  if (end - start === 1) {
-    return stepEdgeDecode(values, state);
-  }
-  const middle = start + (end - start) / 2;
-  const left = decodeEdgeRange(values, start, middle, state);
-  return decodeEdgeRange(values, middle, end, left);
+  return decodeSourceRange(values, remaining - 1, stepSourceDecode(values, state));
 }
 
 export function resolveEncoded(arguments: String[]): ResolverOutcome {
   const values = parseRange(arguments, 0, arguments.length);
-  if (values.length === 0 || values[0] <= 0) {
+  if (values.length < 2 || values[0] < 0) {
     return ResolverOutcome.InvalidInput();
   }
-  const moduleCount = values[0];
-  const moduleInitial: ModuleDecodeState = {
-    position: 1,
-    modules: { chunks: [], tail: [], length: 0 },
+  const entryCount = values[0];
+  const entryStart = 1;
+  const entryEnd = entryStart + entryCount;
+  if (entryEnd >= values.length || entryCount < 0) {
+    return ResolverOutcome.InvalidInput();
+  }
+  const sourceCount = values[entryEnd];
+  if (sourceCount <= 0) {
+    return ResolverOutcome.InvalidInput();
+  }
+  const sourceInitial: SourceDecodeState = {
+    position: entryEnd + 1,
+    sources: { chunks: [], tail: [], length: 0 },
     valid: true
   };
-  const decodedModules = decodeModuleRange(
+  const decodedSources = decodeSourceRange(
     values,
-    0,
-    moduleCount,
-    moduleInitial
+    sourceCount,
+    sourceInitial
   );
-  if (!decodedModules.valid || decodedModules.position >= values.length) {
-    return ResolverOutcome.InvalidInput();
-  }
-  const edgeCount = values[decodedModules.position];
-  if (edgeCount < 0) {
-    return ResolverOutcome.InvalidInput();
-  }
-  const edgeInitial: EdgeDecodeState = {
-    position: decodedModules.position + 1,
-    edges: { chunks: [], tail: [], length: 0 },
-    valid: true
-  };
-  const decodedEdges = decodeEdgeRange(
-    values,
-    0,
-    edgeCount,
-    edgeInitial
-  );
-  if (!decodedEdges.valid || !(decodedEdges.position === values.length)) {
+  if (!decodedSources.valid || !(decodedSources.position === values.length)) {
     return ResolverOutcome.InvalidInput();
   }
   const input: ResolverInput = {
-    modules: toArray(decodedModules.modules),
-    edges: toArray(decodedEdges.edges)
+    entry: valueRange(values, entryStart, entryEnd),
+    sources: toArray(decodedSources.sources)
   };
   return resolve(input);
 }
