@@ -9,7 +9,11 @@ on:
       - "bootstrap/**"
       - "crates/**"
       - "fuzz/**"
+      - "packaging/**"
+      - "scripts/**"
       - "xtask/**"
+      - "docs/release.md"
+      - "README.md"
   push:
     tags:
       - "v*"
@@ -167,15 +171,83 @@ jobs:
           mkdir -p "$extracted"
           tar -xzf "dist/${package}.tar.gz" -C "$extracted"
           smoke "$extracted/$package/$(basename "$binary")"
-
-          archive="dist/${package}.tar.gz"
-          if command -v sha256sum >/dev/null 2>&1; then
-            checksum="$(sha256sum "$archive" | cut -d ' ' -f 1)"
-          else
-            checksum="$(shasum -a 256 "$archive" | cut -d ' ' -f 1)"
-          fi
-          printf '%s  %s\n' "$checksum" "${package}.tar.gz" > "${archive}.sha256"
           echo "name=$package" >> "$GITHUB_OUTPUT"
+
+      - name: Build Debian installer
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          host="$(rustc -vV | sed -n 's/^host: //p')"
+          scripts/package-deb.sh \
+            "$RELEASE_VERSION" \
+            target/release/nexac \
+            "dist/nexac-${RELEASE_VERSION}-${host}.deb"
+
+      - name: Build macOS installer
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          host="$(rustc -vV | sed -n 's/^host: //p')"
+          scripts/package-pkg.sh \
+            "$RELEASE_VERSION" \
+            target/release/nexac \
+            "dist/nexac-${RELEASE_VERSION}-${host}.pkg"
+
+      - name: Install WiX Toolset
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command candle.exe -ErrorAction SilentlyContinue)) {
+            choco install wixtoolset --no-progress --yes
+          }
+
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          $targetTriple = ((rustc -vV | Select-String '^host:').ToString().Split(':', 2)[1]).Trim()
+          ./scripts/package-msi.ps1 `
+            -Version $env:RELEASE_VERSION `
+            -Binary 'target/release/nexac.exe' `
+            -Output "dist/nexac-$env:RELEASE_VERSION-$targetTriple.msi"
+
+      - name: Verify native installer
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          host="$(rustc -vV | sed -n 's/^host: //p')"
+          case "$RUNNER_OS" in
+            Linux)
+              package="dist/nexac-${RELEASE_VERSION}-${host}.deb"
+              dpkg-deb --info "$package"
+              extracted="$(mktemp -d)"
+              dpkg-deb --extract "$package" "$extracted"
+              test "$($extracted/usr/bin/nexac --version)" = "nexac ${RELEASE_VERSION}"
+              ;;
+            macOS)
+              package="dist/nexac-${RELEASE_VERSION}-${host}.pkg"
+              pkgutil --payload-files "$package" | grep -Fx './usr/local/bin/nexac'
+              ;;
+            Windows)
+              package="dist/nexac-${RELEASE_VERSION}-${host}.msi"
+              test -s "$package"
+              ;;
+            *)
+              echo "unsupported runner: $RUNNER_OS" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Write SHA-256 checksums
+        shell: bash
+        run: scripts/checksums.sh dist
 
       - name: Upload packaged binary
         uses: actions/upload-artifact@v7
@@ -183,7 +255,13 @@ jobs:
           name: ${{ steps.package.outputs.name }}
           path: |
             dist/*.tar.gz
-            dist/*.sha256
+            dist/*.tar.gz.sha256
+            dist/*.deb
+            dist/*.deb.sha256
+            dist/*.pkg
+            dist/*.pkg.sha256
+            dist/*.msi
+            dist/*.msi.sha256
           if-no-files-found: error
           retention-days: 7
 

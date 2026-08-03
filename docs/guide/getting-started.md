@@ -35,6 +35,12 @@ without keeping a checkout:
 cargo install --locked --git https://github.com/baicie/tao --tag v0.0.9 nexac
 ```
 
+For end-user installation, download the matching native installer from the
+[GitHub Release](https://github.com/baicie/tao/releases). The Linux `.deb`,
+macOS ARM64 `.pkg`, and Windows x86_64 `.msi` installers configure the command
+path automatically. The `.tar.gz` archive remains available when the native
+installer does not match the host system.
+
 ## Test
 
 ```bash
