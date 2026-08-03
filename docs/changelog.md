@@ -6,6 +6,10 @@
   inference, operators, conditionals, and return checks.
 - Froze `FUTAO-TYPECHECK-1` schema 1 with strict accepted/rejected fixtures and
   source-aware `E3001` through `E3003` diagnostics.
+- Closed the v1 protocol boundary: node shapes and candidate node counts are
+  validated, up to 2048 bounded diagnostics are accepted, diagnostic order is
+  canonical, unknown output tags fail closed, and corpus fixtures carry
+  semantic oracles covering all 12 node kinds.
 - Kept generic substitution, match coverage, ownership, and the Rust default
   path deferred to later `0.0.10` slices.
 

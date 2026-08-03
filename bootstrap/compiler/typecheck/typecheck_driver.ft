@@ -18,7 +18,10 @@ function typeName(kind: Int): String {
   if (kind === 3) {
     return "unit";
   }
-  return "unknown";
+  if (kind === -1) {
+    return "unknown";
+  }
+  return "invalid-type";
 }
 
 function diagnosticCode(code: Int): String {
@@ -28,7 +31,10 @@ function diagnosticCode(code: Int): String {
   if (code === 1) {
     return "E3002";
   }
-  return "E3003";
+  if (code === 2) {
+    return "E3003";
+  }
+  return "invalid-diagnostic";
 }
 
 function emitDiagnostic(diagnostic: TypecheckDiagnostic): Unit {

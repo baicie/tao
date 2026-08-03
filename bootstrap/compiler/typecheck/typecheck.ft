@@ -161,6 +161,212 @@ function ifConditionDiagnostics(left: Int, node: TypecheckNode): TypecheckDiagno
   return [];
 }
 
+function validNodeShape(node: TypecheckNode): Bool {
+  if (node.kind < 0 || node.kind > 11) {
+    return false;
+  }
+  if (node.kind <= 3) {
+    return node.left === -1 && node.right === -1 &&
+      node.extra === -1 && node.expected === -1;
+  }
+  if (node.kind === 4 || node.kind === 5) {
+    return node.left >= 0 && node.right === -1 &&
+      node.extra === -1 && node.expected === -1;
+  }
+  if (node.kind >= 6 && node.kind <= 9) {
+    return node.left >= 0 && node.right >= 0 &&
+      node.extra === -1 && node.expected === -1;
+  }
+  if (node.kind === 10) {
+    return node.left >= 0 && node.right >= 0 &&
+      node.extra >= 0 && node.expected === -1;
+  }
+  return node.kind === 11 && node.left >= 0 && node.right === -1 &&
+    node.extra === -1 && node.expected >= 0 && node.expected <= 3;
+}
+
+function diagnosticBefore(
+  left: TypecheckDiagnostic,
+  right: TypecheckDiagnostic
+): Bool {
+  if (!(left.start === right.start)) {
+    return left.start < right.start;
+  }
+  if (!(left.end === right.end)) {
+    return left.end < right.end;
+  }
+  return left.code <= right.code;
+}
+
+function copyDiagnosticRange(
+  values: TypecheckDiagnostic[],
+  start: Int,
+  end: Int
+): TypecheckDiagnostic[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [values[start]];
+  }
+  const middle = start + (end - start) / 2;
+  return copyDiagnosticRange(values, start, middle).concat(
+    copyDiagnosticRange(values, middle, end)
+  );
+}
+
+function lowerDiagnosticBound(
+  values: TypecheckDiagnostic[],
+  pivot: TypecheckDiagnostic,
+  start: Int,
+  end: Int
+): Int {
+  if (start >= end) {
+    return start;
+  }
+  const middle = start + (end - start) / 2;
+  if (diagnosticBefore(values[middle], pivot)) {
+    return lowerDiagnosticBound(values, pivot, middle + 1, end);
+  }
+  return lowerDiagnosticBound(values, pivot, start, middle);
+}
+
+function mergeDiagnosticSmall(
+  left: TypecheckDiagnostic[],
+  leftStart: Int,
+  leftEnd: Int,
+  right: TypecheckDiagnostic[],
+  rightStart: Int,
+  rightEnd: Int
+): TypecheckDiagnostic[] {
+  if (leftStart >= leftEnd) {
+    return copyDiagnosticRange(right, rightStart, rightEnd);
+  }
+  if (rightStart >= rightEnd) {
+    return copyDiagnosticRange(left, leftStart, leftEnd);
+  }
+  if (diagnosticBefore(left[leftStart], right[rightStart])) {
+    return [left[leftStart]].concat(mergeDiagnosticSmall(
+      left,
+      leftStart + 1,
+      leftEnd,
+      right,
+      rightStart,
+      rightEnd
+    ));
+  }
+  return [right[rightStart]].concat(mergeDiagnosticSmall(
+    left,
+    leftStart,
+    leftEnd,
+    right,
+    rightStart + 1,
+    rightEnd
+  ));
+}
+
+function mergeDiagnosticRange(
+  left: TypecheckDiagnostic[],
+  leftStart: Int,
+  leftEnd: Int,
+  right: TypecheckDiagnostic[],
+  rightStart: Int,
+  rightEnd: Int
+): TypecheckDiagnostic[] {
+  const leftLength = leftEnd - leftStart;
+  const rightLength = rightEnd - rightStart;
+  if (leftLength === 0) {
+    return copyDiagnosticRange(right, rightStart, rightEnd);
+  }
+  if (rightLength === 0) {
+    return copyDiagnosticRange(left, leftStart, leftEnd);
+  }
+  if (leftLength < rightLength) {
+    return mergeDiagnosticRange(
+      right,
+      rightStart,
+      rightEnd,
+      left,
+      leftStart,
+      leftEnd
+    );
+  }
+  if (leftLength + rightLength <= 32) {
+    return mergeDiagnosticSmall(
+      left,
+      leftStart,
+      leftEnd,
+      right,
+      rightStart,
+      rightEnd
+    );
+  }
+  const leftMiddle = leftStart + leftLength / 2;
+  const pivot = left[leftMiddle];
+  const rightMiddle = lowerDiagnosticBound(
+    right,
+    pivot,
+    rightStart,
+    rightEnd
+  );
+  return mergeDiagnosticRange(
+    left,
+    leftStart,
+    leftMiddle,
+    right,
+    rightStart,
+    rightMiddle
+  ).concat([pivot]).concat(mergeDiagnosticRange(
+    left,
+    leftMiddle + 1,
+    leftEnd,
+    right,
+    rightMiddle,
+    rightEnd
+  ));
+}
+
+function sortDiagnosticRange(
+  values: TypecheckDiagnostic[],
+  start: Int,
+  end: Int
+): TypecheckDiagnostic[] {
+  if (end - start <= 1) {
+    return copyDiagnosticRange(values, start, end);
+  }
+  const middle = start + (end - start) / 2;
+  const left = sortDiagnosticRange(values, start, middle);
+  const right = sortDiagnosticRange(values, middle, end);
+  return mergeDiagnosticRange(left, 0, left.length, right, 0, right.length);
+}
+
+function sortDiagnostics(values: TypecheckDiagnostic[]): TypecheckDiagnostic[] {
+  return sortDiagnosticRange(values, 0, values.length);
+}
+
+function validNodeRange(
+  nodes: TypecheckNode[],
+  start: Int,
+  end: Int,
+  sourceLength: Int
+): Bool {
+  if (start >= end) {
+    return true;
+  }
+  if (end - start > 1) {
+    const middle = start + (end - start) / 2;
+    return validNodeRange(nodes, start, middle, sourceLength) &&
+      validNodeRange(nodes, middle, end, sourceLength);
+  }
+  const node = nodes[start];
+  if (!validNodeShape(node) || node.start < 0 || node.start >= node.end ||
+    node.end > sourceLength || node.left >= start ||
+    node.right >= start || node.extra >= start) {
+    return false;
+  }
+  return true;
+}
+
 function checkRange(
   nodes: TypecheckNode[],
   start: Int,
@@ -187,18 +393,16 @@ export function check(nodes: TypecheckNode[], sourceLength: Int): TypecheckOutco
   if (sourceLength < 0 || nodes.length > 1024) {
     return TypecheckOutcome.InvalidInput();
   }
-  for (const node of nodes) {
-    if (
-      node.start < 0 || node.start >= node.end || node.end > sourceLength ||
-      node.left >= nodes.length || node.right >= nodes.length || node.extra >= nodes.length
-    ) {
-      return TypecheckOutcome.InvalidInput();
-    }
+  if (!validNodeRange(nodes, 0, nodes.length, sourceLength)) {
+    return TypecheckOutcome.InvalidInput();
   }
   const state = checkRange(nodes, 0, nodes.length, {
     types: [],
     diagnostics: [],
     valid: true
   });
-  return TypecheckOutcome.Checked({ types: state.types, diagnostics: state.diagnostics });
+  return TypecheckOutcome.Checked({
+    types: state.types,
+    diagnostics: sortDiagnostics(state.diagnostics)
+  });
 }

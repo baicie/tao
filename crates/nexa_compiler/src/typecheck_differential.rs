@@ -12,6 +12,8 @@ use crate::{compile, CompileError, CompilerInput, CompilerOptions, CompilerSourc
 /// Canonical schema used by type-checker differential snapshots.
 pub const TYPECHECK_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
 
+const TYPECHECK_MAX_NODES: usize = 1024;
+const TYPECHECK_MAX_DIAGNOSTICS: usize = TYPECHECK_MAX_NODES * 2;
 const FUTAO_TYPECHECK_STEP_LIMIT: usize = 2_000_000;
 const FUTAO_TYPECHECK_SOURCE: &str =
     include_str!("../../../bootstrap/compiler/typecheck/typecheck.ft");
@@ -455,6 +457,7 @@ impl TypecheckAdapter for RustTypeCheckerAdapter {
             let ty = infer_node(node, &types, &mut diagnostics);
             types.push(ty);
         }
+        diagnostics.sort_by(|left, right| diagnostic_key(left).cmp(&diagnostic_key(right)));
         Ok(snapshot(types, diagnostics))
     }
 }
@@ -585,6 +588,15 @@ fn diagnostic(code: &str, span: TypecheckSpan) -> TypecheckDiagnosticSnapshot {
     }
 }
 
+fn diagnostic_key(diagnostic: &TypecheckDiagnosticSnapshot) -> (u32, u32, u32, &str) {
+    (
+        diagnostic.span.source,
+        diagnostic.span.start,
+        diagnostic.span.end,
+        diagnostic.code.as_str(),
+    )
+}
+
 fn snapshot(
     types: Vec<TypeTag>,
     diagnostics: Vec<TypecheckDiagnosticSnapshot>,
@@ -597,7 +609,7 @@ fn snapshot(
 }
 
 fn validate_input(input: &TypecheckInput) -> Result<(), TypecheckAdapterError> {
-    if input.nodes.len() > 1024 {
+    if input.nodes.len() > TYPECHECK_MAX_NODES {
         return Err(TypecheckAdapterError::InputTooLarge);
     }
     for (index, node) in input.nodes.iter().enumerate() {
@@ -622,9 +634,48 @@ fn validate_input(input: &TypecheckInput) -> Result<(), TypecheckAdapterError> {
                 }
             }
         }
-        if matches!(node.kind, TypecheckNodeKind::Return) && node.expected.is_none() {
+        let shape_valid = match node.kind {
+            TypecheckNodeKind::Int
+            | TypecheckNodeKind::Bool
+            | TypecheckNodeKind::String
+            | TypecheckNodeKind::Unit => {
+                node.left.is_none()
+                    && node.right.is_none()
+                    && node.extra.is_none()
+                    && node.expected.is_none()
+            }
+            TypecheckNodeKind::Neg | TypecheckNodeKind::Not => {
+                node.left.is_some()
+                    && node.right.is_none()
+                    && node.extra.is_none()
+                    && node.expected.is_none()
+            }
+            TypecheckNodeKind::Add
+            | TypecheckNodeKind::Equal
+            | TypecheckNodeKind::And
+            | TypecheckNodeKind::Or => {
+                node.left.is_some()
+                    && node.right.is_some()
+                    && node.extra.is_none()
+                    && node.expected.is_none()
+            }
+            TypecheckNodeKind::If => {
+                node.left.is_some()
+                    && node.right.is_some()
+                    && node.extra.is_some()
+                    && node.expected.is_none()
+            }
+            TypecheckNodeKind::Return => {
+                node.left.is_some()
+                    && node.right.is_none()
+                    && node.extra.is_none()
+                    && node.expected.is_some()
+            }
+        };
+        if !shape_valid {
             return Err(TypecheckAdapterError::InvalidInput(format!(
-                "node {index} return has no expected type"
+                "node {index} has an invalid {:?} shape",
+                node.kind
             )));
         }
     }
@@ -677,7 +728,7 @@ impl TypecheckAdapter for FutaoTypeCheckerAdapter {
                     location: runtime_location(&self.sources, failure.error().span()),
                     failure,
                 })?;
-        parse_output(execution.output(), input.source_len)
+        parse_output(execution.output(), input.source_len, input.nodes.len())
     }
 }
 
@@ -728,6 +779,7 @@ fn encoded_arguments(input: &TypecheckInput) -> Result<Vec<String>, TypecheckAda
 fn parse_output(
     output: &[String],
     source_len: u32,
+    expected_node_count: usize,
 ) -> Result<TypecheckSnapshot, TypecheckAdapterError> {
     let mut reader = ProtocolReader::new(output);
     reader.expect("header", "FUTAO-TYPECHECK-1")?;
@@ -745,7 +797,7 @@ fn parse_output(
         }
     }
     let schema_version = reader.u32("schema version")?;
-    let node_count = reader.count("node count")?;
+    let node_count = reader.count("node count", TYPECHECK_MAX_NODES)?;
     let mut types = Vec::with_capacity(node_count);
     for _ in 0..node_count {
         let value = reader.next("type tag")?;
@@ -756,7 +808,7 @@ fn parse_output(
         }
         types.push(value.to_owned());
     }
-    let diagnostic_count = reader.count("diagnostic count")?;
+    let diagnostic_count = reader.count("diagnostic count", TYPECHECK_MAX_DIAGNOSTICS)?;
     let mut diagnostics = Vec::with_capacity(diagnostic_count);
     for _ in 0..diagnostic_count {
         let code = reader.next("diagnostic code")?;
@@ -781,13 +833,14 @@ fn parse_output(
         types,
         diagnostics,
     };
-    validate_snapshot(&snapshot, node_count, source_len)?;
+    validate_snapshot(&snapshot, node_count, expected_node_count, source_len)?;
     Ok(snapshot)
 }
 
 fn validate_snapshot(
     snapshot: &TypecheckSnapshot,
     node_count: usize,
+    expected_node_count: usize,
     source_len: u32,
 ) -> Result<(), TypecheckAdapterError> {
     if snapshot.schema_version != TYPECHECK_SNAPSHOT_SCHEMA_VERSION {
@@ -795,11 +848,17 @@ fn validate_snapshot(
             "unexpected schema version".to_owned(),
         ));
     }
+    if node_count != expected_node_count {
+        return Err(TypecheckAdapterError::InvalidSnapshot(
+            "node count does not match input node count".to_owned(),
+        ));
+    }
     if snapshot.types.len() != node_count {
         return Err(TypecheckAdapterError::InvalidSnapshot(
             "type count does not match node count".to_owned(),
         ));
     }
+    let mut previous = None;
     for diagnostic in &snapshot.diagnostics {
         let span = diagnostic.span;
         if span.source != 0 || span.start >= span.end || span.end > source_len {
@@ -807,6 +866,14 @@ fn validate_snapshot(
                 "diagnostic span is out of bounds".to_owned(),
             ));
         }
+        if let Some(previous) = previous {
+            if diagnostic_key(previous) > diagnostic_key(diagnostic) {
+                return Err(TypecheckAdapterError::InvalidSnapshot(
+                    "diagnostics are not sorted by source span and code".to_owned(),
+                ));
+            }
+        }
+        previous = Some(diagnostic);
     }
     Ok(())
 }
@@ -861,14 +928,14 @@ impl<'output> ProtocolReader<'output> {
         }
     }
 
-    fn count(&mut self, field: &str) -> Result<usize, TypecheckAdapterError> {
+    fn count(&mut self, field: &str, maximum: usize) -> Result<usize, TypecheckAdapterError> {
         let value = self.next(field)?;
         let count = value.parse::<usize>().map_err(|error| {
             TypecheckAdapterError::Protocol(format!("{field} is not a count: {error}"))
         })?;
-        if count > 1024 {
+        if count > maximum {
             return Err(TypecheckAdapterError::Protocol(format!(
-                "{field} exceeds the bound"
+                "{field} exceeds the bound of {maximum}"
             )));
         }
         Ok(count)
@@ -897,5 +964,82 @@ impl Display for TypecheckImplementation {
             Self::RustReference => "rust-reference",
             Self::Futao => "futao-bootstrap-v1",
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_output, RustTypeCheckerAdapter, TypecheckAdapter, TypecheckAdapterError};
+    use crate::{TypecheckInput, TypecheckNode, TypecheckNodeKind};
+
+    #[test]
+    fn rust_rejects_a_literal_with_operator_shape() {
+        let input = TypecheckInput::new(
+            2,
+            vec![TypecheckNode::literal(TypecheckNodeKind::Add, 0, 2)],
+        );
+
+        assert!(matches!(
+            RustTypeCheckerAdapter.check(&input),
+            Err(TypecheckAdapterError::InvalidInput(message))
+                if message.contains("shape")
+        ));
+    }
+
+    #[test]
+    fn parser_rejects_a_candidate_node_count_that_differs_from_input() {
+        let output = ["FUTAO-TYPECHECK-1", "ok", "1", "0", "0"].map(str::to_owned);
+
+        assert!(matches!(
+            parse_output(&output, 1, 1),
+            Err(TypecheckAdapterError::InvalidSnapshot(message))
+                if message.contains("node count")
+        ));
+    }
+
+    #[test]
+    fn parser_rejects_diagnostics_out_of_canonical_order() {
+        let output = [
+            "FUTAO-TYPECHECK-1",
+            "ok",
+            "1",
+            "1",
+            "int",
+            "2",
+            "E3002",
+            "0",
+            "4",
+            "5",
+            "E3001",
+            "0",
+            "0",
+            "1",
+        ]
+        .map(str::to_owned);
+
+        assert!(matches!(
+            parse_output(&output, 5, 1),
+            Err(TypecheckAdapterError::InvalidSnapshot(message))
+                if message.contains("diagnostics") && message.contains("sorted")
+        ));
+    }
+
+    #[test]
+    fn rust_can_emit_two_diagnostics_per_node_within_the_protocol_bound() {
+        let mut nodes = vec![
+            TypecheckNode::literal(TypecheckNodeKind::Bool, 0, 1),
+            TypecheckNode::literal(TypecheckNodeKind::Int, 1, 2),
+        ];
+        while nodes.len() < 1024 {
+            let index = nodes.len();
+            nodes.push(TypecheckNode::conditional(1, 0, 1, 0, 2));
+            assert_eq!(index, nodes.len() - 1);
+        }
+
+        let result = RustTypeCheckerAdapter.check(&TypecheckInput::new(2, nodes));
+        assert!(matches!(
+            result,
+            Ok(snapshot) if snapshot.diagnostics().len() == 2044
+        ));
     }
 }
