@@ -108,15 +108,15 @@ be used as a release gate. When all Cargo dependencies are already cached, a
 registry outage can be bypassed for the local install smoke with
 `CARGO_NET_OFFLINE=true`; CI still performs its normal online checks.
 
-The self-use compiler is versioned independently as `nexac 0.0.9`. The script
+The self-use compiler is versioned independently as `nexac 0.0.10`. The script
 is the canonical release entry point. If a manual recovery is required after a
 successful preflight, create and push the matching annotated tag directly:
 
 ```bash
 git switch mvp
 git pull --ff-only
-git tag -a v0.0.9 -m "nexac 0.0.9"
-git push origin v0.0.9
+git tag -a v0.0.10 -m "nexac 0.0.10"
+git push origin v0.0.10
 ```
 
 The [release workflow](https://github.com/baicie/tao/actions/workflows/release.yml)
@@ -140,7 +140,7 @@ explicitly disables registry publication.
 All validation and platform builds finish before GitHub Release creation, so
 failures in those jobs can be retried without moving the tag. If publication
 is interrupted and leaves a draft, delete that draft with
-`gh release delete v0.0.9 --yes` before rerunning the workflow. If the tagged
+`gh release delete v0.0.10 --yes` before rerunning the workflow. If the tagged
 source itself needs correction, increment the package version and create a new
 tag rather than rewriting the existing tag. Reinstall any earlier tag to roll
 back, or remove the CLI with `cargo uninstall nexac`.

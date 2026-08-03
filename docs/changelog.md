@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (Futao 0.0.10 Type Checker Kernel)
+## Compiler Package 0.0.10 (Futao Type Checker Kernel)
 
 - Added the first executable Futao type-checker expression kernel for primitive
   inference, operators, conditionals, and return checks.

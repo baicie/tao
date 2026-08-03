@@ -11,7 +11,7 @@ Accepted 状态解释为对应实现已经存在。
 
 ## 当前基线
 
-* 工具链版本：`0.0.9`。
+* 工具链版本：`0.0.10`。
 * Stage 0：固定为 `nexac 0.0.1` Rust 实现，覆盖 Lexer、Parser、Resolver、Type Checker、HIR、CFG MIR、
   reference interpreter、诊断、conformance 与 release gate。
 * 语言名称：新设计和源码使用 Futao / `.ft`；现有 Nexa / `.nexa` 输入在迁移策略
