@@ -92,7 +92,7 @@ git tag -a v0.0.8 -m "nexac 0.0.8"
 git push origin v0.0.8
 ```
 
-The [release workflow](https://github.com/baicie/nexa/actions/workflows/release.yml)
+The [release workflow](https://github.com/baicie/tao/actions/workflows/release.yml)
 rejects a tag that does not exactly match the Cargo package version or does not
 point to `mvp`. It then runs the complete release and security gates, builds
 and smoke-tests Rust 1.80 binaries on Linux, macOS, and Windows, verifies the

@@ -1110,7 +1110,7 @@ checksums.txt
   "stage0": {
     "compilerVersion": "0.0.1",
     "source": {
-      "repository": "https://github.com/baicie/nexa",
+      "repository": "https://github.com/baicie/tao",
       "commit": "9293a7b59ff3b6625ca09091f7ad50234638981f",
       "archiveDigest": "sha256:<digest>",
       "cargoLockDigest": "sha256:<digest>"
@@ -1131,7 +1131,7 @@ checksums.txt
 ```
 
 `0.0.2` 起使用的完整 checked-in schema 见
-[`bootstrap/stage0/bootstrap-manifest.json`](https://github.com/baicie/nexa/blob/mvp/bootstrap/stage0/bootstrap-manifest.json)。
+[`bootstrap/stage0/bootstrap-manifest.json`](https://github.com/baicie/tao/blob/mvp/bootstrap/stage0/bootstrap-manifest.json)。
 Stage 1/2/3 出现后，manifest 扩展各 Stage 的 normalized NIR digest、verifier/backend
 identity 和 reproducibility result；不会把签名时间混入 Stage 比较。
 
