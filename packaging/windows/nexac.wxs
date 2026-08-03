@@ -31,7 +31,7 @@
 
   <Fragment>
     <DirectoryRef Id="INSTALLFOLDER">
-      <Component Id="NexacExecutable" Guid="{B1D4A3C7-3F9F-4C1A-9F5A-6E6E8C1F2A01}">
+      <Component Id="NexacExecutable" Guid="{B1D4A3C7-3F9F-4C1A-9F5A-6E6E8C1F2A01}" Win64="yes">
         <File Id="NexacExe" Source="$(var.SourceDir)\nexac.exe" KeyPath="yes" />
         <Environment
             Id="NexacPath"
@@ -42,10 +42,10 @@
             Action="set"
             System="yes" />
       </Component>
-      <Component Id="NexacReadme" Guid="{B1D4A3C7-3F9F-4C1A-9F5A-6E6E8C1F2A02}">
+      <Component Id="NexacReadme" Guid="{B1D4A3C7-3F9F-4C1A-9F5A-6E6E8C1F2A02}" Win64="yes">
         <File Id="ReadmeMd" Source="$(var.SourceDir)\README.md" KeyPath="yes" />
       </Component>
-      <Component Id="NexacLicense" Guid="{B1D4A3C7-3F9F-4C1A-9F5A-6E6E8C1F2A03}">
+      <Component Id="NexacLicense" Guid="{B1D4A3C7-3F9F-4C1A-9F5A-6E6E8C1F2A03}" Win64="yes">
         <File Id="LicenseFile" Source="$(var.SourceDir)\LICENSE" KeyPath="yes" />
       </Component>
     </DirectoryRef>
