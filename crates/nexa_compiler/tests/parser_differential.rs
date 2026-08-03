@@ -15,42 +15,58 @@ struct BootstrapCompilerManifest {
     source_files: Vec<String>,
 }
 
-const FUTAO_COMPILER_SOURCES: [(&str, &str); 9] = [
+const FUTAO_COMPILER_SOURCES: [(&str, &str); 13] = [
     (
-        "lexer.ft",
+        "src/lexer.ft",
         include_str!("../../../bootstrap/compiler/src/lexer.ft"),
     ),
     (
-        "lexer_bridge.ft",
+        "src/lexer_bridge.ft",
         include_str!("../../../bootstrap/compiler/src/lexer_bridge.ft"),
     ),
     (
-        "lexer_driver.ft",
+        "src/lexer_driver.ft",
         include_str!("../../../bootstrap/compiler/src/lexer_driver.ft"),
     ),
     (
-        "lexer_profile.ft",
+        "src/lexer_profile.ft",
         include_str!("../../../bootstrap/compiler/src/lexer_profile.ft"),
     ),
     (
-        "parser.ft",
+        "src/parser.ft",
         include_str!("../../../bootstrap/compiler/src/parser.ft"),
     ),
     (
-        "parser_bridge.ft",
+        "src/parser_bridge.ft",
         include_str!("../../../bootstrap/compiler/src/parser_bridge.ft"),
     ),
     (
-        "parser_driver.ft",
+        "src/parser_driver.ft",
         include_str!("../../../bootstrap/compiler/src/parser_driver.ft"),
     ),
     (
-        "parser_profile.ft",
+        "src/parser_profile.ft",
         include_str!("../../../bootstrap/compiler/src/parser_profile.ft"),
     ),
     (
-        "sequence.ft",
+        "src/sequence.ft",
         include_str!("../../../bootstrap/compiler/src/sequence.ft"),
+    ),
+    (
+        "typecheck/typecheck.ft",
+        include_str!("../../../bootstrap/compiler/typecheck/typecheck.ft"),
+    ),
+    (
+        "typecheck/typecheck_bridge.ft",
+        include_str!("../../../bootstrap/compiler/typecheck/typecheck_bridge.ft"),
+    ),
+    (
+        "typecheck/typecheck_driver.ft",
+        include_str!("../../../bootstrap/compiler/typecheck/typecheck_driver.ft"),
+    ),
+    (
+        "typecheck/typecheck_profile.ft",
+        include_str!("../../../bootstrap/compiler/typecheck/typecheck_profile.ft"),
     ),
 ];
 
@@ -653,7 +669,7 @@ fn futao_parser_can_process_its_sorted_full_source_graph_for_the_resolver(
     let manifest: BootstrapCompilerManifest = serde_json::from_str(FUTAO_COMPILER_MANIFEST)?;
     let embedded_sources = FUTAO_COMPILER_SOURCES
         .iter()
-        .map(|(identity, _)| format!("src/{identity}"))
+        .map(|(identity, _)| (*identity).to_owned())
         .collect::<Vec<_>>();
 
     let manifest_parser_sources = manifest

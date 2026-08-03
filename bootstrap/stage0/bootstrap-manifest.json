@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "toolchainVersion": "0.0.10",
   "languageVersion": "1.0",
   "stage0": {
@@ -35,7 +35,9 @@
     "version": "0.0.3",
     "profile": "futao-bootstrap-v1",
     "manifest": "bootstrap/compiler/bootstrap-compiler.json",
-    "treeDigest": "sha256:085e030264fd56e3232ce0fcef480dc2b3f0fe79bb41d8bb7b7823d2a026ded8",
+    "manifestSchemaVersion": 2,
+    "sourceRoots": ["src", "typecheck"],
+    "treeDigest": "sha256:1982421cdc786e056ca420aad0cc0410b3d790253391e7ced4d4f605d9c8da10",
     "implementedPhases": ["lexer", "parser", "resolver"],
     "lexerSnapshotSchemaVersion": 1,
     "differentialCaseCount": 11,

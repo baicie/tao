@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -82,6 +83,8 @@ struct BootstrapCompiler {
     version: String,
     profile: String,
     manifest: String,
+    manifest_schema_version: u32,
+    source_roots: Vec<String>,
     tree_digest: String,
     implemented_phases: Vec<String>,
     lexer_snapshot_schema_version: u32,
@@ -104,6 +107,7 @@ struct BootstrapCompilerManifest {
     profile_entry: String,
     driver_entry: String,
     implemented_phases: Vec<String>,
+    source_roots: Vec<String>,
     source_files: Vec<String>,
     tree_hash_algorithm: String,
     tree_digest: String,
@@ -196,7 +200,7 @@ fn parse_manifest(text: &str) -> Result<BootstrapManifest> {
 
 impl BootstrapManifest {
     fn validate(&self) -> Result<()> {
-        ensure!(self.schema_version == 1, "schemaVersion must be 1");
+        ensure!(self.schema_version == 2, "schemaVersion must be 2");
         expect(
             "toolchainVersion",
             &self.toolchain_version,
@@ -296,6 +300,14 @@ impl BootstrapManifest {
             &self.bootstrap_compiler.manifest,
             "bootstrap/compiler/bootstrap-compiler.json",
         )?;
+        ensure!(
+            self.bootstrap_compiler.manifest_schema_version == 2,
+            "bootstrapCompiler.manifestSchemaVersion must be 2"
+        );
+        ensure!(
+            self.bootstrap_compiler.source_roots == ["src", "typecheck"],
+            "bootstrapCompiler.sourceRoots must contain src, then typecheck"
+        );
         validate_sha256(
             "bootstrapCompiler.treeDigest",
             &self.bootstrap_compiler.tree_digest,
@@ -473,15 +485,26 @@ fn verify_bootstrap_inputs(manifest: &BootstrapManifest, root: &Path) -> Result<
 }
 
 fn verify_bootstrap_compiler(manifest: &BootstrapManifest, root: &Path) -> Result<()> {
+    let bootstrap_root = root.join("bootstrap");
+    ensure_real_directory(&bootstrap_root, "bootstrap root")?;
+    let compiler_root = bootstrap_root.join("compiler");
+    ensure_real_directory(&compiler_root, "bootstrap compiler root")?;
     let compiler_path = root.join(&manifest.bootstrap_compiler.manifest);
+    let compiler_metadata = std::fs::symlink_metadata(&compiler_path)
+        .with_context(|| format!("failed to inspect {}", compiler_path.display()))?;
+    ensure!(
+        compiler_metadata.file_type().is_file(),
+        "{} must be a regular file, not a symlink",
+        compiler_path.display()
+    );
     let compiler_bytes = std::fs::read(&compiler_path)
         .with_context(|| format!("failed to read {}", compiler_path.display()))?;
     let compiler: BootstrapCompilerManifest = serde_json::from_slice(&compiler_bytes)
         .with_context(|| format!("invalid JSON in {}", compiler_path.display()))?;
 
     ensure!(
-        compiler.schema_version == 1,
-        "compiler schemaVersion must be 1"
+        compiler.schema_version == manifest.bootstrap_compiler.manifest_schema_version,
+        "compiler schemaVersion does not match bootstrapCompiler.manifestSchemaVersion"
     );
     expect("compiler.name", &compiler.name, "futao-bootstrap-compiler")?;
     expect(
@@ -513,6 +536,12 @@ fn verify_bootstrap_compiler(manifest: &BootstrapManifest, root: &Path) -> Resul
         compiler.implemented_phases == manifest.bootstrap_compiler.implemented_phases,
         "compiler implementedPhases do not match the top-level contract"
     );
+    validate_compiler_source_roots(&compiler.source_roots)?;
+    ensure!(
+        compiler.source_roots == manifest.bootstrap_compiler.source_roots,
+        "compiler sourceRoots do not match the top-level contract"
+    );
+    validate_compiler_source_files(&compiler.source_files, &compiler.source_roots)?;
     expect(
         "compiler.treeHashAlgorithm",
         &compiler.tree_hash_algorithm,
@@ -552,31 +581,13 @@ fn verify_bootstrap_compiler(manifest: &BootstrapManifest, root: &Path) -> Resul
         &manifest.bootstrap_compiler.default_implementation,
     )?;
 
-    let compiler_root = root.join("bootstrap/compiler");
-    let discovered = discover_compiler_sources(&compiler_root)?;
+    reject_undeclared_compiler_entries(&compiler_root, &compiler.source_roots)?;
+    let discovered = discover_compiler_sources(&compiler_root, &compiler.source_roots)?;
     ensure!(
         compiler.source_files == discovered,
-        "compiler sourceFiles do not match the checked-in src directory"
+        "compiler sourceFiles do not match recursively discovered source roots"
     );
-    let mut tree_hasher = Sha256::new();
-    tree_hasher.update(b"FUTAO-BOOTSTRAP-COMPILER\0");
-    for relative in &compiler.source_files {
-        validate_compiler_source_path(relative)?;
-        let path = compiler_root.join(relative);
-        let metadata = std::fs::symlink_metadata(&path)
-            .with_context(|| format!("failed to inspect {}", path.display()))?;
-        ensure!(
-            metadata.file_type().is_file(),
-            "{} must be a file",
-            path.display()
-        );
-        let bytes =
-            std::fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
-        std::str::from_utf8(&bytes).with_context(|| format!("{} must be UTF-8", path.display()))?;
-        hash_tree_field(&mut tree_hasher, relative.as_bytes())?;
-        hash_tree_field(&mut tree_hasher, &bytes)?;
-    }
-    let actual = format!("sha256:{:x}", tree_hasher.finalize());
+    let actual = compiler_tree_digest(&compiler, &compiler_root)?;
     ensure!(
         actual == compiler.tree_digest,
         "bootstrap compiler tree digest mismatch: expected {}, found {actual}",
@@ -595,28 +606,141 @@ fn verify_bootstrap_compiler(manifest: &BootstrapManifest, root: &Path) -> Resul
     Ok(())
 }
 
-fn discover_compiler_sources(root: &Path) -> Result<Vec<String>> {
-    let source_root = root.join("src");
-    let entries = std::fs::read_dir(&source_root)
-        .with_context(|| format!("failed to read {}", source_root.display()))?;
+fn ensure_real_directory(path: &Path, description: &str) -> Result<()> {
+    let metadata = std::fs::symlink_metadata(path)
+        .with_context(|| format!("failed to inspect {}", path.display()))?;
+    ensure!(
+        metadata.file_type().is_dir(),
+        "{description} must be a directory, not a symlink: {}",
+        path.display()
+    );
+    Ok(())
+}
+
+fn discover_compiler_sources(root: &Path, source_roots: &[String]) -> Result<Vec<String>> {
     let mut sources = Vec::new();
-    for entry in entries {
-        let entry =
-            entry.with_context(|| format!("failed to inspect {}", source_root.display()))?;
-        let path = entry.path();
+    for source_root in source_roots {
+        let path = root.join(source_root);
+        let metadata = std::fs::symlink_metadata(&path)
+            .with_context(|| format!("failed to inspect {}", path.display()))?;
         ensure!(
-            entry.file_type()?.is_file(),
-            "bootstrap compiler source entry must be a file: {}",
+            metadata.file_type().is_dir(),
+            "bootstrap compiler source root must be a directory, not a symlink: {}",
             path.display()
         );
-        let name = path
-            .file_name()
-            .and_then(|value| value.to_str())
-            .context("bootstrap compiler source filename must be UTF-8")?;
-        sources.push(format!("src/{name}"));
+        discover_compiler_source_directory(root, &path, &mut sources)?;
     }
     sources.sort();
+    case_folded_path_set(
+        &sources,
+        "compiler source paths must be unique on case-insensitive filesystems",
+    )?;
     Ok(sources)
+}
+
+fn reject_undeclared_compiler_entries(root: &Path, source_roots: &[String]) -> Result<()> {
+    reject_undeclared_compiler_entries_below(root, root, source_roots)
+}
+
+fn reject_undeclared_compiler_entries_below(
+    compiler_root: &Path,
+    directory: &Path,
+    source_roots: &[String],
+) -> Result<()> {
+    let entries = std::fs::read_dir(directory)
+        .with_context(|| format!("failed to read {}", directory.display()))?;
+    for entry in entries {
+        let entry = entry.with_context(|| format!("failed to inspect {}", directory.display()))?;
+        let path = entry.path();
+        let relative = portable_relative_path(
+            path.strip_prefix(compiler_root)
+                .context("bootstrap compiler entry escaped its root")?,
+            "bootstrap compiler entry",
+        )?;
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("failed to inspect {}", path.display()))?;
+        ensure!(
+            !file_type.is_symlink(),
+            "bootstrap compiler source entry must not be a symlink: {}",
+            path.display()
+        );
+
+        if relative == "bootstrap-compiler.json" {
+            ensure!(
+                file_type.is_file(),
+                "bootstrap compiler manifest must be a regular file"
+            );
+            continue;
+        }
+        if relative == "tests" {
+            ensure!(
+                file_type.is_dir(),
+                "bootstrap compiler tests corpus must be a directory"
+            );
+            continue;
+        }
+        if source_roots.iter().any(|root| root == &relative) {
+            ensure!(
+                file_type.is_dir(),
+                "bootstrap compiler source root must be a directory: {}",
+                path.display()
+            );
+            continue;
+        }
+        let is_source_root_ancestor = source_roots
+            .iter()
+            .any(|root| root.starts_with(&format!("{relative}/")));
+        ensure!(
+            is_source_root_ancestor && file_type.is_dir(),
+            "undeclared bootstrap compiler source entry: {}",
+            path.display()
+        );
+        reject_undeclared_compiler_entries_below(compiler_root, &path, source_roots)?;
+    }
+    Ok(())
+}
+
+fn discover_compiler_source_directory(
+    compiler_root: &Path,
+    directory: &Path,
+    sources: &mut Vec<String>,
+) -> Result<()> {
+    let entries = std::fs::read_dir(directory)
+        .with_context(|| format!("failed to read {}", directory.display()))?;
+    for entry in entries {
+        let entry = entry.with_context(|| format!("failed to inspect {}", directory.display()))?;
+        let path = entry.path();
+        let relative = portable_relative_path(
+            path.strip_prefix(compiler_root)
+                .context("bootstrap compiler source escaped its root")?,
+            "compiler source path",
+        )?;
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("failed to inspect {}", path.display()))?;
+        ensure!(
+            !file_type.is_symlink(),
+            "bootstrap compiler source entry must not be a symlink: {}",
+            path.display()
+        );
+        if file_type.is_dir() {
+            discover_compiler_source_directory(compiler_root, &path, sources)?;
+        } else {
+            ensure!(
+                file_type.is_file(),
+                "bootstrap compiler source entry must be a regular file: {}",
+                path.display()
+            );
+            ensure!(
+                relative.ends_with(".ft"),
+                "bootstrap compiler source files must use .ft: {}",
+                path.display()
+            );
+            sources.push(relative);
+        }
+    }
+    Ok(())
 }
 
 fn validate_parser_corpus(
@@ -734,19 +858,164 @@ fn count_parser_cases(directory: &Path, extension: Option<&str>) -> Result<usize
     Ok(count)
 }
 
-fn validate_compiler_source_path(value: &str) -> Result<()> {
+fn validate_compiler_source_roots(source_roots: &[String]) -> Result<()> {
     ensure!(
-        value.starts_with("src/") && value.ends_with(".ft"),
-        "compiler sourceFiles entries must be `.ft` files below src/"
+        !source_roots.is_empty(),
+        "compiler sourceRoots must not be empty"
     );
+    for source_root in source_roots {
+        validate_portable_relative_path("compiler sourceRoots entry", source_root).context(
+            "compiler sourceRoots entries must be normalized portable relative directories",
+        )?;
+    }
     ensure!(
-        !value.contains(['\\', '\0'])
-            && value
-                .split('/')
-                .all(|component| !component.is_empty() && component != "." && component != ".."),
-        "compiler sourceFiles entries must be normalized portable paths"
+        source_roots.windows(2).all(|pair| pair[0] < pair[1]),
+        "compiler sourceRoots must be unique and sorted by portable path"
     );
+    let folded_roots = case_folded_path_set(
+        source_roots,
+        "compiler sourceRoots must be unique and sorted by portable path",
+    )?;
+    for source_root in &folded_roots {
+        for (index, _) in source_root.match_indices('/') {
+            ensure!(
+                !folded_roots.contains(&source_root[..index]),
+                "compiler sourceRoots must not overlap"
+            );
+        }
+    }
     Ok(())
+}
+
+fn validate_compiler_source_files(source_files: &[String], source_roots: &[String]) -> Result<()> {
+    ensure!(
+        !source_files.is_empty(),
+        "compiler sourceFiles must not be empty"
+    );
+    for source_file in source_files {
+        validate_portable_relative_path("compiler sourceFiles entry", source_file)
+            .context("compiler sourceFiles entries must be normalized portable `.ft` paths")?;
+    }
+    ensure!(
+        source_files.windows(2).all(|pair| pair[0] < pair[1]),
+        "compiler sourceFiles must be unique and sorted by portable path"
+    );
+    case_folded_path_set(
+        source_files,
+        "compiler sourceFiles must be unique on case-insensitive filesystems",
+    )?;
+    let source_root_set = source_roots
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    for source_file in source_files {
+        ensure!(
+            source_file.ends_with(".ft"),
+            "compiler sourceFiles entries must use .ft"
+        );
+        ensure!(
+            source_file
+                .match_indices('/')
+                .any(|(index, _)| source_root_set.contains(&source_file[..index])),
+            "compiler sourceFiles entries must be below a declared source root"
+        );
+    }
+    Ok(())
+}
+
+fn case_folded_path_set(values: &[String], duplicate_message: &str) -> Result<BTreeSet<String>> {
+    let mut folded = BTreeSet::new();
+    for value in values {
+        ensure!(
+            folded.insert(value.to_ascii_lowercase()),
+            "{}",
+            duplicate_message
+        );
+    }
+    Ok(folded)
+}
+
+fn validate_portable_relative_path(field: &str, value: &str) -> Result<()> {
+    ensure!(
+        !value.is_empty() && value.is_ascii() && !value.contains(['\\', '\0']),
+        "{field} must be an ASCII portable relative path"
+    );
+    for component in value.split('/') {
+        ensure!(
+            !component.is_empty()
+                && component != "."
+                && component != ".."
+                && !component.ends_with('.')
+                && component
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.')),
+            "{field} must be a normalized portable relative path"
+        );
+        let basename = component
+            .split_once('.')
+            .map_or(component, |(basename, _)| basename);
+        let basename = basename.to_ascii_uppercase();
+        let reserved = matches!(basename.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+            || basename
+                .strip_prefix("COM")
+                .is_some_and(|suffix| matches!(suffix.as_bytes(), [b'1'..=b'9']))
+            || basename
+                .strip_prefix("LPT")
+                .is_some_and(|suffix| matches!(suffix.as_bytes(), [b'1'..=b'9']));
+        ensure!(!reserved, "{field} contains a reserved portable name");
+    }
+    Ok(())
+}
+
+fn portable_relative_path(path: &Path, field: &str) -> Result<String> {
+    let mut components = Vec::new();
+    for component in path.components() {
+        let std::path::Component::Normal(component) = component else {
+            bail!("{field} must be a normalized portable relative path");
+        };
+        components.push(
+            component
+                .to_str()
+                .with_context(|| format!("{field} must be UTF-8"))?,
+        );
+    }
+    let value = components.join("/");
+    validate_portable_relative_path(field, &value)?;
+    Ok(value)
+}
+
+fn compiler_tree_digest(
+    compiler: &BootstrapCompilerManifest,
+    compiler_root: &Path,
+) -> Result<String> {
+    let mut tree_hasher = Sha256::new();
+    tree_hasher.update(b"FUTAO-BOOTSTRAP-COMPILER-TREE-V2\0");
+    hash_tree_field(&mut tree_hasher, &compiler.schema_version.to_be_bytes())?;
+    let source_root_count = u64::try_from(compiler.source_roots.len())
+        .context("too many bootstrap compiler source roots")?;
+    hash_tree_field(&mut tree_hasher, &source_root_count.to_be_bytes())?;
+    for source_root in &compiler.source_roots {
+        hash_tree_field(&mut tree_hasher, source_root.as_bytes())?;
+    }
+    let source_file_count = u64::try_from(compiler.source_files.len())
+        .context("too many bootstrap compiler source files")?;
+    hash_tree_field(&mut tree_hasher, &source_file_count.to_be_bytes())?;
+    for relative in &compiler.source_files {
+        let path = compiler_root.join(relative);
+        let metadata = std::fs::symlink_metadata(&path)
+            .with_context(|| format!("failed to inspect {}", path.display()))?;
+        ensure!(
+            metadata.file_type().is_file(),
+            "{} must be a regular file, not a symlink",
+            path.display()
+        );
+        let bytes =
+            std::fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+        std::str::from_utf8(&bytes).with_context(|| format!("{} must be UTF-8", path.display()))?;
+        hash_tree_field(&mut tree_hasher, relative.as_bytes())?;
+        hash_tree_field(&mut tree_hasher, &bytes)?;
+    }
+    Ok(format!("sha256:{:x}", tree_hasher.finalize()))
 }
 
 fn hash_tree_field(hasher: &mut Sha256, bytes: &[u8]) -> Result<()> {
@@ -1160,12 +1429,15 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::{
-        canonical_fixture_bytes, parse_manifest, project_bootstrap_stdlib_for_stage0,
-        project_source_for_stage0, stage0_target_dir, verify_bootstrap_compiler,
-        verify_bootstrap_inputs, verify_digest, verify_source, workspace_root,
+        canonical_fixture_bytes, compiler_tree_digest, discover_compiler_sources, parse_manifest,
+        project_bootstrap_stdlib_for_stage0, project_source_for_stage0, stage0_target_dir,
+        validate_compiler_source_roots, verify_bootstrap_compiler, verify_bootstrap_inputs,
+        verify_digest, verify_source, workspace_root,
     };
+    use serde_json::{json, Value};
 
     const ACCEPTED: &str = include_str!("../../bootstrap/stage0/bootstrap-manifest.json");
+    const COMPILER: &str = include_str!("../../bootstrap/compiler/bootstrap-compiler.json");
     const PUBLIC_NIR: &str =
         include_str!("../../bootstrap/tests/rejected/public-nir-artifact.json");
     static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
@@ -1175,7 +1447,7 @@ mod tests {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let manifest = parse_manifest(ACCEPTED)?;
 
-        assert_eq!(manifest.schema_version, 1);
+        assert_eq!(manifest.schema_version, 2);
         assert_eq!(manifest.stage0.compiler_version, "0.0.1");
         assert_eq!(manifest.bootstrap_profile.id, "futao-bootstrap-v1");
         assert_eq!(
@@ -1196,13 +1468,18 @@ mod tests {
         assert_eq!(manifest.bootstrap_compiler.status, "resolver-differential");
         assert_eq!(manifest.bootstrap_compiler.version, "0.0.3");
         assert_eq!(manifest.bootstrap_compiler.profile, "futao-bootstrap-v1");
+        assert_eq!(manifest.bootstrap_compiler.manifest_schema_version, 2);
+        assert_eq!(
+            manifest.bootstrap_compiler.source_roots,
+            ["src", "typecheck"]
+        );
         assert_eq!(
             manifest.bootstrap_compiler.implemented_phases,
             ["lexer", "parser", "resolver"]
         );
         assert_eq!(
             manifest.bootstrap_compiler.tree_digest,
-            "sha256:085e030264fd56e3232ce0fcef480dc2b3f0fe79bb41d8bb7b7823d2a026ded8"
+            "sha256:1982421cdc786e056ca420aad0cc0410b3d790253391e7ced4d4f605d9c8da10"
         );
         assert_eq!(manifest.bootstrap_compiler.lexer_snapshot_schema_version, 1);
         assert_eq!(manifest.bootstrap_compiler.differential_case_count, 11);
@@ -1247,6 +1524,48 @@ mod tests {
         assert!(!manifest.stable_component.includes_nir);
         assert!(manifest.stable_component.separate_lifecycle);
 
+        Ok(())
+    }
+
+    #[test]
+    fn checked_in_manifests_bind_recursive_compiler_sources(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let stage0 = parse_manifest(ACCEPTED)?;
+        let compiler: super::BootstrapCompilerManifest = serde_json::from_str(COMPILER)?;
+
+        assert_eq!(compiler.schema_version, 2);
+        assert_eq!(compiler.source_roots, ["src", "typecheck"]);
+        assert_eq!(
+            compiler.source_files,
+            [
+                "src/lexer.ft",
+                "src/lexer_bridge.ft",
+                "src/lexer_driver.ft",
+                "src/lexer_profile.ft",
+                "src/parser.ft",
+                "src/parser_bridge.ft",
+                "src/parser_driver.ft",
+                "src/parser_profile.ft",
+                "src/resolver.ft",
+                "src/resolver_bridge.ft",
+                "src/resolver_driver.ft",
+                "src/resolver_profile.ft",
+                "src/sequence.ft",
+                "typecheck/typecheck.ft",
+                "typecheck/typecheck_bridge.ft",
+                "typecheck/typecheck_driver.ft",
+                "typecheck/typecheck_profile.ft",
+            ]
+        );
+        assert_eq!(
+            compiler.schema_version,
+            stage0.bootstrap_compiler.manifest_schema_version
+        );
+        assert_eq!(
+            compiler.source_roots,
+            stage0.bootstrap_compiler.source_roots
+        );
+        assert_eq!(compiler.tree_digest, stage0.bootstrap_compiler.tree_digest);
         Ok(())
     }
 
@@ -1314,6 +1633,52 @@ mod tests {
     }
 
     #[test]
+    fn parser_rejects_the_previous_stage0_manifest_schema() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut manifest: Value = serde_json::from_str(ACCEPTED)?;
+        manifest["schemaVersion"] = json!(1);
+
+        let error = parse_manifest(&serde_json::to_string(&manifest)?).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains("schemaVersion must be 2")
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn parser_rejects_an_unbound_compiler_manifest_schema() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut manifest: Value = serde_json::from_str(ACCEPTED)?;
+        manifest["bootstrapCompiler"]["manifestSchemaVersion"] = json!(1);
+
+        let error = parse_manifest(&serde_json::to_string(&manifest)?).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains(
+                "bootstrapCompiler.manifestSchemaVersion must be 2"
+            )
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn parser_rejects_unbound_compiler_source_roots() -> Result<(), Box<dyn std::error::Error>> {
+        let mut manifest: Value = serde_json::from_str(ACCEPTED)?;
+        manifest["bootstrapCompiler"]["sourceRoots"] = json!(["src"]);
+
+        let error = parse_manifest(&serde_json::to_string(&manifest)?).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains("bootstrapCompiler.sourceRoots")
+        ));
+        Ok(())
+    }
+
+    #[test]
     fn checked_in_bootstrap_inputs_match_the_top_level_contract(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let manifest = parse_manifest(ACCEPTED)?;
@@ -1324,15 +1689,519 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_compiler_provenance_rejects_source_drift() -> Result<(), Box<dyn std::error::Error>>
-    {
-        let manifest = parse_manifest(ACCEPTED)?;
+    fn bootstrap_compiler_provenance_accepts_recursive_declared_source_roots(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let directory = TestDirectory::new()?;
+        let mut manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        let nested = directory
+            .path()
+            .join("bootstrap/compiler/src/nested/helper.ft");
+        fs::create_dir_all(directory.path().join("bootstrap/compiler/src/nested"))?;
+        fs::write(&nested, "function helper(): Unit {}\n")?;
+        let compiler_path = directory
+            .path()
+            .join("bootstrap/compiler/bootstrap-compiler.json");
+        let mut compiler = read_json(&compiler_path)?;
+        compiler["sourceFiles"] = json!(discover_compiler_sources(
+            &directory.path().join("bootstrap/compiler"),
+            &["src".to_owned(), "typecheck".to_owned()],
+        )?);
+        refresh_fixture_digest(directory.path(), &mut manifest, &mut compiler)?;
+
+        verify_bootstrap_compiler(&manifest, directory.path())?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_a_missing_source_root(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let error = compiler_fixture_error(|root| {
+            fs::remove_dir_all(root.join("bootstrap/compiler/typecheck"))?;
+            Ok(())
+        })?;
+
+        assert!(error.contains("typecheck"));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_a_missing_source_file(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let error = compiler_fixture_error(|root| {
+            fs::remove_file(root.join("bootstrap/compiler/src/lexer.ft"))?;
+            Ok(())
+        })?;
+
+        assert!(error.contains("sourceFiles do not match recursively discovered source roots"));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_a_wrong_source_extension(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let error = compiler_fixture_error(|root| {
+            fs::rename(
+                root.join("bootstrap/compiler/src/lexer.ft"),
+                root.join("bootstrap/compiler/src/lexer.txt"),
+            )?;
+            Ok(())
+        })?;
+
+        assert!(error.contains("bootstrap compiler source files must use .ft"));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_child_manifest_binding_drift(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let schema_error = compiler_fixture_error(|root| {
+            mutate_compiler_manifest(root, |compiler| {
+                compiler["schemaVersion"] = json!(1);
+            })?;
+            Ok(())
+        })?;
+        let digest_error = compiler_fixture_error(|root| {
+            mutate_compiler_manifest(root, |compiler| {
+                compiler["treeDigest"] = json!(
+                    "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+                );
+            })?;
+            Ok(())
+        })?;
+
+        assert!(schema_error.contains("compiler schemaVersion"));
+        assert!(digest_error.contains("compiler.treeDigest"));
+        Ok(())
+    }
+
+    #[test]
+    fn compiler_tree_digest_binds_schema_roots_paths_and_contents(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
         copy_bootstrap_compiler_fixture(directory.path())?;
+        let compiler_root = directory.path().join("bootstrap/compiler");
+        let compiler_path = compiler_root.join("bootstrap-compiler.json");
+        let original = read_json(&compiler_path)?;
+        let baseline: super::BootstrapCompilerManifest = serde_json::from_value(original.clone())?;
+        let baseline_digest = compiler_tree_digest(&baseline, &compiler_root)?;
+
+        let mut schema = original.clone();
+        schema["schemaVersion"] = json!(3);
+        let schema_manifest: super::BootstrapCompilerManifest = serde_json::from_value(schema)?;
+        assert_ne!(
+            baseline_digest,
+            compiler_tree_digest(&schema_manifest, &compiler_root)?
+        );
+
+        let mut roots = original.clone();
+        roots["sourceRoots"] = json!(["typecheck", "src"]);
+        let roots_manifest: super::BootstrapCompilerManifest = serde_json::from_value(roots)?;
+        assert_ne!(
+            baseline_digest,
+            compiler_tree_digest(&roots_manifest, &compiler_root)?
+        );
+
+        let mut paths = original.clone();
+        if let Some(source_files) = paths["sourceFiles"].as_array_mut() {
+            source_files.swap(0, 1);
+        }
+        let paths_manifest: super::BootstrapCompilerManifest = serde_json::from_value(paths)?;
+        assert_ne!(
+            baseline_digest,
+            compiler_tree_digest(&paths_manifest, &compiler_root)?
+        );
+
+        let source = compiler_root.join("src/lexer.ft");
+        let mut bytes = fs::read(&source)?;
+        bytes.push(b'\n');
+        fs::write(&source, bytes)?;
+        assert_ne!(
+            baseline_digest,
+            compiler_tree_digest(&baseline, &compiler_root)?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn compiler_tree_digest_matches_the_schema_two_fixed_vector(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let directory = TestDirectory::new()?;
+        fs::create_dir(directory.path().join("src"))?;
+        fs::write(
+            directory.path().join("src/main.ft"),
+            b"function main(): Unit {}\n",
+        )?;
+        let mut compiler: Value = serde_json::from_str(COMPILER)?;
+        compiler["sourceRoots"] = json!(["src"]);
+        compiler["sourceFiles"] = json!(["src/main.ft"]);
+        let compiler: super::BootstrapCompilerManifest = serde_json::from_value(compiler)?;
+
+        assert_eq!(
+            compiler_tree_digest(&compiler, directory.path())?,
+            "sha256:6f092de2710a2a723a993ac86e1d0afbb6c8d11e9efa5c565789578289bc3889"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_an_undeclared_file_in_a_source_root(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let directory = TestDirectory::new()?;
+        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        fs::write(
+            directory
+                .path()
+                .join("bootstrap/compiler/src/undeclared.ft"),
+            "function undeclared(): Unit {}\n",
+        )?;
+
+        let error = verify_bootstrap_compiler(&manifest, directory.path()).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains(
+                "compiler sourceFiles do not match recursively discovered source roots"
+            )
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_an_undeclared_source_root(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let directory = TestDirectory::new()?;
+        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        let source = directory
+            .path()
+            .join("bootstrap/compiler/lowering/lower.ft");
+        fs::create_dir_all(directory.path().join("bootstrap/compiler/lowering"))?;
+        fs::write(source, "function lower(): Unit {}\n")?;
+
+        let error = verify_bootstrap_compiler(&manifest, directory.path()).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains("undeclared bootstrap compiler source")
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_unsorted_source_roots(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let directory = TestDirectory::new()?;
+        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        mutate_compiler_manifest(directory.path(), |compiler| {
+            compiler["sourceRoots"] = json!(["typecheck", "src"]);
+        })?;
+
+        let error = verify_bootstrap_compiler(&manifest, directory.path()).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains(
+                "compiler sourceRoots must be unique and sorted by portable path"
+            )
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_duplicate_source_roots(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let directory = TestDirectory::new()?;
+        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        mutate_compiler_manifest(directory.path(), |compiler| {
+            compiler["sourceRoots"] = json!(["src", "src", "typecheck"]);
+        })?;
+
+        let error = verify_bootstrap_compiler(&manifest, directory.path()).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains(
+                "compiler sourceRoots must be unique and sorted by portable path"
+            )
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_overlapping_source_roots(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let directory = TestDirectory::new()?;
+        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        mutate_compiler_manifest(directory.path(), |compiler| {
+            compiler["sourceRoots"] = json!(["src", "src/nested", "typecheck"]);
+        })?;
+
+        let error = verify_bootstrap_compiler(&manifest, directory.path()).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains("compiler sourceRoots must not overlap")
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn compiler_source_contract_rejects_case_insensitive_reverse_root_overlap() {
+        let roots = vec!["SRC/nested".to_owned(), "src".to_owned()];
+
+        let error = validate_compiler_source_roots(&roots).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains("compiler sourceRoots must not overlap")
+        ));
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_non_portable_source_roots(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let directory = TestDirectory::new()?;
+        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        mutate_compiler_manifest(directory.path(), |compiler| {
+            compiler["sourceRoots"] = json!(["../src", "typecheck"]);
+        })?;
+
+        let error = verify_bootstrap_compiler(&manifest, directory.path()).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains(
+                "compiler sourceRoots entries must be normalized portable relative directories"
+            )
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_unsorted_source_files(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let directory = TestDirectory::new()?;
+        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        mutate_compiler_manifest(directory.path(), |compiler| {
+            if let Some(source_files) = compiler["sourceFiles"].as_array_mut() {
+                source_files.swap(0, 1);
+            }
+        })?;
+
+        let error = verify_bootstrap_compiler(&manifest, directory.path()).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains(
+                "compiler sourceFiles must be unique and sorted by portable path"
+            )
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_duplicate_source_files(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let directory = TestDirectory::new()?;
+        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        mutate_compiler_manifest(directory.path(), |compiler| {
+            if let Some(sources) = compiler["sourceFiles"].as_array_mut() {
+                if let Some(first) = sources.first().cloned() {
+                    sources.insert(1, first);
+                }
+            }
+        })?;
+
+        let error = verify_bootstrap_compiler(&manifest, directory.path()).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains(
+                "compiler sourceFiles must be unique and sorted by portable path"
+            )
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_non_portable_source_files(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let directory = TestDirectory::new()?;
+        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        mutate_compiler_manifest(directory.path(), |compiler| {
+            compiler["sourceFiles"][0] = json!("src\\lexer.ft");
+        })?;
+
+        let error = verify_bootstrap_compiler(&manifest, directory.path()).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains(
+                "compiler sourceFiles entries must be normalized portable `.ft` paths"
+            )
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_invalid_utf8_source(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let directory = TestDirectory::new()?;
+        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        let source = directory
+            .path()
+            .join("bootstrap/compiler/typecheck/typecheck.ft");
+        fs::write(&source, [0xff, 0xfe])?;
+
+        let error = verify_bootstrap_compiler(&manifest, directory.path()).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains("typecheck.ft must be UTF-8")
+        ));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_source_symlinks(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use std::os::unix::fs::symlink;
+
+        let directory = TestDirectory::new()?;
+        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        let source = directory.path().join("bootstrap/compiler/src/lexer.ft");
+        fs::remove_file(&source)?;
+        symlink("sequence.ft", &source)?;
+
+        let error = verify_bootstrap_compiler(&manifest, directory.path()).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains(
+                "bootstrap compiler source entry must not be a symlink"
+            )
+        ));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_a_source_root_symlink(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use std::os::unix::fs::symlink;
+
+        let error = compiler_fixture_error(|root| {
+            let typecheck = root.join("bootstrap/compiler/typecheck");
+            fs::remove_dir_all(&typecheck)?;
+            symlink("../src", typecheck)?;
+            Ok(())
+        })?;
+
+        assert!(error.contains("must not be a symlink"));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_a_compiler_root_symlink(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use std::os::unix::fs::symlink;
+
+        let error = compiler_fixture_error(|root| {
+            let compiler = root.join("bootstrap/compiler");
+            let compiler_target = root.join("bootstrap/compiler-target");
+            fs::rename(&compiler, &compiler_target)?;
+            symlink("compiler-target", compiler)?;
+            Ok(())
+        })?;
+
+        assert!(error.contains("bootstrap compiler root must be a directory, not a symlink"));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_a_bootstrap_root_symlink(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use std::os::unix::fs::symlink;
+
+        let error = compiler_fixture_error(|root| {
+            let bootstrap = root.join("bootstrap");
+            let bootstrap_target = root.join("bootstrap-target");
+            fs::rename(&bootstrap, &bootstrap_target)?;
+            symlink("bootstrap-target", bootstrap)?;
+            Ok(())
+        })?;
+
+        assert!(error.contains("bootstrap root must be a directory, not a symlink"));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_a_nested_directory_symlink(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use std::os::unix::fs::symlink;
+
+        let error = compiler_fixture_error(|root| {
+            let source_root = root.join("bootstrap/compiler/src");
+            fs::create_dir(source_root.join("nested-target"))?;
+            symlink("nested-target", source_root.join("nested-link"))?;
+            Ok(())
+        })?;
+
+        assert!(error.contains("must not be a symlink"));
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_a_non_utf8_source_filename(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let error = compiler_fixture_error(|root| {
+            let name = OsString::from_vec(vec![0xff, b'.', b'f', b't']);
+            fs::write(root.join("bootstrap/compiler/src").join(name), b"source")?;
+            Ok(())
+        })?;
+
+        assert!(error.contains("compiler source path must be UTF-8"));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_source_drift() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let directory = TestDirectory::new()?;
+        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
         let lexer = directory.path().join("bootstrap/compiler/src/lexer.ft");
         let mut source = fs::read_to_string(&lexer)?;
         source.push_str("// provenance drift\n");
         fs::write(&lexer, source)?;
+
+        let error = verify_bootstrap_compiler(&manifest, directory.path()).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains("bootstrap compiler tree digest mismatch")
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_typecheck_source_drift(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let directory = TestDirectory::new()?;
+        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        let typecheck = directory
+            .path()
+            .join("bootstrap/compiler/typecheck/typecheck.ft");
+        let mut source = fs::read_to_string(&typecheck)?;
+        source.push_str("// provenance drift\n");
+        fs::write(&typecheck, source)?;
 
         let error = verify_bootstrap_compiler(&manifest, directory.path()).err();
 
@@ -1410,17 +2279,91 @@ function main(): Unit {
         Ok(())
     }
 
-    fn copy_bootstrap_compiler_fixture(destination: &Path) -> Result<(), std::io::Error> {
-        let source = workspace_root().join("bootstrap/compiler");
-        let target = destination.join("bootstrap/compiler");
-        fs::create_dir_all(target.join("src"))?;
-        fs::copy(
-            source.join("bootstrap-compiler.json"),
-            target.join("bootstrap-compiler.json"),
+    fn compiler_fixture_error(
+        mutate: impl FnOnce(&Path) -> Result<(), Box<dyn std::error::Error>>,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let directory = TestDirectory::new()?;
+        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        mutate(directory.path())?;
+        match verify_bootstrap_compiler(&manifest, directory.path()) {
+            Ok(()) => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "verification unexpectedly succeeded",
+            )
+            .into()),
+            Err(error) => Ok(error.to_string()),
+        }
+    }
+
+    fn prepare_schema_two_compiler_fixture(
+        destination: &Path,
+    ) -> Result<super::BootstrapManifest, Box<dyn std::error::Error>> {
+        copy_bootstrap_compiler_fixture(destination)?;
+        Ok(parse_manifest(ACCEPTED)?)
+    }
+
+    fn refresh_fixture_digest(
+        destination: &Path,
+        manifest: &mut super::BootstrapManifest,
+        compiler: &mut Value,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let parsed: super::BootstrapCompilerManifest = serde_json::from_value(compiler.clone())?;
+        let digest = compiler_tree_digest(&parsed, &destination.join("bootstrap/compiler"))?;
+        compiler["treeDigest"] = json!(digest);
+        manifest.bootstrap_compiler.tree_digest = digest;
+        write_json(
+            &destination.join("bootstrap/compiler/bootstrap-compiler.json"),
+            compiler,
         )?;
-        for entry in fs::read_dir(source.join("src"))? {
+        Ok(())
+    }
+
+    fn mutate_compiler_manifest(
+        destination: &Path,
+        mutate: impl FnOnce(&mut Value),
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = destination.join("bootstrap/compiler/bootstrap-compiler.json");
+        let mut compiler = read_json(&path)?;
+        mutate(&mut compiler);
+        write_json(&path, &compiler)?;
+        Ok(())
+    }
+
+    fn read_json(path: &Path) -> Result<Value, Box<dyn std::error::Error>> {
+        Ok(serde_json::from_str(&fs::read_to_string(path)?)?)
+    }
+
+    fn write_json(path: &Path, value: &Value) -> Result<(), Box<dyn std::error::Error>> {
+        let mut bytes = serde_json::to_vec_pretty(value)?;
+        bytes.push(b'\n');
+        fs::write(path, bytes)?;
+        Ok(())
+    }
+
+    fn copy_bootstrap_compiler_fixture(destination: &Path) -> Result<(), std::io::Error> {
+        for relative in [
+            "bootstrap/compiler",
+            "fuzz/corpus/parser",
+            "fuzz/corpus/resolver",
+        ] {
+            copy_source_tree(
+                &workspace_root().join(relative),
+                &destination.join(relative),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn copy_source_tree(source: &Path, target: &Path) -> Result<(), std::io::Error> {
+        fs::create_dir_all(target)?;
+        for entry in fs::read_dir(source)? {
             let entry = entry?;
-            fs::copy(entry.path(), target.join("src").join(entry.file_name()))?;
+            let destination = target.join(entry.file_name());
+            if entry.file_type()?.is_dir() {
+                copy_source_tree(&entry.path(), &destination)?;
+            } else {
+                fs::copy(entry.path(), destination)?;
+            }
         }
         Ok(())
     }
