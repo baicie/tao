@@ -1,4 +1,4 @@
-.PHONY: check fmt lint test doc conformance fuzz-smoke perf storage-kernel nir-artifact release-check security bootstrap-contract bootstrap-profile lexer-differential parser-differential resolver-differential typecheck-differential
+.PHONY: check fmt lint test doc conformance fuzz-smoke perf storage-kernel nir-artifact release-check release release-dry-run security bootstrap-contract bootstrap-profile lexer-differential parser-differential resolver-differential typecheck-differential
 
 check:
 	cargo xtask check
@@ -32,6 +32,12 @@ nir-artifact:
 
 release-check:
 	cargo xtask release-check
+
+release-dry-run:
+	./scripts/release.sh --dry-run
+
+release:
+	./scripts/release.sh --publish
 
 security:
 	cargo xtask security

@@ -85,8 +85,32 @@ deploy documentation, or publish a binary distribution. Publishing remains a
 separate, explicitly authorized operation. The completed integration process,
 not the command by itself, declares Nexa Language 1.0 Reference Core delivered.
 
-The self-use compiler is versioned independently as `nexac 0.0.9`. After a
-release commit is squash-merged to `mvp`, create and push the matching annotated tag:
+## Local Release Script
+
+Run the release script from a clean, up-to-date `mvp` checkout after the release
+PR has been squash-merged:
+
+```bash
+scripts/release.sh --dry-run
+scripts/release.sh --publish
+```
+
+The script reads the `nexac` version from Cargo, verifies that the checkout is
+on `mvp` and matches `origin/mvp`, rejects an existing matching tag, runs
+`cargo xtask release-check`, installs the CLI into a temporary root, and checks
+the installed compiler against the bundled `.ft` example. The default mode and
+`--dry-run` perform validation only. `--publish` is the only mode that creates
+and pushes the annotated tag; the GitHub release workflow then builds the
+cross-platform archives and creates the prerelease.
+
+`--skip-checks` is available only for a non-publishing preflight and must not
+be used as a release gate. When all Cargo dependencies are already cached, a
+registry outage can be bypassed for the local install smoke with
+`CARGO_NET_OFFLINE=true`; CI still performs its normal online checks.
+
+The self-use compiler is versioned independently as `nexac 0.0.9`. The script
+is the canonical release entry point. If a manual recovery is required after a
+successful preflight, create and push the matching annotated tag directly:
 
 ```bash
 git switch mvp
