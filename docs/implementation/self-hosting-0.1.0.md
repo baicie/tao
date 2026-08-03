@@ -26,7 +26,10 @@ Accepted 状态解释为对应实现已经存在。
 * `0.0.7` 已交付真实 Futao Lexer、UTF-8 snapshot schema 与无差异 corpus/fuzz gate。
 * `0.0.8` 已交付真实 Futao Parser、lossless CST/recovery snapshot schema 与无差异 corpus/fuzz gate。
 * `0.0.9` 已交付真实 Futao Resolver、resolver snapshot schema、模块图/作用域/名称可观察合同与无差异 corpus/fuzz gate。
-* 当前里程碑：`0.0.10` Futao Type Checker differential 首个 expression-kernel slice。
+* 当前大目标：按
+  [`0.0.11` 完整 compiler core 实施合同](futao-compiler-core-0.0.11.md)
+  先闭合 `0.0.10` 剩余 Type Checker differential，再完成 HIR/MIR/NIR、driver
+  与完整 corpus 门槛。
 
 ## 关键依赖
 
@@ -59,8 +62,8 @@ ADR-000 边界收敛
 | `0.0.7` | Futao Lexer | token/span/diagnostic differential 与 fuzz corpus 无未解释差异 |
 | `0.0.8` | Futao Parser | lossless CST、recovery、accepted/rejected differential 与 fuzz 通过 |
 | `0.0.9` | Futao Resolver | module graph、scope、visibility、cycle diagnostics 与 Rust 一致 |
-| `0.0.10` | Futao Type Checker | inference、generics、match/ownership 检查与 Rust 一致 |
-| `0.0.11` | 完整 Futao compiler core | HIR/MIR/NIR lowering、diagnostics、driver core 能编译 corpus |
+| `0.0.10` | Futao Type Checker expression kernel（已发布） | closed schema 1 的 12 种 primitive expression 与 Rust 一致 |
+| `0.0.11` | 完整 Futao compiler core | 补交完整 Type Checker 后完成 HIR/MIR/NIR、diagnostics 与 driver core |
 | `0.0.12` | Stage 1 compiler | C0 产出 C1；C1 能编译自身、Bootstrap Stdlib 与真实示例 |
 | `0.0.13` | Release candidate 1 | C1/C2/C3 自动化；normalized C2/C3 与跨平台产物一致 |
 | `0.0.14` | Release candidate 2 | 第二个连续稳定 RC；性能、资源上限、fallback 与 provenance 通过 |
@@ -183,8 +186,8 @@ accepted/rejected 与 fuzz seeds，运行 differential，记录并消除差异�
 | `0.0.7` | token kind、text range、trivia、lexical diagnostics |
 | `0.0.8` | lossless CST、recovery events、parse diagnostics |
 | `0.0.9` | module graph、symbol identity、scope/visibility diagnostics |
-| `0.0.10` | inferred types、generic substitution、ownership/match diagnostics |
-| `0.0.11` | HIR/MIR/NIR、diagnostics ordering、compiler driver result |
+| `0.0.10` | closed schema 1 primitive expression inference kernel |
+| `0.0.11` | 完整 semantic observable、HIR/MIR/NIR、diagnostic ordering、driver result |
 
 `0.0.7` 交付状态：已实现。`nexa_parser::lex_source` 冻结 Rust reference
 observable；`bootstrap/compiler/src/lexer.ft` 是在 `futao-bootstrap-v1` 下编译的
@@ -224,7 +227,8 @@ semantic oracle 固定 accepted/rejected 结果。fixture JSON 的 unknown 字�
 kind-incompatible 的非空值在 typed construction 前即被拒绝；1025 nodes、2048/2049 diagnostics、
 schema/tag、span、缺失/尾随字段与 forward child reference 均有回归门禁。`E3001`、`E3002`、
 `E3003` 均 fail closed；
-泛型替换、match exhaustiveness、ownership 和 mutable capture 仍是后续 `0.0.10` slices。
+泛型替换、match exhaustiveness、immutable-owned facts 和 mutable capture 作为
+`0.0.11` 的前置兼容工作补交；已发布的 `v0.0.10` tag 与 schema 1 不移动、不扩展。
 详细合同见
 [`futao-type-checker-0.0.10.md`](futao-type-checker-0.0.10.md)。
 

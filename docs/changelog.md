@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added the implementation contract for the complete `0.0.11` Futao compiler
+  core, including the remaining type-checker semantics, canonical HIR/MIR/NIR,
+  a real non-emulated compiler adapter, explicit candidate-driver gates, and the
+  exact evidence required before the milestone can be marked implemented.
 - Added the first ADR-004 shared-ownership slice with allocator-accounted
   `Shared<T>`/`Weak<T>`, last-owner Drop, weak upgrade rejection after release,
   and typed borrow-conflict errors.
@@ -37,8 +41,9 @@
   and non-null kind-incompatible values before typed construction, while
   regression tests freeze the 1024-node and exact 2048-diagnostic bounds,
   schema/tags, spans, field completeness, and backward-only child references.
-- Kept generic substitution, match coverage, ownership, and the Rust default
-  path deferred to later `0.0.10` slices.
+- Kept generic substitution, match coverage, immutable-owned/capture facts, and
+  the Rust default path deferred to `0.0.11` prerequisite slices; the published
+  `v0.0.10` tag and closed schema 1 remain unchanged.
 
 ## Compiler Package 0.0.9 (Futao Resolver Differential)
 
