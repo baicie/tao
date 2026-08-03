@@ -48,8 +48,10 @@ allocator provenance tests remain in the same crate suite.
 
 ## Deferred Work
 
-This slice does not implement partial aggregate initialization,
-panic-isolation cleanup traces, thread-safe sharing, Native/Wasm layout
-conformance, or stable external descriptors. `StorageBox<T>` is documented in
-the following [owned-box slice](adr-004-owned-box.md); the remaining items are
-independent ADR-004/005/007 slices and must not be inferred from this API.
+This slice does not implement partial aggregate initialization; the bounded
+homogeneous reference model is documented in the following
+[partial-init slice](adr-004-partial-init.md). Panic-isolation cleanup traces,
+thread-safe sharing, Native/Wasm layout conformance, or stable external
+descriptors remain deferred. `StorageBox<T>` is documented in the following
+[owned-box slice](adr-004-owned-box.md); the remaining items are independent
+ADR-004/005/007 slices and must not be inferred from this API.

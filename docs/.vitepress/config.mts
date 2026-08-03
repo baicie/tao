@@ -93,6 +93,7 @@ export default defineConfig({
             { text: "0.0.10 CLI E2E Tests", link: "/implementation/futao-cli-e2e-0.0.10" },
             { text: "ADR-004 Shared and Weak", link: "/implementation/adr-004-shared-weak" },
             { text: "ADR-004 Owned Box", link: "/implementation/adr-004-owned-box" },
+            { text: "ADR-004 Partial Init", link: "/implementation/adr-004-partial-init" },
           ],
         },
         {
