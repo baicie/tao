@@ -46,7 +46,9 @@ both a condition and branch diagnostic. Diagnostics are ordered by
 `(source, start, end, code)`. Malformed input, invalid node shapes, unknown
 node/type/diagnostic tags, forward child references, out-of-range spans,
 trailing fields, inverse diagnostic order, and malformed output fail closed in
-the Rust adapter.
+the Rust adapter. Regression tests cover 1025 input nodes, the exact 2048
+diagnostic boundary and its 2049 rejection, wrong schema versions, unknown
+output tags, invalid diagnostic spans, and missing or trailing protocol fields.
 
 ## Acceptance and Rejection Corpus
 
@@ -54,12 +56,17 @@ The accepted fixture covers all 12 expression node kinds. The rejected fixture
 covers invalid unary, equality, boolean, conditional, and return checks. Each
 fixture carries an explicit semantic oracle for inferred types and diagnostics;
 Rust and Futao adapters must also produce byte-for-byte equivalent canonical
-snapshots for every fixture.
+snapshots for every fixture. Fixture JSON denies unknown fields at every level,
+and the loader validates decoded optional values against the declared node kind
+before constructing a typed node, so typed constructors cannot erase non-null
+kind-incompatible values.
 
 ## Verification
 
 ```bash
 cargo test --locked -p nexa_compiler --test typecheck_differential
+cargo test --locked -p nexa_compiler typecheck_differential::tests
+cargo test --locked -p xtask typecheck_differential::tests
 cargo xtask typecheck-differential
 ```
 

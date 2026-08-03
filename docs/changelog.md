@@ -10,6 +10,10 @@
   validated, up to 2048 bounded diagnostics are accepted, diagnostic order is
   canonical, unknown output tags fail closed, and corpus fixtures carry
   semantic oracles covering all 12 node kinds.
+- Hardened the corpus and protocol gates: fixture JSON rejects unknown fields
+  and non-null kind-incompatible values before typed construction, while
+  regression tests freeze the 1024-node and exact 2048-diagnostic bounds,
+  schema/tags, spans, field completeness, and backward-only child references.
 - Kept generic substitution, match coverage, ownership, and the Rust default
   path deferred to later `0.0.10` slices.
 

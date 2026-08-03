@@ -220,7 +220,10 @@ child identity 与声明 span 必须匹配 lowered source declaration contract�
 `0.0.10` 首个 slice 已实现并完成合同收口：Rust/Futao adapter 以 schema 1 比较已解析、
 带稳定 source span 的表达式表，覆盖全部 12 种节点，严格验证 node shape、输入绑定的
 node count、2048 条 bounded diagnostics、canonical diagnostic order 和未知 tag，并以
-semantic oracle 固定 accepted/rejected 结果。`E3001`、`E3002`、`E3003` 均 fail closed；
+semantic oracle 固定 accepted/rejected 结果。fixture JSON 的 unknown 字段与 optional 字段中
+kind-incompatible 的非空值在 typed construction 前即被拒绝；1025 nodes、2048/2049 diagnostics、
+schema/tag、span、缺失/尾随字段与 forward child reference 均有回归门禁。`E3001`、`E3002`、
+`E3003` 均 fail closed；
 泛型替换、match exhaustiveness、ownership 和 mutable capture 仍是后续 `0.0.10` slices。
 详细合同见
 [`futao-type-checker-0.0.10.md`](futao-type-checker-0.0.10.md)。
