@@ -2,21 +2,28 @@ import { LexerInput } from "./lexer.ft";
 import { ParserCstEvent, parse } from "./parser.ft";
 import { Sequence, append, toArray } from "./sequence.ft";
 
+export type ResolverSourceInput = {
+  identity: Int[];
+  source: LexerInput;
+};
+
 export type ResolverModuleInput = {
   id: Int;
+  identity: Int[];
   source: LexerInput;
 };
 
 export type ResolverEdgeInput = {
   importer: Int;
   imported: Int;
+  specifier: Int[];
   pathStart: Int;
   pathEnd: Int;
 };
 
 export type ResolverInput = {
-  modules: ResolverModuleInput[];
-  edges: ResolverEdgeInput[];
+  entry: Int[];
+  sources: ResolverSourceInput[];
 };
 
 export type ResolverSpan = {
@@ -90,6 +97,8 @@ export type ResolverDiagnostic = {
 };
 
 export type ResolverResult = {
+  modules: ResolverModuleInput[];
+  edges: ResolverEdgeInput[];
   symbols: ResolverSymbol[];
   scopes: ResolverScope[];
   bindings: ResolverBinding[];
@@ -131,6 +140,7 @@ type CstBuildState = {
 
 type ParsedModule = {
   id: Int;
+  identity: Int[];
   source: LexerInput;
   nodes: CstNode[];
   root: Int;
@@ -138,6 +148,19 @@ type ParsedModule = {
 
 type ParsedModulesState = {
   modules: Sequence<ParsedModule>;
+  valid: Bool;
+};
+
+type GraphBuildState = {
+  modules: Sequence<ResolverModuleInput>;
+  edges: Sequence<ResolverEdgeInput>;
+  catalogIds: Int[];
+  visits: Int[];
+  valid: Bool;
+};
+
+type PathBuildState = {
+  path: Int[];
   valid: Bool;
 };
 
@@ -745,6 +768,7 @@ function parseModule(module: ResolverModuleInput): ParsedModulesState {
       chunks: [],
       tail: [{
         id: module.id,
+        identity: module.identity,
         source: module.source,
         nodes: nodes,
         root: nodes.length - 1
@@ -777,6 +801,330 @@ function parseModuleRange(
   const middle = start + (end - start) / 2;
   const left = parseModuleRange(modules, start, middle, state);
   return parseModuleRange(modules, middle, end, left);
+}
+
+function sameIntRange(
+  left: Int[],
+  right: Int[],
+  start: Int,
+  end: Int
+): Bool {
+  if (start >= end) {
+    return true;
+  }
+  if (end - start === 1) {
+    return left[start] === right[start];
+  }
+  const middle = start + (end - start) / 2;
+  return sameIntRange(left, right, start, middle) &&
+    sameIntRange(left, right, middle, end);
+}
+
+function sameInts(left: Int[], right: Int[]): Bool {
+  return left.length === right.length &&
+    sameIntRange(left, right, 0, left.length);
+}
+
+function lastValueIndex(values: Int[], value: Int, start: Int, end: Int): Int {
+  if (start >= end) {
+    return -1;
+  }
+  if (end - start === 1) {
+    if (values[start] === value) {
+      return start;
+    }
+    return -1;
+  }
+  const middle = start + (end - start) / 2;
+  const right = lastValueIndex(values, value, middle, end);
+  if (right >= 0) {
+    return right;
+  }
+  return lastValueIndex(values, value, start, middle);
+}
+
+function removeLastPathComponent(path: Int[]): Int[] {
+  const slash = lastValueIndex(path, 47, 0, path.length);
+  if (slash < 0) {
+    return [];
+  }
+  return arrayRange(path, 0, slash);
+}
+
+function parentIdentity(identity: Int[]): Int[] {
+  const slash = lastValueIndex(identity, 47, 0, identity.length);
+  if (slash < 0) {
+    return [];
+  }
+  return arrayRange(identity, 0, slash);
+}
+
+function appendPathComponent(path: Int[], component: Int[]): PathBuildState {
+  if (component.length === 0 || sameInts(component, [46])) {
+    return { path: path, valid: true };
+  }
+  if (sameInts(component, [46, 46])) {
+    return { path: removeLastPathComponent(path), valid: true };
+  }
+  if (path.length === 0) {
+    return { path: component, valid: true };
+  }
+  return { path: path.concat([47]).concat(component), valid: true };
+}
+
+function nextSlash(values: Int[], start: Int, end: Int): Int {
+  if (start >= end) {
+    return end;
+  }
+  if (end - start === 1) {
+    if (values[start] === 47) {
+      return start;
+    }
+    return end;
+  }
+  const middle = start + (end - start) / 2;
+  const left = nextSlash(values, start, middle);
+  if (left < middle) {
+    return left;
+  }
+  return nextSlash(values, middle, end);
+}
+
+function normalizePathRange(
+  values: Int[],
+  start: Int,
+  end: Int,
+  path: Int[]
+): PathBuildState {
+  if (start >= end) {
+    return { path: path, valid: true };
+  }
+  const slash = nextSlash(values, start, end);
+  const component = arrayRange(values, start, slash);
+  const appended = appendPathComponent(path, component);
+  if (!appended.valid) {
+    return appended;
+  }
+  if (slash >= end) {
+    return appended;
+  }
+  return normalizePathRange(values, slash + 1, end, appended.path);
+}
+
+function importPathIdentity(moduleValue: ParsedModule, token: CstToken): Int[] {
+  const pathStart = byteOffsetIndex(
+    moduleValue.source.byteOffsets,
+    token.start + 1,
+    0,
+    moduleValue.source.byteOffsets.length
+  );
+  const pathEnd = byteOffsetIndex(
+    moduleValue.source.byteOffsets,
+    token.end - 1,
+    0,
+    moduleValue.source.byteOffsets.length
+  );
+  const base = parentIdentity(moduleValue.identity);
+  const combined = base.concat([47]).concat(
+    arrayRange(moduleValue.source.codePoints, pathStart, pathEnd)
+  );
+  return normalizePathRange(combined, 0, combined.length, []).path;
+}
+
+function importSpecifier(moduleValue: ParsedModule, token: CstToken): Int[] {
+  const pathStart = byteOffsetIndex(
+    moduleValue.source.byteOffsets,
+    token.start + 1,
+    0,
+    moduleValue.source.byteOffsets.length
+  );
+  const pathEnd = byteOffsetIndex(
+    moduleValue.source.byteOffsets,
+    token.end - 1,
+    0,
+    moduleValue.source.byteOffsets.length
+  );
+  return arrayRange(moduleValue.source.codePoints, pathStart, pathEnd);
+}
+
+function importNodeRange(
+  nodes: CstNode[],
+  childIds: Int[],
+  start: Int,
+  end: Int,
+  result: Int[]
+): Int[] {
+  if (start >= end) {
+    return result;
+  }
+  if (end - start === 1) {
+    const child = childIds[start];
+    if (nodes[child].kind === 95) {
+      return result.append(child);
+    }
+    return result;
+  }
+  const middle = start + (end - start) / 2;
+  const left = importNodeRange(nodes, childIds, start, middle, result);
+  return importNodeRange(nodes, childIds, middle, end, left);
+}
+
+function findSourceCatalog(
+  sources: ResolverSourceInput[],
+  identity: Int[],
+  start: Int,
+  end: Int
+): Int {
+  if (start >= end) {
+    return -1;
+  }
+  if (end - start === 1) {
+    if (sameInts(sources[start].identity, identity)) {
+      return start;
+    }
+    return -1;
+  }
+  const middle = start + (end - start) / 2;
+  const left = findSourceCatalog(sources, identity, start, middle);
+  if (left >= 0) {
+    return left;
+  }
+  return findSourceCatalog(sources, identity, middle, end);
+}
+
+function registerSource(
+  sources: ResolverSourceInput[],
+  catalog: Int,
+  state: GraphBuildState
+): GraphBuildState {
+  const source = sources[catalog];
+  const id = state.modules.length;
+  return {
+    modules: append(state.modules, { id: id, identity: source.identity, source: source.source }),
+    edges: state.edges,
+    catalogIds: replaceIntAt(state.catalogIds, catalog, id),
+    visits: state.visits,
+    valid: state.valid
+  };
+}
+
+function registerSourceIfNeeded(
+  sources: ResolverSourceInput[],
+  catalog: Int,
+  state: GraphBuildState
+): GraphBuildState {
+  if (state.catalogIds[catalog] < 0) {
+    return registerSource(sources, catalog, state);
+  }
+  return state;
+}
+
+function visitImportRange(
+  sources: ResolverSourceInput[],
+  moduleValue: ParsedModule,
+  imports: Int[],
+  start: Int,
+  end: Int,
+  state: GraphBuildState
+): GraphBuildState {
+  if (!state.valid || start >= end) {
+    return state;
+  }
+  if (end - start === 1) {
+    const node = moduleValue.nodes[imports[start]];
+    const path = directToken(node, 64);
+    if (path.kind < 0) {
+      return { modules: state.modules, edges: state.edges, catalogIds: state.catalogIds, visits: state.visits, valid: false };
+    }
+    const identity = importPathIdentity(moduleValue, path);
+    const catalog = findSourceCatalog(sources, identity, 0, sources.length);
+    if (catalog < 0) {
+      return { modules: state.modules, edges: state.edges, catalogIds: state.catalogIds, visits: state.visits, valid: false };
+    }
+    const registered = registerSourceIfNeeded(sources, catalog, state);
+    const edge: ResolverEdgeInput = {
+      importer: moduleValue.id,
+      imported: registered.catalogIds[catalog],
+      specifier: importSpecifier(moduleValue, path),
+      pathStart: path.start,
+      pathEnd: path.end
+    };
+    const withEdge: GraphBuildState = {
+      modules: registered.modules,
+      edges: append(registered.edges, edge),
+      catalogIds: registered.catalogIds,
+      visits: registered.visits,
+      valid: registered.valid
+    };
+    if (withEdge.visits[catalog] === 0) {
+      return visitGraphSource(sources, catalog, withEdge);
+    }
+    return withEdge;
+  }
+  const middle = start + (end - start) / 2;
+  const left = visitImportRange(sources, moduleValue, imports, start, middle, state);
+  return visitImportRange(sources, moduleValue, imports, middle, end, left);
+}
+
+function visitGraphSource(
+  sources: ResolverSourceInput[],
+  catalog: Int,
+  state: GraphBuildState
+): GraphBuildState {
+  if (!state.valid || !(state.visits[catalog] === 0)) {
+    return state;
+  }
+  const moduleId = state.catalogIds[catalog];
+  const parsedState = parseModule({
+    id: moduleId,
+    identity: sources[catalog].identity,
+    source: sources[catalog].source
+  });
+  if (!parsedState.valid) {
+    return { modules: state.modules, edges: state.edges, catalogIds: state.catalogIds, visits: state.visits, valid: false };
+  }
+  const moduleValue = toArray(parsedState.modules)[0];
+  const imports = importNodeRange(
+    moduleValue.nodes,
+    moduleValue.nodes[moduleValue.root].childIds,
+    0,
+    moduleValue.nodes[moduleValue.root].childIds.length,
+    []
+  );
+  const active: GraphBuildState = {
+    modules: state.modules,
+    edges: state.edges,
+    catalogIds: state.catalogIds,
+    visits: replaceIntAt(state.visits, catalog, 1),
+    valid: state.valid
+  };
+  const visited = visitImportRange(sources, moduleValue, imports, 0, imports.length, active);
+  return {
+    modules: visited.modules,
+    edges: visited.edges,
+    catalogIds: visited.catalogIds,
+    visits: replaceIntAt(visited.visits, catalog, 2),
+    valid: visited.valid
+  };
+}
+
+function buildGraph(input: ResolverInput): GraphBuildState {
+  if (input.sources.length === 0) {
+    return { modules: { chunks: [], tail: [], length: 0 }, edges: { chunks: [], tail: [], length: 0 }, catalogIds: [], visits: [], valid: false };
+  }
+  const entry = findSourceCatalog(input.sources, input.entry, 0, input.sources.length);
+  if (entry < 0) {
+    return { modules: { chunks: [], tail: [], length: 0 }, edges: { chunks: [], tail: [], length: 0 }, catalogIds: [], visits: [], valid: false };
+  }
+  const initial: GraphBuildState = {
+    modules: { chunks: [], tail: [], length: 0 },
+    edges: { chunks: [], tail: [], length: 0 },
+    catalogIds: arrayRangeInt(input.sources.length, -1),
+    visits: arrayRangeInt(input.sources.length, 0),
+    valid: true
+  };
+  const registered = registerSource(input.sources, entry, initial);
+  return visitGraphSource(input.sources, entry, registered);
 }
 
 function exportedDeclarationNode(moduleValue: ParsedModule, itemId: Int): Int {
@@ -4456,8 +4804,8 @@ function arrayRangeInt(length: Int, value: Int): Int[] {
   );
 }
 
-function validModuleRange(
-  modules: ResolverModuleInput[],
+function validSourceRange(
+  sources: ResolverSourceInput[],
   start: Int,
   end: Int
 ): Bool {
@@ -4465,14 +4813,42 @@ function validModuleRange(
     return true;
   }
   if (end - start === 1) {
-    const module = modules[start];
-    return module.id === start &&
-      module.source.byteLength >= 0 &&
-      module.source.codePoints.length + 1 === module.source.byteOffsets.length;
+    const source = sources[start];
+    return source.identity.length > 0 &&
+      source.source.byteLength >= 0 &&
+      source.source.codePoints.length + 1 === source.source.byteOffsets.length;
   }
   const middle = start + (end - start) / 2;
-  return validModuleRange(modules, start, middle) &&
-    validModuleRange(modules, middle, end);
+  return validSourceRange(sources, start, middle) &&
+    validSourceRange(sources, middle, end);
+}
+
+function uniqueSourceRange(
+  sources: ResolverSourceInput[],
+  index: Int,
+  start: Int,
+  end: Int
+): Bool {
+  if (start >= end) {
+    return true;
+  }
+  if (end - start === 1) {
+    return !sameInts(sources[index].identity, sources[start].identity);
+  }
+  const middle = start + (end - start) / 2;
+  return uniqueSourceRange(sources, index, start, middle) &&
+    uniqueSourceRange(sources, index, middle, end);
+}
+
+function allSourcesUnique(
+  sources: ResolverSourceInput[],
+  index: Int
+): Bool {
+  if (index >= sources.length) {
+    return true;
+  }
+  return uniqueSourceRange(sources, index, index + 1, sources.length) &&
+    allSourcesUnique(sources, index + 1);
 }
 
 function validEdgeRange(
@@ -4489,7 +4865,8 @@ function validEdgeRange(
     if (
       edge.importer < 0 || edge.importer >= modules.length ||
       edge.imported < 0 || edge.imported >= modules.length ||
-      edge.pathStart < 0 || edge.pathEnd < edge.pathStart
+      edge.specifier.length === 0 || edge.pathStart < 0 ||
+      edge.pathEnd < edge.pathStart
     ) {
       return false;
     }
@@ -4501,23 +4878,30 @@ function validEdgeRange(
 }
 
 function inputIsValid(input: ResolverInput): Bool {
-  return input.modules.length > 0 &&
-    validModuleRange(input.modules, 0, input.modules.length) &&
-    validEdgeRange(input.edges, input.modules, 0, input.edges.length);
+  return input.sources.length > 0 &&
+    validSourceRange(input.sources, 0, input.sources.length) &&
+    findSourceCatalog(input.sources, input.entry, 0, input.sources.length) >= 0 &&
+    allSourcesUnique(input.sources, 0);
 }
 
 export function resolve(input: ResolverInput): ResolverOutcome {
   if (!inputIsValid(input)) {
     return ResolverOutcome.InvalidInput();
   }
+  const graph = buildGraph(input);
+  if (!graph.valid) {
+    return ResolverOutcome.InvalidInput();
+  }
+  const graphModules = toArray(graph.modules);
+  const graphEdges = toArray(graph.edges);
   const initial: ParsedModulesState = {
     modules: { chunks: [], tail: [], length: 0 },
     valid: true
   };
   const parsed = parseModuleRange(
-    input.modules,
+    graphModules,
     0,
-    input.modules.length,
+    graphModules.length,
     initial
   );
   if (!parsed.valid) {
@@ -4548,7 +4932,7 @@ export function resolve(input: ResolverInput): ResolverOutcome {
   const builtEnvironments = buildEnvironmentRange(
     modules,
     catalogs,
-    input.edges,
+    graphEdges,
     0,
     modules.length,
     environmentInitial
@@ -4587,8 +4971,10 @@ export function resolve(input: ResolverInput): ResolverOutcome {
     .concat(allDeclarationNames);
   const allDiagnostics = toArray(builtEnvironments.diagnostics).concat(
     toArray(semantics.diagnostics)
-  ).concat(cycleDiagnostics(input.modules.length, input.edges));
+  ).concat(cycleDiagnostics(graphModules.length, graphEdges));
   const result: ResolverResult = {
+    modules: graphModules,
+    edges: graphEdges,
     symbols: toArray(builtCatalogs.symbols),
     scopes: toArray(semantics.scopes),
     bindings: toArray(semantics.bindings),

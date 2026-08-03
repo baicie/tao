@@ -1,7 +1,9 @@
 import {
   ResolverBinding,
   ResolverDiagnostic,
+  ResolverEdgeInput,
   ResolverLabel,
+  ResolverModuleInput,
   ResolverName,
   ResolverOutcome,
   ResolverResult,
@@ -16,6 +18,26 @@ function emitSpan(span: ResolverSpan): Unit {
   print(span.source);
   print(span.start);
   print(span.end);
+}
+
+function emitCodePoints(values: Int[]): Unit {
+  print(values.length);
+  for (const value of values) {
+    print(value);
+  }
+}
+
+function emitModule(moduleValue: ResolverModuleInput): Unit {
+  print(moduleValue.id);
+  emitCodePoints(moduleValue.identity);
+}
+
+function emitEdge(edge: ResolverEdgeInput): Unit {
+  print(edge.importer);
+  print(edge.imported);
+  emitCodePoints(edge.specifier);
+  print(edge.pathStart);
+  print(edge.pathEnd);
 }
 
 function symbolKindName(kind: Int): String {
@@ -218,6 +240,14 @@ function emitDiagnostic(diagnostic: ResolverDiagnostic): Unit {
 }
 
 function emitResult(result: ResolverResult): Unit {
+  print(result.modules.length);
+  for (const moduleValue of result.modules) {
+    emitModule(moduleValue);
+  }
+  print(result.edges.length);
+  for (const edge of result.edges) {
+    emitEdge(edge);
+  }
   print(result.symbols.length);
   for (const symbol of result.symbols) {
     emitSymbol(symbol);
@@ -247,7 +277,7 @@ function emitResolved(result: ResolverResult): Unit {
 
 function main(arguments: String[]): Unit {
   const outcome = resolveEncoded(arguments);
-  print("FUTAO-RESOLVER-1");
+  print("FUTAO-RESOLVER-2");
   match (outcome) {
     case ResolverOutcome.InvalidInput() => print("invalid-input");
     case ResolverOutcome.ParserInvalid() => print("parser-invalid");

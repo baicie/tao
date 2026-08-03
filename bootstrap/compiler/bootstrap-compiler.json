@@ -23,7 +23,7 @@
     "src/sequence.ft"
   ],
   "treeHashAlgorithm": "sha256",
-  "treeDigest": "sha256:c0eb83d8736893cc82ce38f96dbea4265136af23696ca5ed540d3ffdc77129c2",
+  "treeDigest": "sha256:0a84ac381ace43b4d7be650f1082aedd1bfc92c10002b50d2d6b223fef6b7ebc",
   "lexerSnapshotSchemaVersion": 1,
   "differentialCorpus": {
     "accepted": 4,

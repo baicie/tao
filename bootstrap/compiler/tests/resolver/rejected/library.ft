@@ -1,5 +1,11 @@
 import { main } from "./main.ft";
 
+export type Value = { inner: Int; };
+
+export function Value(): Int {
+  return 0;
+}
+
 function Hidden(): Int {
   return main();
 }

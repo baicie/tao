@@ -14,7 +14,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::core::explicit_session;
+use crate::core::{explicit_session, validated_sources};
 use crate::{compile, CompileError, CompilerInput, CompilerOptions, CompilerSource};
 
 /// Canonical schema used by resolver-only differential snapshots.
@@ -1029,10 +1029,8 @@ impl<'adapter> ResolverDifferentialHarness<'adapter> {
     ) -> Result<ResolverDifferentialReport, ResolverAdapterError> {
         let reference_snapshot = self.reference.resolve(input)?;
         let candidate_snapshot = self.candidate.resolve(input)?;
-        let session = explicit_session(input)?;
-        let source_lengths = session_source_lengths(&session)?;
-        reference_snapshot.validate(&source_lengths)?;
-        candidate_snapshot.validate(&source_lengths)?;
+        validate_snapshot_against_input(input, &reference_snapshot)?;
+        validate_snapshot_against_input(input, &candidate_snapshot)?;
 
         let reference_digest = snapshot_digest(&reference_snapshot)?;
         let candidate_digest = snapshot_digest(&candidate_snapshot)?;
@@ -1097,6 +1095,40 @@ impl<'adapter> ResolverDifferentialHarness<'adapter> {
             candidate_snapshot,
         })
     }
+}
+
+fn validate_snapshot_against_input(
+    input: &CompilerInput,
+    snapshot: &ResolverSnapshot,
+) -> Result<(), ResolverAdapterError> {
+    let sources = validated_sources(input)?;
+    if snapshot
+        .modules
+        .first()
+        .map(ResolverModuleSnapshot::identity)
+        != Some(input.entry())
+    {
+        return Err(ResolverAdapterError::InvalidSnapshot(
+            "module 0 identity must equal the explicit entry identity".to_owned(),
+        ));
+    }
+    let source_lengths = snapshot
+        .modules
+        .iter()
+        .map(|module| {
+            sources
+                .iter()
+                .find(|source| source.identity() == module.identity())
+                .map(|source| source.content().len())
+                .ok_or_else(|| {
+                    ResolverAdapterError::InvalidSnapshot(format!(
+                        "module identity `{}` is absent from the explicit source collection",
+                        module.identity()
+                    ))
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    snapshot.validate(&source_lengths)
 }
 
 fn snapshot_digest(snapshot: &ResolverSnapshot) -> Result<String, ResolverAdapterError> {
@@ -1329,48 +1361,15 @@ impl FutaoResolverAdapter {
         input: &CompilerInput,
         step_limit: usize,
     ) -> Result<ResolverSnapshot, ResolverAdapterError> {
-        let session = explicit_session(input)?;
-        if !session.diagnostics().is_empty() {
-            let summary = session
-                .diagnostics()
-                .iter()
-                .map(|diagnostic| diagnostic.code().as_str())
-                .collect::<Vec<_>>()
-                .join(",");
-            return Err(ResolverAdapterError::InvalidInput(summary));
-        }
-        let modules = session
-            .modules()
-            .iter()
-            .map(|module| {
-                Ok(ResolverModuleSnapshot {
-                    id: schema_u32(module.id().index())?,
-                    identity: module.key().to_string(),
-                    entry: module.id().index() == 0,
-                })
-            })
-            .collect::<Result<Vec<_>, ResolverAdapterError>>()?;
-        let edges = session
-            .edges()
-            .iter()
-            .map(|edge| {
-                Ok(ResolverEdgeSnapshot {
-                    importer: schema_u32(edge.importer().index())?,
-                    imported: schema_u32(edge.imported().index())?,
-                    specifier: edge.specifier().to_owned(),
-                    path_span: resolver_span(edge.path_span())?,
-                })
-            })
-            .collect::<Result<Vec<_>, ResolverAdapterError>>()?;
-        let arguments = encoded_resolver_arguments(&session)?;
+        let _ = validated_sources(input)?;
+        let arguments = encoded_resolver_arguments(input)?;
         let execution =
             run_mir_with_args(&self.program, &arguments, step_limit).map_err(|failure| {
                 let location = resolver_runtime_location(&self.sources, failure.error().span());
                 ResolverAdapterError::Runtime { failure, location }
             })?;
-        let snapshot = parse_futao_resolver_output(execution.output(), modules, edges)?;
-        let source_lengths = session_source_lengths(&session)?;
-        snapshot.validate(&source_lengths)?;
+        let snapshot = parse_futao_resolver_output(execution.output())?;
+        validate_snapshot_against_input(input, &snapshot)?;
         Ok(snapshot)
     }
 }
@@ -1406,7 +1405,21 @@ fn ensure_futao_resolver_compiled(
     let summary = output
         .diagnostics()
         .iter()
-        .map(|diagnostic| format!("{}: {}", diagnostic.code(), diagnostic.message()))
+        .map(|diagnostic| {
+            let span = diagnostic
+                .labels()
+                .first()
+                .map(|label| {
+                    format!(
+                        " @source{}:{}..{}",
+                        label.file(),
+                        label.start(),
+                        label.end()
+                    )
+                })
+                .unwrap_or_default();
+            format!("{}: {}{}", diagnostic.code(), diagnostic.message(), span)
+        })
         .collect::<Vec<_>>()
         .join("; ");
     Err(ResolverAdapterError::FutaoSource(format!(
@@ -1414,45 +1427,38 @@ fn ensure_futao_resolver_compiled(
     )))
 }
 
-fn encoded_resolver_arguments<P>(
-    session: &crate::CompilerSession<P>,
-) -> Result<Vec<String>, ResolverAdapterError> {
-    let pair_count = session
-        .modules()
-        .iter()
-        .filter_map(|module| session.sources().file(module.file()))
-        .map(|source| source.text().chars().count())
-        .sum::<usize>();
-    let capacity = pair_count
-        .checked_mul(2)
-        .and_then(|count| count.checked_add(session.modules().len().saturating_mul(3)))
-        .and_then(|count| count.checked_add(session.edges().len().saturating_mul(4)))
-        .and_then(|count| count.checked_add(2))
-        .ok_or(ResolverAdapterError::InputTooLarge)?;
-    let mut arguments = Vec::with_capacity(capacity);
-    arguments.push(session.modules().len().to_string());
-    for module in session.modules() {
-        let source = session.sources().file(module.file()).ok_or_else(|| {
-            ResolverAdapterError::InvalidInput("session source map is incomplete".to_owned())
-        })?;
-        let text = source.text();
-        let _ = u32::try_from(text.len()).map_err(|_| ResolverAdapterError::InputTooLarge)?;
-        arguments.push(module.id().index().to_string());
-        arguments.push(text.len().to_string());
-        arguments.push(text.chars().count().to_string());
+fn encoded_resolver_arguments(input: &CompilerInput) -> Result<Vec<String>, ResolverAdapterError> {
+    let sources = validated_sources(input)?;
+    let mut arguments = Vec::new();
+    push_code_points(&mut arguments, input.entry())?;
+    arguments.push(sources.len().to_string());
+    for source in sources {
+        push_code_points(&mut arguments, source.identity())?;
+        let text = source.content();
+        let byte_length =
+            u32::try_from(text.len()).map_err(|_| ResolverAdapterError::InputTooLarge)?;
+        let pair_count =
+            u32::try_from(text.chars().count()).map_err(|_| ResolverAdapterError::InputTooLarge)?;
+        arguments.push(byte_length.to_string());
+        arguments.push(pair_count.to_string());
         for (offset, character) in text.char_indices() {
             arguments.push(u32::from(character).to_string());
             arguments.push(offset.to_string());
         }
     }
-    arguments.push(session.edges().len().to_string());
-    for edge in session.edges() {
-        arguments.push(edge.importer().index().to_string());
-        arguments.push(edge.imported().index().to_string());
-        arguments.push(edge.path_span().range().start().to_string());
-        arguments.push(edge.path_span().range().end().to_string());
-    }
     Ok(arguments)
+}
+
+fn push_code_points(output: &mut Vec<String>, value: &str) -> Result<(), ResolverAdapterError> {
+    let count =
+        u32::try_from(value.chars().count()).map_err(|_| ResolverAdapterError::InputTooLarge)?;
+    output.push(count.to_string());
+    output.extend(
+        value
+            .chars()
+            .map(|character| u32::from(character).to_string()),
+    );
+    Ok(())
 }
 
 fn resolver_runtime_location(sources: &SourceMap, span: SourceSpan) -> String {
@@ -1479,11 +1485,9 @@ fn resolver_runtime_location(sources: &SourceMap, span: SourceSpan) -> String {
 
 fn parse_futao_resolver_output(
     output: &[String],
-    modules: Vec<ResolverModuleSnapshot>,
-    edges: Vec<ResolverEdgeSnapshot>,
 ) -> Result<ResolverSnapshot, ResolverAdapterError> {
     let mut reader = ResolverProtocolReader::new(output);
-    reader.expect("header", "FUTAO-RESOLVER-1")?;
+    reader.expect("header", "FUTAO-RESOLVER-2")?;
     match reader.next("resolver status")? {
         "ok" => {}
         "invalid-input" => {
@@ -1501,6 +1505,39 @@ fn parse_futao_resolver_output(
                 "unknown resolver status `{status}`"
             )));
         }
+    }
+
+    let module_count = reader.count("module count")?;
+    let mut modules = Vec::with_capacity(module_count);
+    for expected_id in 0..module_count {
+        let id = reader.u32("module id")?;
+        let identity = reader.code_points("module identity")?;
+        if usize::try_from(id).ok() != Some(expected_id) {
+            return Err(ResolverAdapterError::Protocol(
+                "module ids must be contiguous and discovery ordered".to_owned(),
+            ));
+        }
+        modules.push(ResolverModuleSnapshot {
+            id,
+            identity,
+            entry: expected_id == 0,
+        });
+    }
+
+    let edge_count = reader.count("edge count")?;
+    let mut edges = Vec::with_capacity(edge_count);
+    for _ in 0..edge_count {
+        let importer = reader.u32("edge importer")?;
+        edges.push(ResolverEdgeSnapshot {
+            importer,
+            imported: reader.u32("edge imported")?,
+            specifier: reader.code_points("edge specifier")?,
+            path_span: ResolverSpanSnapshot {
+                source: importer,
+                start: reader.u32("edge path start")?,
+                end: reader.u32("edge path end")?,
+            },
+        });
     }
 
     let symbol_count = reader.count("symbol count")?;
@@ -1793,10 +1830,26 @@ impl<'output> ResolverProtocolReader<'output> {
         Ok(count)
     }
 
+    fn code_points(&mut self, field: &str) -> Result<String, ResolverAdapterError> {
+        let count = self.count(field)?;
+        let mut value = String::new();
+        for _ in 0..count {
+            let point = self.u32(&format!("{field} code point"))?;
+            let character = char::from_u32(point).ok_or_else(|| {
+                ResolverAdapterError::Protocol(format!(
+                    "{field} contains invalid Unicode scalar `{point}`"
+                ))
+            })?;
+            value.push(character);
+        }
+        Ok(value)
+    }
+
     fn u32(&mut self, field: &str) -> Result<u32, ResolverAdapterError> {
-        self.next(field)?
-            .parse::<u32>()
-            .map_err(|_| ResolverAdapterError::Protocol(format!("{field} is not a u32 integer")))
+        let value = self.next(field)?;
+        value.parse::<u32>().map_err(|_| {
+            ResolverAdapterError::Protocol(format!("{field} is not a u32 integer: `{value}`"))
+        })
     }
 
     fn boolean(&mut self, field: &str) -> Result<bool, ResolverAdapterError> {
@@ -2050,7 +2103,11 @@ mod tests {
             snapshot: minimal_snapshot(),
         };
         let mut candidate_snapshot = minimal_snapshot();
-        candidate_snapshot.modules[0].identity = "candidate.ft".to_owned();
+        candidate_snapshot.modules.push(ResolverModuleSnapshot {
+            id: 1,
+            identity: "candidate.ft".to_owned(),
+            entry: false,
+        });
         candidate_snapshot.symbols[0].visibility = ResolverVisibility::Exported;
         candidate_snapshot.scopes[0].span.end -= 1;
         candidate_snapshot.bindings[0].mutable = true;
@@ -2075,7 +2132,13 @@ mod tests {
         let harness = ResolverDifferentialHarness::new(&reference, &candidate);
         let report = harness.run_case(
             "all-observables",
-            &CompilerInput::new("main.ft", [CompilerSource::new("main.ft", SOURCE)]),
+            &CompilerInput::new(
+                "main.ft",
+                [
+                    CompilerSource::new("main.ft", SOURCE),
+                    CompilerSource::new("candidate.ft", SOURCE),
+                ],
+            ),
         )?;
 
         assert_eq!(
@@ -2102,12 +2165,14 @@ mod tests {
     #[test]
     fn futao_protocol_rejects_a_count_larger_than_remaining_lines() {
         let output = [
-            "FUTAO-RESOLVER-1".to_owned(),
+            "FUTAO-RESOLVER-2".to_owned(),
             "ok".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
             usize::MAX.to_string(),
         ];
 
-        let error = parse_futao_resolver_output(&output, Vec::new(), Vec::new()).err();
+        let error = parse_futao_resolver_output(&output).err();
 
         assert!(
             matches!(error, Some(ResolverAdapterError::Protocol(message)) if message.contains("symbol count") && message.contains("remaining protocol line"))
@@ -2117,8 +2182,17 @@ mod tests {
     #[test]
     fn futao_protocol_rejects_unknown_target_tags() {
         let output = [
-            "FUTAO-RESOLVER-1",
+            "FUTAO-RESOLVER-2",
             "ok",
+            "0",
+            "0",
+            "1",
+            "function",
+            "0",
+            "0",
+            "private",
+            "0",
+            "0",
             "0",
             "0",
             "0",
@@ -2127,11 +2201,10 @@ mod tests {
             "0",
             "0",
             "mystery",
-            "0",
         ]
         .map(str::to_owned);
 
-        let error = parse_futao_resolver_output(&output, Vec::new(), Vec::new()).err();
+        let error = parse_futao_resolver_output(&output).err();
 
         assert!(
             matches!(error, Some(ResolverAdapterError::Protocol(message)) if message.contains("unknown resolved target kind"))
@@ -2141,8 +2214,10 @@ mod tests {
     #[test]
     fn futao_protocol_rejects_trailing_lines() {
         let output = [
-            "FUTAO-RESOLVER-1",
+            "FUTAO-RESOLVER-2",
             "ok",
+            "0",
+            "0",
             "0",
             "0",
             "0",
@@ -2152,7 +2227,7 @@ mod tests {
         ]
         .map(str::to_owned);
 
-        let error = parse_futao_resolver_output(&output, Vec::new(), Vec::new()).err();
+        let error = parse_futao_resolver_output(&output).err();
 
         assert!(
             matches!(error, Some(ResolverAdapterError::Protocol(message)) if message == "1 trailing line(s)")

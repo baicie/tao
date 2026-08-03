@@ -3,7 +3,7 @@
 use nexa_compiler::{
     CompilerInput, CompilerSource, FutaoResolverAdapter, ResolverAdapter,
     ResolverDifferentialHarness, ResolverDifferentialOutcome, ResolverImplementation,
-    RustResolverAdapter, RESOLVER_SNAPSHOT_SCHEMA_VERSION,
+    ResolverScopeKind, RustResolverAdapter, RESOLVER_SNAPSHOT_SCHEMA_VERSION,
 };
 
 const ACCEPTED_MAIN: &str =
@@ -45,8 +45,12 @@ fn rust_resolver_snapshot_freezes_the_complete_observable_contract(
         [(0, 1), (1, 2)]
     );
     assert_eq!(snapshot.symbols().len(), 4);
-    assert_eq!(snapshot.scopes().len(), 4);
-    assert_eq!(snapshot.bindings().len(), 5);
+    assert_eq!(snapshot.scopes().len(), 5);
+    assert!(snapshot
+        .scopes()
+        .iter()
+        .any(|scope| scope.kind() == ResolverScopeKind::For));
+    assert_eq!(snapshot.bindings().len(), 6);
     assert!(!snapshot.names().is_empty());
     assert!(snapshot.diagnostics().is_empty());
     assert!(snapshot.to_json()?.contains("\"schemaVersion\":1"));
@@ -71,7 +75,7 @@ fn rust_resolver_snapshot_keeps_rejected_diagnostics_and_cycle_witnesses(
             .iter()
             .map(|diagnostic| diagnostic.code())
             .collect::<Vec<_>>(),
-        ["E4004", "E4003", "E2002", "E2002", "E2001", "E4002"]
+        ["E4004", "E4003", "E2002", "E2002", "E2001", "E4002", "E4005"]
     );
     let cycle = snapshot
         .diagnostics()
@@ -81,6 +85,14 @@ fn rust_resolver_snapshot_keeps_rejected_diagnostics_and_cycle_witnesses(
     assert_eq!(cycle.labels().len(), 2);
     assert_eq!(cycle.labels()[0].span().source(), 1);
     assert_eq!(cycle.labels()[1].span().source(), 0);
+    assert_eq!(
+        snapshot
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.code() == "E4005")
+            .count(),
+        1
+    );
 
     Ok(())
 }
@@ -141,7 +153,7 @@ fn futao_resolver_matches_rejected_diagnostics_and_cycle() -> Result<(), Box<dyn
         report.reference_snapshot().to_json()?,
         report.candidate_snapshot().to_json()?
     );
-    assert_eq!(report.candidate_snapshot().diagnostics().len(), 6);
+    assert_eq!(report.candidate_snapshot().diagnostics().len(), 7);
     Ok(())
 }
 

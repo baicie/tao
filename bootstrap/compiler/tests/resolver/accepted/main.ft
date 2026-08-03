@@ -2,6 +2,9 @@ import { Box, makeBox } from "./model.ft";
 
 function main(value: Int): Unit {
   const boxed: Box = makeBox(value);
+  for (const item of [boxed]) {
+    print(item.value);
+  }
   if (true) {
     const nested = boxed;
     print(nested.value);

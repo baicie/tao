@@ -211,7 +211,7 @@ local/generic bindings、record fields、union variants 与 resolved names，并
 `E2001`、`E2002`、`E4002` 至 `E4005`。schema 1 快照比较 module graph、symbols、scopes、
 bindings、names 和 diagnostics 六类 observable；accepted/rejected 图与 4 个 fuzz seed
 共 6 个 case 全部由 Rust/Futao 真实 adapter 执行且零差异。严格
-`FUTAO-RESOLVER-1` 协议、双侧快照保留、source-aware runtime failure、snapshot validation
+`FUTAO-RESOLVER-2` 协议、双侧快照保留、source-aware runtime failure、snapshot validation
 和双侧 SHA-256 digest 均 fail closed。Rust Resolver 仍为默认路径。详细合同见
 [`futao-resolver-differential-0.0.9.md`](futao-resolver-differential-0.0.9.md)。
 

@@ -21,7 +21,7 @@ and lexical validation are complete before resolution starts. Type checking,
 HIR/MIR/NIR lowering, and compiler-driver migration remain later milestones.
 
 The resolver runs under `futao-bootstrap-v1` and emits a strict private protocol
-with header `FUTAO-RESOLVER-1`. The Rust adapter validates every field, integer
+with header `FUTAO-RESOLVER-2`. The Rust adapter validates every field, integer
 bound, source span, identity, ordering rule, and terminal status before a
 snapshot can enter the differential comparison.
 
@@ -95,7 +95,7 @@ protocol entry points, schema version, and exact corpus counts. The source-tree
 digest for this milestone is:
 
 ```text
-sha256:c0eb83d8736893cc82ce38f96dbea4265136af23696ca5ed540d3ffdc77129c2
+sha256:0a84ac381ace43b4d7be650f1082aedd1bfc92c10002b50d2d6b223fef6b7ebc
 ```
 
 `bootstrap/stage0/bootstrap-manifest.json` repeats the digest and records
