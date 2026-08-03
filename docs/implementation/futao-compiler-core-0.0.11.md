@@ -188,14 +188,15 @@ or type forms are added in small schema-versioned slices with accepted and
 rejected verifier tests. The closing corpus must not contain a `Deferred` NIR
 artifact for any supported Bootstrap Profile program.
 
-NIR expansion is reference-first. Each vocabulary slice extends the Rust model,
-verifier, canonical logical DTO, layout evidence, and reference MIR-to-NIR
-lowering before the Futao builder may emit it. The sequence is the in-memory
-layout-table foundation, scalar/locals/CFG, String/Array and intrinsics,
-Record/Union aggregates, then function values and closures. Schema 2 is frozen
-only after that vocabulary and its layout/Drop-glue completeness gate close.
-This keeps the independent verifier and reference oracle ahead of candidate
-output without silently widening closed schema 1.
+NIR expansion is reference-first. Each slice extends the Rust model, verifier,
+canonical logical DTO, and layout evidence where its required vocabulary is not
+already present, and always completes the reference MIR-to-NIR path before the
+Futao builder may emit that behavior. The sequence is the in-memory layout-table
+foundation, scalar/locals/CFG, String/Array and intrinsics, Record/Union
+aggregates, then function values and closures. Schema 2 is frozen only after
+that vocabulary and its layout/Drop-glue completeness gate close. This keeps
+the independent verifier and reference oracle ahead of candidate output without
+silently widening closed schema 1.
 
 The existing artifact schema 1 remains the closed `target-neutral-v1` contract:
 it verifies logical NIR before selecting a target and cannot carry aggregate
@@ -457,17 +458,22 @@ prerequisites of `0.0.11`; none of these slices is a replacement `0.0.10`.
      the scalar, pointer, handle, function-reference, and already modeled
      Struct/FixedArray/TaggedUnion types available at this slice; later type
      slices extend the table atomically.
+   - Materialize a layout record only when any required `DropGlueId` body is
+     already verified. Owned records land with their glue in later vocabulary
+     slices; slice 24, not this foundation, enforces whole-program completeness.
    - Add `bootstrap-layout-64le-v1` as an explicit versioned compiler option and
      bind that exact descriptor into candidate input and comparison evidence.
    - Make the independent verifier reject missing, duplicate, inconsistent,
      recursive, overflowing, target-mismatched, or unresolved Drop-glue records.
 
 20. **Scalar, local, and CFG NIR reference**
-   - Extend the Rust NIR vocabulary, verifier, canonical logical DTO, and
-     reference MIR-to-NIR lowering for locals, branches, block parameters, and
-     scalar operations before candidate emission.
-   - Add builder, verifier, DTO round-trip, schema 1 rejection, mutation,
-     recursion, ownership, and overflow tests for each addition.
+   - Complete Rust reference MIR-to-NIR lowering for immutable locals,
+     multi-block CFG, existing block parameters, and scalar operations. Reuse
+     existing verified NIR forms where sufficient and add vocabulary only for a
+     semantic operation that cannot be represented correctly by those forms.
+   - Add lowering, builder, verifier, DTO round-trip, mutation, recursion,
+     ownership, and overflow tests. Schema 1 continues to accept its frozen
+     forms and rejects only newly introduced forms.
 
 21. **String, Array, and intrinsic NIR reference**
    - Add independently verified operations and types for owned String,
@@ -483,13 +489,15 @@ prerequisites of `0.0.11`; none of these slices is a replacement `0.0.10`.
    - Add aggregate construction, projection, variant tags and payloads, switch
      lowering, layout references, and active-variant cleanup verification.
    - Add every instantiated aggregate layout and Drop glue in the same slice;
-     prove complete Rust reference lowering before enabling candidate output.
+     prove complete Rust reference lowering and schema 1 rejection of new forms
+     before enabling candidate output.
 
 23. **Function-value and closure NIR reference**
    - Add direct/indirect calls, function instances, environments, captures,
      and closure cleanup with deterministic identities.
    - Add closure-environment layouts and cleanup in the same slice and close all
-     remaining Rust MIR-to-NIR `Deferred` states used by the compiler self-graph.
+     remaining Rust MIR-to-NIR `Deferred` states used by the compiler self-graph;
+     retain fail-closed schema 1 rejection of every new form.
 
 24. **Layout and Drop-glue completeness gate**
    - Walk every materializable closed type and require exactly one target layout
