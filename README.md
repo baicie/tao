@@ -109,9 +109,12 @@ cargo install --locked --path crates/nexac
 nexac --version
 ```
 
-Version tags publish checked Linux, macOS, and Windows archives with SHA-256
-files through [GitHub Releases](https://github.com/baicie/tao/releases). The
-compiler remains a prerelease and is not published to crates.io.
+Version tags publish checked Linux, macOS, and Windows installer packages and
+portable archives with SHA-256 files through [GitHub Releases](https://github.com/baicie/tao/releases).
+Use the native installer when available: `.deb` on Debian-based Linux, `.pkg`
+on Apple Silicon macOS, and `.msi` on 64-bit Windows. These installers place
+`nexac` on the system command path, so no manual `PATH` configuration is
+needed. The compiler remains a prerelease and is not published to crates.io.
 
 After `v0.0.9` is published, the same version can be installed reproducibly
 from its tag:

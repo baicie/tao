@@ -123,9 +123,19 @@ The [release workflow](https://github.com/baicie/tao/actions/workflows/release.y
 rejects a tag that does not exactly match the Cargo package version or does not
 point to `mvp`. It then runs the complete release and security gates, builds
 and smoke-tests Rust 1.80 binaries on Linux, macOS, and Windows, verifies the
-archives after extraction, attaches `.tar.gz` archives and SHA-256 files, and
-publishes the result as a GitHub prerelease. It does not publish any crate to
-crates.io; every workspace package explicitly disables registry publication.
+archives after extraction, builds native installers, attaches installer and
+archive SHA-256 files, and publishes the result as a GitHub prerelease. The
+native installer assets are:
+
+* Linux x86_64: `.deb`, installing `nexac` into `/usr/bin`.
+* macOS ARM64: `.pkg`, installing `nexac` into `/usr/local/bin`.
+* Windows x86_64: `.msi`, installing `nexac` under `Program Files\Futao` and
+  adding that directory to the system `PATH`.
+
+The `.tar.gz` archives remain available for unsupported distributions and
+architectures. Every installer and archive has a matching `.sha256` file. The
+workflow does not publish any crate to crates.io; every workspace package
+explicitly disables registry publication.
 
 All validation and platform builds finish before GitHub Release creation, so
 failures in those jobs can be retried without moving the tag. If publication
