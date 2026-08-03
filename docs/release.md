@@ -20,14 +20,15 @@ owns bounded coverage-guided execution.
 That command validates the candidate without publishing anything. It runs:
 
 1. the locked Rust formatting, lint, test, rustdoc, Bootstrap Profile/Stdlib,
-   and Rust/Futao lexer/parser/resolver differential quality gates;
+   and Rust/Futao lexer/parser/resolver/type-checker differential quality gates;
 2. a Rust 1.80 compatibility check;
 3. Stage 0 manifest/digest verification, a clean Rust 1.80 locked rebuild, and
    a complete Bootstrap Stdlib check through the deterministic `.ft` to
    historical `.nexa` compatibility projection;
 4. the versioned `conformance/1.0` corpus;
-5. stable front-end seed replay, the checked-in lexer, parser, and resolver differential
-   corpora, and a Rust 1.80 front-end fuzz-target compile check;
+5. stable front-end seed replay, the checked-in lexer, parser, resolver, and
+   type-checker differential corpora, and a Rust 1.80 front-end fuzz-target
+   compile check;
 6. the release-mode performance workload;
 7. the private NIR artifact accepted/rejected contract;
 8. a release `nexac` build, version smoke, canonical `check`/`run` smoke, and
@@ -47,6 +48,7 @@ cargo xtask bootstrap-profile
 cargo xtask lexer-differential
 cargo xtask parser-differential
 cargo xtask resolver-differential
+cargo xtask typecheck-differential
 cargo xtask nir-artifact
 cargo xtask fuzz-smoke
 cargo xtask perf

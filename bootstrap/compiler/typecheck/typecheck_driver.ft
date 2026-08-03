@@ -1,0 +1,61 @@
+import {
+  TypecheckDiagnostic,
+  TypecheckOutcome,
+  TypecheckResult
+} from "./typecheck.ft";
+import { checkEncoded } from "./typecheck_bridge.ft";
+
+function typeName(kind: Int): String {
+  if (kind === 0) {
+    return "int";
+  }
+  if (kind === 1) {
+    return "bool";
+  }
+  if (kind === 2) {
+    return "string";
+  }
+  if (kind === 3) {
+    return "unit";
+  }
+  return "unknown";
+}
+
+function diagnosticCode(code: Int): String {
+  if (code === 0) {
+    return "E3001";
+  }
+  if (code === 1) {
+    return "E3002";
+  }
+  return "E3003";
+}
+
+function emitDiagnostic(diagnostic: TypecheckDiagnostic): Unit {
+  print(diagnosticCode(diagnostic.code));
+  print(0);
+  print(diagnostic.start);
+  print(diagnostic.end);
+}
+
+function emitResult(result: TypecheckResult): Unit {
+  print("ok");
+  print(1);
+  print(result.types.length);
+  for (const kind of result.types) {
+    print(typeName(kind));
+  }
+  print(result.diagnostics.length);
+  for (const diagnostic of result.diagnostics) {
+    emitDiagnostic(diagnostic);
+  }
+}
+
+function main(arguments: String[]): Unit {
+  print("FUTAO-TYPECHECK-1");
+  const outcome = checkEncoded(arguments);
+  match (outcome) {
+    case TypecheckOutcome.InvalidInput() => print("invalid-input");
+    case TypecheckOutcome.Checked(result) => emitResult(result);
+  };
+}

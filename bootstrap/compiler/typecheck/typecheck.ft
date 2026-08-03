@@ -1,0 +1,204 @@
+export type TypecheckNode = {
+  kind: Int;
+  left: Int;
+  right: Int;
+  extra: Int;
+  expected: Int;
+  start: Int;
+  end: Int;
+};
+
+export type TypecheckDiagnostic = {
+  code: Int;
+  start: Int;
+  end: Int;
+};
+
+export type TypecheckResult = {
+  types: Int[];
+  diagnostics: TypecheckDiagnostic[];
+};
+
+export type TypecheckOutcome =
+  | InvalidInput()
+  | Checked(result: TypecheckResult);
+
+type CheckValue = {
+  inferred: Int;
+  diagnostics: TypecheckDiagnostic[];
+};
+
+type CheckState = {
+  types: Int[];
+  diagnostics: TypecheckDiagnostic[];
+  valid: Bool;
+};
+
+function diagnostic(code: Int, start: Int, end: Int): TypecheckDiagnostic {
+  return { code: code, start: start, end: end };
+}
+
+function oneDiagnostic(code: Int, node: TypecheckNode): TypecheckDiagnostic[] {
+  return [diagnostic(code, node.start, node.end)];
+}
+
+function typeAt(types: Int[], index: Int): Int {
+  if (index < 0 || index >= types.length) {
+    return -1;
+  }
+  return types[index];
+}
+
+function expectedType(node: TypecheckNode): Int {
+  if (node.expected === 0) {
+    return 0;
+  }
+  if (node.expected === 1) {
+    return 1;
+  }
+  if (node.expected === 2) {
+    return 2;
+  }
+  if (node.expected === 3) {
+    return 3;
+  }
+  return -1;
+}
+
+function binaryType(
+  left: Int,
+  right: Int,
+  expected: Int,
+  node: TypecheckNode
+): CheckValue {
+  if (left < 0 || right < 0) {
+    return { inferred: -1, diagnostics: [] };
+  }
+  if (left === expected && right === expected) {
+    return { inferred: expected, diagnostics: [] };
+  }
+  return { inferred: -1, diagnostics: oneDiagnostic(0, node) };
+}
+
+function inferNode(node: TypecheckNode, types: Int[]): CheckValue {
+  const left = typeAt(types, node.left);
+  const right = typeAt(types, node.right);
+  const extra = typeAt(types, node.extra);
+  if (node.kind === 0) {
+    return { inferred: 0, diagnostics: [] };
+  }
+  if (node.kind === 1) {
+    return { inferred: 1, diagnostics: [] };
+  }
+  if (node.kind === 2) {
+    return { inferred: 2, diagnostics: [] };
+  }
+  if (node.kind === 3) {
+    return { inferred: 3, diagnostics: [] };
+  }
+  if (node.kind === 4) {
+    if (left < 0) {
+      return { inferred: -1, diagnostics: [] };
+    }
+    if (left === 0) {
+      return { inferred: 0, diagnostics: [] };
+    }
+    return { inferred: -1, diagnostics: oneDiagnostic(0, node) };
+  }
+  if (node.kind === 5) {
+    if (left < 0) {
+      return { inferred: -1, diagnostics: [] };
+    }
+    if (left === 1) {
+      return { inferred: 1, diagnostics: [] };
+    }
+    return { inferred: -1, diagnostics: oneDiagnostic(0, node) };
+  }
+  if (node.kind === 6) {
+    return binaryType(left, right, 0, node);
+  }
+  if (node.kind === 7) {
+    if (left < 0 || right < 0) {
+      return { inferred: -1, diagnostics: [] };
+    }
+    if (left === right && (left === 0 || left === 1 || left === 2)) {
+      return { inferred: 1, diagnostics: [] };
+    }
+    return { inferred: -1, diagnostics: oneDiagnostic(0, node) };
+  }
+  if (node.kind === 8 || node.kind === 9) {
+    return binaryType(left, right, 1, node);
+  }
+  if (node.kind === 10) {
+    const conditionDiagnostics = ifConditionDiagnostics(left, node);
+    if (right < 0 || extra < 0) {
+      return { inferred: -1, diagnostics: conditionDiagnostics };
+    }
+    if (right === extra) {
+      return { inferred: right, diagnostics: conditionDiagnostics };
+    }
+    return {
+      inferred: -1,
+      diagnostics: conditionDiagnostics.concat(oneDiagnostic(0, node))
+    };
+  }
+  if (node.kind === 11) {
+    if (left < 0 || expectedType(node) < 0) {
+      return { inferred: 3, diagnostics: [] };
+    }
+    if (left === expectedType(node)) {
+      return { inferred: 3, diagnostics: [] };
+    }
+    return { inferred: 3, diagnostics: oneDiagnostic(2, node) };
+  }
+  return { inferred: -1, diagnostics: [] };
+}
+
+function ifConditionDiagnostics(left: Int, node: TypecheckNode): TypecheckDiagnostic[] {
+  if (left >= 0 && !(left === 1)) {
+    return oneDiagnostic(1, node);
+  }
+  return [];
+}
+
+function checkRange(
+  nodes: TypecheckNode[],
+  start: Int,
+  end: Int,
+  state: CheckState
+): CheckState {
+  if (!state.valid || start >= end) {
+    return state;
+  }
+  if (end - start === 1) {
+    const value = inferNode(nodes[start], state.types);
+    return {
+      types: state.types.concat([value.inferred]),
+      diagnostics: state.diagnostics.concat(value.diagnostics),
+      valid: true
+    };
+  }
+  const middle = start + (end - start) / 2;
+  const left = checkRange(nodes, start, middle, state);
+  return checkRange(nodes, middle, end, left);
+}
+
+export function check(nodes: TypecheckNode[], sourceLength: Int): TypecheckOutcome {
+  if (sourceLength < 0 || nodes.length > 1024) {
+    return TypecheckOutcome.InvalidInput();
+  }
+  for (const node of nodes) {
+    if (
+      node.start < 0 || node.start >= node.end || node.end > sourceLength ||
+      node.left >= nodes.length || node.right >= nodes.length || node.extra >= nodes.length
+    ) {
+      return TypecheckOutcome.InvalidInput();
+    }
+  }
+  const state = checkRange(nodes, 0, nodes.length, {
+    types: [],
+    diagnostics: [],
+    valid: true
+  });
+  return TypecheckOutcome.Checked({ types: state.types, diagnostics: state.diagnostics });
+}

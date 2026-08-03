@@ -68,6 +68,7 @@ cargo xtask bootstrap-profile
 cargo xtask lexer-differential
 cargo xtask parser-differential
 cargo xtask resolver-differential
+cargo xtask typecheck-differential
 cargo xtask storage-kernel
 cargo xtask nir-artifact
 cargo run -p nexac -- check examples/practical-core/main.nexa
@@ -97,6 +98,9 @@ and zero-difference accepted/rejected/fuzz gate are documented in
 The `0.0.9` executable Futao resolver, schema 1 snapshot, module/scope/name
 contract, and zero-difference corpus gate are documented in
 [docs/implementation/futao-resolver-differential-0.0.9.md](docs/implementation/futao-resolver-differential-0.0.9.md).
+The first `0.0.10` Futao type-checker expression kernel, schema 1 protocol,
+and accepted/rejected differential gate are documented in
+[docs/implementation/futao-type-checker-0.0.10.md](docs/implementation/futao-type-checker-0.0.10.md).
 
 Install the self-use CLI from a local checkout with:
 

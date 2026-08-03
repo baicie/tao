@@ -1,0 +1,11 @@
+{
+  "sourceLength": 8,
+  "nodes": [
+    {"kind": "bool", "start": 0, "end": 4},
+    {"kind": "int", "start": 5, "end": 6},
+    {"kind": "add", "left": 0, "right": 1, "start": 0, "end": 6},
+    {"kind": "int", "start": 7, "end": 8},
+    {"kind": "if", "left": 3, "right": 1, "extra": 1, "start": 7, "end": 8},
+    {"kind": "return", "left": 1, "expected": "bool", "start": 5, "end": 6}
+  ]
+}

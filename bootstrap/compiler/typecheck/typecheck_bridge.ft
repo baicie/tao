@@ -1,0 +1,59 @@
+import { TypecheckNode, TypecheckOutcome, check } from "./typecheck.ft";
+
+function parseRange(values: String[], start: Int, end: Int): Int[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [parseInt(values[start])];
+  }
+  const middle = start + (end - start) / 2;
+  return parseRange(values, start, middle).concat(
+    parseRange(values, middle, end)
+  );
+}
+
+function decodeNode(values: Int[], position: Int): TypecheckNode {
+  return {
+    kind: values[position],
+    left: values[position + 1],
+    right: values[position + 2],
+    extra: values[position + 3],
+    expected: values[position + 4],
+    start: values[position + 5],
+    end: values[position + 6]
+  };
+}
+
+function decodeRange(
+  values: Int[],
+  start: Int,
+  end: Int,
+  base: Int
+): TypecheckNode[] {
+  if (start >= end) {
+    return [];
+  }
+  if (end - start === 1) {
+    return [decodeNode(values, base + start * 7)];
+  }
+  const middle = start + (end - start) / 2;
+  return decodeRange(values, start, middle, base).concat(
+    decodeRange(values, middle, end, base)
+  );
+}
+
+export function checkEncoded(arguments: String[]): TypecheckOutcome {
+  const values = parseRange(arguments, 0, arguments.length);
+  if (values.length < 2 || values[0] < 0 || values[0] > 1024) {
+    return TypecheckOutcome.InvalidInput();
+  }
+  const nodeCount = values[0];
+  const base = 1;
+  const sourcePosition = base + nodeCount * 7;
+  if (sourcePosition >= values.length || !(sourcePosition + 1 === values.length)) {
+    return TypecheckOutcome.InvalidInput();
+  }
+  const nodes = decodeRange(values, 0, nodeCount, base);
+  return check(nodes, values[sourcePosition]);
+}

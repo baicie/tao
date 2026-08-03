@@ -1,0 +1,5 @@
+import { checkEncoded } from "./typecheck_bridge.ft";
+
+function main(arguments: String[]): Unit {
+  const result = checkEncoded(arguments);
+}

@@ -19,11 +19,14 @@ cargo xtask security
 cargo xtask lexer-differential
 cargo xtask parser-differential
 cargo xtask resolver-differential
+cargo xtask typecheck-differential
 ```
 
 `cargo xtask check` runs formatting, clippy, tests, Rust docs, the Stage 0
 bootstrap contract, the Bootstrap Profile/Stdlib gate, and all Rust/Futao
 lexer/parser/resolver differential gates.
+The type-checker differential gate compares inferred primitive types and
+source-aware semantic diagnostics over its accepted/rejected expression corpus.
 `conformance` runs the versioned language corpus. `fuzz-smoke` replays stable
 parser seeds and checks the fuzz target on Rust 1.80. `perf` runs release-mode
 reference workloads without a machine-independent threshold. `release-check`
@@ -45,6 +48,9 @@ rejections.
 resolved names, and diagnostics over the accepted/rejected resolver graphs and
 checked-in resolver fuzz seeds. A mismatch retains both canonical snapshots
 under `target/resolver-differential`.
+`typecheck-differential` compares the first Futao type-checker expression
+kernel (`Int`, `Bool`, `String`, `Unit`, operators, conditionals, and returns)
+and retains both snapshots under `target/typecheck-differential` on mismatch.
 
 ## Manual Checks
 
