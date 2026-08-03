@@ -41,6 +41,7 @@ mod boxed;
 mod collections;
 mod layout;
 mod ownership;
+mod partial_init;
 mod shared;
 mod storage;
 
@@ -57,6 +58,10 @@ pub use layout::{LayoutError, ValueLayout};
 pub use ownership::{
     CleanupAction, OwnershipEffect, OwnershipError, OwnershipErrorKind, OwnershipFrame, PlaceId,
     PlaceKind, PlaceState,
+};
+pub use partial_init::{
+    InitializedAggregate, PartialInit, PartialInitCreateError, PartialInitCreateErrorKind,
+    PartialInitFinishError, PartialInitWriteError, PartialInitWriteErrorKind,
 };
 pub use shared::{Shared, SharedAccessError, SharedError, Weak};
 pub use storage::{

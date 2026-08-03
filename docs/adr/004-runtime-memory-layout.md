@@ -11,9 +11,10 @@
 * **实现优先级**：P0
 * **兼容性范围**：不修改 Nexa Language 1.0 已冻结语义
 
-当前已交付的实现切片包括 [`Shared<T>`/`Weak<T>` 控制块](../implementation/adr-004-shared-weak.md)
-和 [`StorageBox<T>` 唯一所有权](../implementation/adr-004-owned-box.md)。这些切片不等同于
-ADR-004 全部实现；部分初始化、跨后端布局和稳定外部描述符仍按独立验收门槛推进。
+当前已交付的实现切片包括 [`Shared<T>`/`Weak<T>` 控制块](../implementation/adr-004-shared-weak.md)、
+[`StorageBox<T>` 唯一所有权](../implementation/adr-004-owned-box.md) 和
+[`PartialInit<T>` 有界部分初始化参考模型](../implementation/adr-004-partial-init.md)。这些切片不等同于
+ADR-004 全部实现；异构布局、跨后端布局和稳定外部描述符仍按独立验收门槛推进。
 
 ---
 

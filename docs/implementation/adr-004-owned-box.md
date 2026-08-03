@@ -43,6 +43,8 @@ with original-value recovery, and ZST Drop without allocation.
 
 ## Deferred Work
 
-Partial aggregate initialization, panic-isolation cleanup traces,
-Native/Wasm layout conformance, stable external descriptors, and
-Freestanding/custom allocator integration remain separate ADR-004/005 slices.
+The [bounded homogeneous partial-initialization reference model](adr-004-partial-init.md)
+is a later ADR-004 slice and is intentionally not part of this owner API.
+Panic-isolation cleanup traces, Native/Wasm layout conformance, stable external
+descriptors, and Freestanding/custom allocator integration remain separate
+ADR-004/005 slices.
