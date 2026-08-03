@@ -102,14 +102,14 @@ nexac --version
 ```
 
 Version tags publish checked Linux, macOS, and Windows archives with SHA-256
-files through [GitHub Releases](https://github.com/baicie/nexa/releases). The
+files through [GitHub Releases](https://github.com/baicie/tao/releases). The
 compiler remains a prerelease and is not published to crates.io.
 
 After `v0.0.8` is published, the same version can be installed reproducibly
 from its tag:
 
 ```bash
-cargo install --locked --git https://github.com/baicie/nexa --tag v0.0.8 nexac
+cargo install --locked --git https://github.com/baicie/tao --tag v0.0.8 nexac
 ```
 
 Nexa intentionally borrows familiar TypeScript surface syntax without

@@ -113,7 +113,7 @@ export default defineConfig({
     },
 
     socialLinks: [
-      { icon: "github", link: "https://github.com/baicie/nexa" },
+      { icon: "github", link: "https://github.com/baicie/tao" },
     ],
 
     search: {

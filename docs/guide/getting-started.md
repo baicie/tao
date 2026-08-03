@@ -14,8 +14,8 @@ cargo install cargo-deny cargo-audit cargo-machete cargo-llvm-cov git-cliff
 ## Build
 
 ```bash
-git clone https://github.com/baicie/nexa.git
-cd nexa
+git clone https://github.com/baicie/tao.git
+cd tao
 cargo build --workspace
 ```
 
@@ -32,7 +32,7 @@ After the corresponding tag is published, install the same source revision
 without keeping a checkout:
 
 ```bash
-cargo install --locked --git https://github.com/baicie/nexa --tag v0.0.8 nexac
+cargo install --locked --git https://github.com/baicie/tao --tag v0.0.8 nexac
 ```
 
 ## Test

@@ -7,7 +7,7 @@
     "compiler": "nexac",
     "compilerVersion": "0.0.1",
     "source": {
-      "repository": "https://github.com/baicie/nexa",
+      "repository": "https://github.com/baicie/tao",
       "commit": "9293a7b59ff3b6625ca09091f7ad50234638981f",
       "archiveDigest": "sha256:15ea2ee9205e327293353aa6ece756ef511c9425e740f89d5b62694ae571f492",
       "cargoLockDigest": "sha256:4f68e587c3772126b16cba2d1ad1fcf56cd1ef653b6c33ba03d596ab0d7c9504"

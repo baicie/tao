@@ -208,7 +208,7 @@ impl BootstrapManifest {
         expect(
             "stage0.source.repository",
             &self.stage0.source.repository,
-            "https://github.com/baicie/nexa",
+            "https://github.com/baicie/tao",
         )?;
         ensure!(
             valid_lower_hex(&self.stage0.source.commit, 40),
