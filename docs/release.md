@@ -104,7 +104,9 @@ and pushes the annotated tag; the GitHub release workflow then builds the
 cross-platform archives and creates the prerelease.
 
 `--skip-checks` is available only for a non-publishing preflight and must not
-be used as a release gate.
+be used as a release gate. When all Cargo dependencies are already cached, a
+registry outage can be bypassed for the local install smoke with
+`CARGO_NET_OFFLINE=true`; CI still performs its normal online checks.
 
 The self-use compiler is versioned independently as `nexac 0.0.9`. The script
 is the canonical release entry point. If a manual recovery is required after a

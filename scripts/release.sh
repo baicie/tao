@@ -135,7 +135,9 @@ info "candidate nexac $version at $local_head"
 
 run_install_smoke() {
     install_root="$(mktemp -d "${TMPDIR:-/tmp}/nexac-release.XXXXXX")"
-    cargo install --locked --path crates/nexac --root "$install_root"
+    if ! cargo install --locked --path crates/nexac --root "$install_root"; then
+        fail "cargo install failed; fix registry access or retry with CARGO_NET_OFFLINE=true when dependencies are cached"
+    fi
 
     local installed="$install_root/bin/nexac"
     [[ -x "$installed" ]] || fail "installed nexac binary was not created"

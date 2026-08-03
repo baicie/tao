@@ -151,6 +151,9 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
 
+      - name: Validate release script
+        run: bash -n scripts/release.sh
+
       - name: Check
         run: cargo check --locked --workspace --all-targets --all-features
 
