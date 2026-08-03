@@ -1,0 +1,7 @@
+function main(): Unit {
+  const transform: (value: Int) => Int = (value: Int): Int => {
+    const result: Int = value;
+    return result;
+  };
+  print(transform(1));
+}

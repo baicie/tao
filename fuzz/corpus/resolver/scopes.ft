@@ -1,0 +1,7 @@
+function main(value: Int): Unit {
+  const copy: Int = value;
+  if (true) {
+    const nested: Int = copy;
+    print(nested);
+  }
+}

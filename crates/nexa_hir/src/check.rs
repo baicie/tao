@@ -78,9 +78,16 @@ impl ResolvedImport {
 pub struct Analysis {
     typed: Option<TypedProgram>,
     diagnostics: Vec<Diagnostic>,
+    resolution: crate::Resolution,
 }
 
 impl Analysis {
+    /// Returns the resolver-stage result consumed by this analysis.
+    #[must_use]
+    pub const fn resolution(&self) -> &crate::Resolution {
+        &self.resolution
+    }
+
     /// Returns the validated typed HIR when no error diagnostics were produced.
     #[must_use]
     pub fn typed(&self) -> Option<&TypedProgram> {
@@ -856,8 +863,12 @@ pub fn type_check(program: &Program) -> Analysis {
 /// Resolves imports and validates static semantics for a complete module graph.
 #[must_use]
 pub fn type_check_modules(programs: &[Program], links: &[ResolvedImport]) -> Analysis {
+    let resolution = crate::resolve_modules(programs, links);
     let mut diagnostics = Vec::new();
     let mut facts = FactBuilder::default();
+    for name in resolution.names() {
+        facts.record_name(name.span(), name.resolution());
+    }
     let local_modules = programs
         .iter()
         .map(|program| {
@@ -930,6 +941,14 @@ pub fn type_check_modules(programs: &[Program], links: &[ResolvedImport]) -> Ana
     reject_invalid_generic_instances(&instances, &records, &unions, &functions, &mut diagnostics);
     reject_generic_instance_budget(&instances, &records, &unions, &functions, &mut diagnostics);
 
+    for diagnostic in resolution.diagnostics() {
+        if !diagnostics
+            .iter()
+            .any(|existing| same_diagnostic_observation(existing, diagnostic))
+        {
+            diagnostics.push(diagnostic.clone());
+        }
+    }
     diagnostics.sort_by(|left, right| diagnostic_position(left).cmp(&diagnostic_position(right)));
     facts.records = records;
     facts.unions = unions;
@@ -962,7 +981,22 @@ pub fn type_check_modules(programs: &[Program], links: &[ResolvedImport]) -> Ana
             closures: facts.closures,
         });
 
-    Analysis { typed, diagnostics }
+    Analysis {
+        typed,
+        diagnostics,
+        resolution,
+    }
+}
+
+fn same_diagnostic_observation(left: &Diagnostic, right: &Diagnostic) -> bool {
+    left.code() == right.code()
+        && left.severity() == right.severity()
+        && left.labels().len() == right.labels().len()
+        && left
+            .labels()
+            .iter()
+            .zip(right.labels())
+            .all(|(left, right)| left.style() == right.style() && left.span() == right.span())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

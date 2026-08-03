@@ -589,13 +589,19 @@ impl CompilerOutput {
 /// Returns [`CompileError`] for an invalid input collection, a source-less
 /// session failure, an internal MIR invariant failure, or serialization failure.
 pub fn compile(input: &CompilerInput) -> Result<CompilerOutput, CompileError> {
+    let session = explicit_session(input)?;
+    compile_session_with_options(&session, input.options())
+}
+
+pub(crate) fn explicit_session(
+    input: &CompilerInput,
+) -> Result<CompilerSession<MemorySourceProvider>, CompileError> {
     let sources = validated_sources(input)?;
     let mut provider = MemorySourceProvider::default();
     for source in sources {
         let _ = provider.insert(source.identity(), source.content().as_bytes());
     }
-    let session = CompilerSession::build(provider, Path::new(input.entry()))?;
-    compile_session_with_options(&session, input.options())
+    CompilerSession::build(provider, Path::new(input.entry())).map_err(Into::into)
 }
 
 /// Produces the same structured output for a Host-loaded compiler session.

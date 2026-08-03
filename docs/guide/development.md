@@ -16,10 +16,14 @@ cargo xtask fuzz-smoke
 cargo xtask perf
 cargo xtask release-check
 cargo xtask security
+cargo xtask lexer-differential
+cargo xtask parser-differential
+cargo xtask resolver-differential
 ```
 
 `cargo xtask check` runs formatting, clippy, tests, Rust docs, the Stage 0
-bootstrap contract, and the Bootstrap Profile/Stdlib gate.
+bootstrap contract, the Bootstrap Profile/Stdlib gate, and all Rust/Futao
+lexer/parser/resolver differential gates.
 `conformance` runs the versioned language corpus. `fuzz-smoke` replays stable
 parser seeds and checks the fuzz target on Rust 1.80. `perf` runs release-mode
 reference workloads without a machine-independent threshold. `release-check`
@@ -37,6 +41,10 @@ test phase of `cargo xtask check`.
 `nir-artifact` validates the exact private schema against one canonical
 accepted artifact and mutation, unknown-field, and unsupported-schema
 rejections.
+`resolver-differential` compares module graphs, symbols, scopes, bindings,
+resolved names, and diagnostics over the accepted/rejected resolver graphs and
+checked-in resolver fuzz seeds. A mismatch retains both canonical snapshots
+under `target/resolver-differential`.
 
 ## Manual Checks
 

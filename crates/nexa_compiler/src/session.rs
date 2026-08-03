@@ -15,7 +15,6 @@ use nexa_syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 use thiserror::Error;
 
 const IMPORT_SOURCE_ERROR: DiagnosticCode = DiagnosticCode::new("E4001");
-const MODULE_CYCLE: DiagnosticCode = DiagnosticCode::new("E4002");
 
 /// A source module loaded and parsed once within one compiler session.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,8 +118,6 @@ pub struct CompilerSession<P> {
     source_states: HashMap<SourceKey, SourceState>,
     resolution_cache: HashMap<ImportRequest, Result<SourceKey, SourceLoadError>>,
     visit_states: Vec<VisitState>,
-    parent_edges: Vec<Option<usize>>,
-    back_edges: Vec<usize>,
 }
 
 impl<P> CompilerSession<P> {
@@ -208,13 +205,10 @@ impl<P: SourceProvider> CompilerSession<P> {
             source_states: HashMap::new(),
             resolution_cache: HashMap::new(),
             visit_states: Vec::new(),
-            parent_edges: Vec::new(),
-            back_edges: Vec::new(),
         };
         let entry_module = session.register_module(entry_key, display_path, text)?;
         debug_assert_eq!(entry_module, ModuleId::ENTRY);
         session.visit_module(entry_module)?;
-        session.diagnostics.extend(session.cycle_diagnostics());
         session.diagnostics.sort_by_key(super::diagnostic_position);
         Ok(session)
     }
@@ -240,7 +234,6 @@ impl<P: SourceProvider> CompilerSession<P> {
         });
         let _ = self.source_states.insert(key, SourceState::Loaded(module));
         self.visit_states.push(VisitState::Unvisited);
-        self.parent_edges.push(None);
         Ok(module)
     }
 
@@ -282,7 +275,6 @@ impl<P: SourceProvider> CompilerSession<P> {
                 }
             };
 
-            let edge_index = self.edges.len();
             self.edges.push(ImportEdge {
                 importer: module,
                 imported: target,
@@ -291,16 +283,7 @@ impl<P: SourceProvider> CompilerSession<P> {
             });
 
             if is_new {
-                if let Some(parent) = self.parent_edges.get_mut(target.index()) {
-                    *parent = Some(edge_index);
-                }
                 self.visit_module(target)?;
-            } else if self
-                .visit_states
-                .get(target.index())
-                .is_some_and(|state| *state == VisitState::Active)
-            {
-                self.back_edges.push(edge_index);
             }
         }
 
@@ -378,83 +361,6 @@ impl<P: SourceProvider> CompilerSession<P> {
             module,
             is_new: true,
         })
-    }
-
-    fn cycle_diagnostics(&self) -> Vec<Diagnostic> {
-        let components = strongly_connected_components(self.modules.len(), &self.edges);
-        let mut component_by_module = vec![None; self.modules.len()];
-        for (component_index, component) in components.iter().enumerate() {
-            for module in component {
-                if let Some(slot) = component_by_module.get_mut(module.index()) {
-                    *slot = Some(component_index);
-                }
-            }
-        }
-
-        let mut diagnostics = Vec::new();
-        for (component_index, component) in components.iter().enumerate() {
-            if !component_is_cyclic(component, &self.edges) {
-                continue;
-            }
-
-            let witness = self.back_edges.iter().copied().find(|edge_index| {
-                self.edges.get(*edge_index).is_some_and(|edge| {
-                    component_by_module
-                        .get(edge.importer.index())
-                        .copied()
-                        .flatten()
-                        == Some(component_index)
-                        && component_by_module
-                            .get(edge.imported.index())
-                            .copied()
-                            .flatten()
-                            == Some(component_index)
-                })
-            });
-            let Some(witness) = witness else {
-                continue;
-            };
-            let Some(closing_edge) = self.edges.get(witness) else {
-                continue;
-            };
-            let mut diagnostic = Diagnostic::error(MODULE_CYCLE, "cyclic module import")
-                .with_label(Label::primary(
-                    closing_edge.path_span,
-                    "this import closes a module cycle",
-                ));
-            for edge_index in self.tree_path_edges(closing_edge.imported, closing_edge.importer) {
-                if let Some(edge) = self.edges.get(edge_index) {
-                    diagnostic = diagnostic.with_label(Label::secondary(
-                        edge.path_span,
-                        "cycle continues through this import",
-                    ));
-                }
-            }
-            diagnostics.push(diagnostic);
-        }
-        diagnostics
-    }
-
-    fn tree_path_edges(&self, ancestor: ModuleId, descendant: ModuleId) -> Vec<usize> {
-        let mut reversed = Vec::new();
-        let mut current = descendant;
-
-        for _ in 0..self.modules.len() {
-            if current == ancestor {
-                reversed.reverse();
-                return reversed;
-            }
-            let Some(parent_edge) = self.parent_edges.get(current.index()).copied().flatten()
-            else {
-                return Vec::new();
-            };
-            let Some(edge) = self.edges.get(parent_edge) else {
-                return Vec::new();
-            };
-            reversed.push(parent_edge);
-            current = edge.importer;
-        }
-        Vec::new()
     }
 }
 
@@ -646,95 +552,6 @@ fn import_failure_diagnostic(import: &ImportSite, _error: &SourceLoadError) -> D
         import.path_span,
         "imported source could not be loaded",
     ))
-}
-
-fn component_is_cyclic(component: &[ModuleId], edges: &[ImportEdge]) -> bool {
-    component.len() > 1
-        || component.first().is_some_and(|module| {
-            edges
-                .iter()
-                .any(|edge| edge.importer == *module && edge.imported == *module)
-        })
-}
-
-fn strongly_connected_components(module_count: usize, edges: &[ImportEdge]) -> Vec<Vec<ModuleId>> {
-    let mut adjacency = vec![Vec::new(); module_count];
-    for edge in edges {
-        if let Some(neighbors) = adjacency.get_mut(edge.importer.index()) {
-            neighbors.push(edge.imported);
-        }
-    }
-    Tarjan::new(adjacency).components()
-}
-
-struct Tarjan {
-    adjacency: Vec<Vec<ModuleId>>,
-    next_index: usize,
-    indices: Vec<Option<usize>>,
-    low_links: Vec<usize>,
-    stack: Vec<ModuleId>,
-    on_stack: Vec<bool>,
-    components: Vec<Vec<ModuleId>>,
-}
-
-impl Tarjan {
-    fn new(adjacency: Vec<Vec<ModuleId>>) -> Self {
-        let module_count = adjacency.len();
-        Self {
-            adjacency,
-            next_index: 0,
-            indices: vec![None; module_count],
-            low_links: vec![0; module_count],
-            stack: Vec::new(),
-            on_stack: vec![false; module_count],
-            components: Vec::new(),
-        }
-    }
-
-    fn components(mut self) -> Vec<Vec<ModuleId>> {
-        for index in 0..self.adjacency.len() {
-            if self.indices[index].is_none() {
-                self.visit(ModuleId::new(index));
-            }
-        }
-        self.components
-    }
-
-    fn visit(&mut self, module: ModuleId) {
-        let module_index = module.index();
-        let discovery_index = self.next_index;
-        self.next_index += 1;
-        self.indices[module_index] = Some(discovery_index);
-        self.low_links[module_index] = discovery_index;
-        self.stack.push(module);
-        self.on_stack[module_index] = true;
-
-        for neighbor_index in 0..self.adjacency[module_index].len() {
-            let neighbor = self.adjacency[module_index][neighbor_index];
-            if self.indices[neighbor.index()].is_none() {
-                self.visit(neighbor);
-                self.low_links[module_index] =
-                    self.low_links[module_index].min(self.low_links[neighbor.index()]);
-            } else if self.on_stack[neighbor.index()] {
-                if let Some(index) = self.indices[neighbor.index()] {
-                    self.low_links[module_index] = self.low_links[module_index].min(index);
-                }
-            }
-        }
-
-        if self.low_links[module_index] != discovery_index {
-            return;
-        }
-        let mut component = Vec::new();
-        while let Some(member) = self.stack.pop() {
-            self.on_stack[member.index()] = false;
-            component.push(member);
-            if member == module {
-                break;
-            }
-        }
-        self.components.push(component);
-    }
 }
 
 #[cfg(test)]

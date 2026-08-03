@@ -43,12 +43,24 @@ jobs:
       - name: Validate Futao parser differential
         run: cargo run --locked --package xtask -- parser-differential
 
+      - name: Validate Futao resolver differential
+        run: cargo run --locked --package xtask -- resolver-differential
+
       - name: Upload parser differential mismatch artifacts
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: parser-differential-mismatch
           path: target/parser-differential
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload resolver differential mismatch artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resolver-differential-mismatch
+          path: target/resolver-differential
           if-no-files-found: ignore
           retention-days: 7
 
@@ -61,7 +73,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [parser, lexer]
+        target: [parser, lexer, resolver]
 
     steps:
       - uses: actions/checkout@v4

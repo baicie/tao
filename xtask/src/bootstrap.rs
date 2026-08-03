@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{bail, ensure, Context, Result};
-use nexa_compiler::{LEXER_SNAPSHOT_SCHEMA_VERSION, PARSER_SNAPSHOT_SCHEMA_VERSION};
+use nexa_compiler::{
+    LEXER_SNAPSHOT_SCHEMA_VERSION, PARSER_SNAPSHOT_SCHEMA_VERSION, RESOLVER_SNAPSHOT_SCHEMA_VERSION,
+};
 use nexa_nir::{
     ArtifactCompatibility, ArtifactErrorCode, CanonicalArtifact, NIR_ARTIFACT_MAGIC,
     NIR_SCHEMA_VERSION,
@@ -86,6 +88,8 @@ struct BootstrapCompiler {
     differential_case_count: usize,
     parser_snapshot_schema_version: u32,
     parser_differential_case_count: usize,
+    resolver_snapshot_schema_version: u32,
+    resolver_differential_case_count: usize,
     default_implementation: String,
 }
 
@@ -107,6 +111,8 @@ struct BootstrapCompilerManifest {
     differential_corpus: DifferentialCorpus,
     parser_snapshot_schema_version: u32,
     parser_differential_corpus: DifferentialCorpus,
+    resolver_snapshot_schema_version: u32,
+    resolver_differential_corpus: DifferentialCorpus,
     default_implementation: String,
 }
 
@@ -273,12 +279,12 @@ impl BootstrapManifest {
         expect(
             "bootstrapCompiler.status",
             &self.bootstrap_compiler.status,
-            "parser-differential",
+            "resolver-differential",
         )?;
         expect(
             "bootstrapCompiler.version",
             &self.bootstrap_compiler.version,
-            "0.0.2",
+            "0.0.3",
         )?;
         expect(
             "bootstrapCompiler.profile",
@@ -295,8 +301,8 @@ impl BootstrapManifest {
             &self.bootstrap_compiler.tree_digest,
         )?;
         ensure!(
-            self.bootstrap_compiler.implemented_phases == ["lexer", "parser"],
-            "bootstrapCompiler.implementedPhases must contain lexer then parser"
+            self.bootstrap_compiler.implemented_phases == ["lexer", "parser", "resolver"],
+            "bootstrapCompiler.implementedPhases must contain lexer, parser, then resolver"
         );
         ensure!(
             self.bootstrap_compiler.lexer_snapshot_schema_version == LEXER_SNAPSHOT_SCHEMA_VERSION,
@@ -314,6 +320,15 @@ impl BootstrapManifest {
         ensure!(
             self.bootstrap_compiler.parser_differential_case_count == 21,
             "bootstrapCompiler.parserDifferentialCaseCount must be 21"
+        );
+        ensure!(
+            self.bootstrap_compiler.resolver_snapshot_schema_version
+                == RESOLVER_SNAPSHOT_SCHEMA_VERSION,
+            "bootstrapCompiler.resolverSnapshotSchemaVersion must be {RESOLVER_SNAPSHOT_SCHEMA_VERSION}"
+        );
+        ensure!(
+            self.bootstrap_compiler.resolver_differential_case_count == 6,
+            "bootstrapCompiler.resolverDifferentialCaseCount must be 6"
         );
         expect(
             "bootstrapCompiler.defaultImplementation",
@@ -487,12 +502,12 @@ fn verify_bootstrap_compiler(manifest: &BootstrapManifest, root: &Path) -> Resul
     expect(
         "compiler.profileEntry",
         &compiler.profile_entry,
-        "src/parser_profile.ft",
+        "src/resolver_profile.ft",
     )?;
     expect(
         "compiler.driverEntry",
         &compiler.driver_entry,
-        "src/parser_driver.ft",
+        "src/resolver_driver.ft",
     )?;
     ensure!(
         compiler.implemented_phases == manifest.bootstrap_compiler.implemented_phases,
@@ -525,6 +540,11 @@ fn verify_bootstrap_compiler(manifest: &BootstrapManifest, root: &Path) -> Resul
         compiler.parser_snapshot_schema_version
             == manifest.bootstrap_compiler.parser_snapshot_schema_version,
         "compiler parserSnapshotSchemaVersion does not match the top-level contract"
+    );
+    ensure!(
+        compiler.resolver_snapshot_schema_version
+            == manifest.bootstrap_compiler.resolver_snapshot_schema_version,
+        "compiler resolverSnapshotSchemaVersion does not match the top-level contract"
     );
     expect(
         "compiler.defaultImplementation",
@@ -565,6 +585,11 @@ fn verify_bootstrap_compiler(manifest: &BootstrapManifest, root: &Path) -> Resul
     validate_parser_corpus(
         &compiler.parser_differential_corpus,
         manifest.bootstrap_compiler.parser_differential_case_count,
+        root,
+    )?;
+    validate_resolver_corpus(
+        &compiler.resolver_differential_corpus,
+        manifest.bootstrap_compiler.resolver_differential_case_count,
         root,
     )?;
     Ok(())
@@ -626,6 +651,60 @@ fn validate_parser_corpus(
         "compiler parserDifferentialCorpus counts do not match the checked-in parser corpus"
     );
     Ok(())
+}
+
+fn validate_resolver_corpus(
+    declared: &DifferentialCorpus,
+    expected_total: usize,
+    root: &Path,
+) -> Result<()> {
+    let accepted_sources =
+        count_resolver_sources(&root.join("bootstrap/compiler/tests/resolver/accepted"))?;
+    let rejected_sources =
+        count_resolver_sources(&root.join("bootstrap/compiler/tests/resolver/rejected"))?;
+    let fuzz_seeds = count_resolver_sources(&root.join("fuzz/corpus/resolver"))?;
+    ensure!(
+        accepted_sources > 0 && rejected_sources > 0 && fuzz_seeds > 0,
+        "resolver differential corpus categories must not be empty"
+    );
+    let actual_total = 2usize
+        .checked_add(fuzz_seeds)
+        .context("resolver differential corpus count overflow")?;
+    ensure!(
+        declared.accepted == 1
+            && declared.rejected == 1
+            && declared.fuzz_seeds == fuzz_seeds
+            && declared.total == actual_total
+            && declared.total == expected_total,
+        "compiler resolverDifferentialCorpus counts do not match the checked-in resolver corpus"
+    );
+    Ok(())
+}
+
+fn count_resolver_sources(directory: &Path) -> Result<usize> {
+    let entries = std::fs::read_dir(directory)
+        .with_context(|| format!("failed to read resolver corpus {}", directory.display()))?;
+    let mut count = 0usize;
+    for entry in entries {
+        let entry = entry.with_context(|| {
+            format!("failed to inspect resolver corpus {}", directory.display())
+        })?;
+        let path = entry.path();
+        ensure!(
+            entry.file_type()?.is_file(),
+            "resolver corpus entry must be a file: {}",
+            path.display()
+        );
+        ensure!(
+            path.extension().and_then(|value| value.to_str()) == Some("ft"),
+            "resolver corpus entry must use .ft: {}",
+            path.display()
+        );
+        count = count
+            .checked_add(1)
+            .context("resolver differential corpus count overflow")?;
+    }
+    Ok(count)
 }
 
 fn count_parser_cases(directory: &Path, extension: Option<&str>) -> Result<usize> {
@@ -1114,16 +1193,16 @@ mod tests {
             manifest.bootstrap_stdlib.build_digest,
             "sha256:03c183622af98e72f667443a1995f96f0314ab8cf9c7e1eaf70dbe114175538b"
         );
-        assert_eq!(manifest.bootstrap_compiler.status, "parser-differential");
-        assert_eq!(manifest.bootstrap_compiler.version, "0.0.2");
+        assert_eq!(manifest.bootstrap_compiler.status, "resolver-differential");
+        assert_eq!(manifest.bootstrap_compiler.version, "0.0.3");
         assert_eq!(manifest.bootstrap_compiler.profile, "futao-bootstrap-v1");
         assert_eq!(
             manifest.bootstrap_compiler.implemented_phases,
-            ["lexer", "parser"]
+            ["lexer", "parser", "resolver"]
         );
         assert_eq!(
             manifest.bootstrap_compiler.tree_digest,
-            "sha256:fc654f1177071faabea6fec294ff7b768391b551102555611f6679d6e301c51b"
+            "sha256:c0eb83d8736893cc82ce38f96dbea4265136af23696ca5ed540d3ffdc77129c2"
         );
         assert_eq!(manifest.bootstrap_compiler.lexer_snapshot_schema_version, 1);
         assert_eq!(manifest.bootstrap_compiler.differential_case_count, 11);
@@ -1136,6 +1215,14 @@ mod tests {
             21
         );
         assert_eq!(
+            manifest.bootstrap_compiler.resolver_snapshot_schema_version,
+            1
+        );
+        assert_eq!(
+            manifest.bootstrap_compiler.resolver_differential_case_count,
+            6
+        );
+        assert_eq!(
             manifest.bootstrap_compiler.default_implementation,
             "rust-reference"
         );
@@ -1144,7 +1231,7 @@ mod tests {
         assert_eq!(manifest.bootstrap_output.artifact_magic, "FUTAO-NIR");
         assert_eq!(manifest.bootstrap_output.nir_schema_version, 1);
         assert_eq!(manifest.bootstrap_output.verifier_crate, "nexa_nir");
-        assert_eq!(manifest.bootstrap_output.verifier_version, "0.0.8");
+        assert_eq!(manifest.bootstrap_output.verifier_version, "0.0.9");
         assert_eq!(
             manifest.bootstrap_output.target_profile,
             "target-neutral-v1"

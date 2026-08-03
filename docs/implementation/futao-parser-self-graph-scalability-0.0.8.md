@@ -11,8 +11,11 @@ its own `parser.ft`: immutable token and CST-event appends were quadratic, and
 multiple recursive range runners retained more than the runtime limit of 64
 active calls.
 
-The current compiler graph has nine sorted `.ft` sources, 122,588 source bytes,
-and a 100,770-byte `parser.ft` containing 228 top-level type/function items. A
+The parser baseline has nine sorted `.ft` sources, 122,588 source bytes, and a
+100,770-byte `parser.ft` containing 228 top-level type/function items. The
+resolver slice keeps this parser gate at the 0.0.8 source boundary; its own
+resolver sources are currently parsed by the Rust Stage 0 reference compiler.
+A
 small-corpus differential alone is therefore insufficient evidence for Phase
 B5.
 

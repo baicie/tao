@@ -8,6 +8,7 @@ mod differential;
 mod lexer_differential;
 mod nir_lower;
 mod parser_differential;
+mod resolver_differential;
 mod session;
 
 use std::collections::{HashMap, HashSet};
@@ -45,6 +46,16 @@ pub use parser_differential::{
     ParserDifferentialOutcome, ParserDifferentialReport, ParserImplementation, ParserLabelStyle,
     ParserObservable, ParserRecoverySnapshot, ParserSeverity, ParserSnapshot, RustParserAdapter,
     PARSER_SNAPSHOT_SCHEMA_VERSION,
+};
+pub use resolver_differential::{
+    FutaoResolverAdapter, ResolverAdapter, ResolverAdapterError, ResolverBindingSnapshot,
+    ResolverDiagnosticSnapshot, ResolverDifference, ResolverDifferentialHarness,
+    ResolverDifferentialOutcome, ResolverDifferentialReport, ResolverEdgeSnapshot,
+    ResolverImplementation, ResolverLabelSnapshot, ResolverLabelStyle, ResolverModuleSnapshot,
+    ResolverNameSnapshot, ResolverObservable, ResolverScopeKind, ResolverScopeSnapshot,
+    ResolverSeverity, ResolverSnapshot, ResolverSpanSnapshot, ResolverSymbolKind,
+    ResolverSymbolSnapshot, ResolverTargetSnapshot, ResolverVisibility, RustResolverAdapter,
+    RESOLVER_SNAPSHOT_SCHEMA_VERSION,
 };
 pub use session::{CompilerSession, ImportEdge, SessionBuildError, SessionModule};
 
@@ -177,13 +188,9 @@ pub fn check_session<P>(session: &CompilerSession<P>) -> CheckResult {
         .collect::<Vec<_>>();
     let programs = graph_complete_programs(programs, &links);
 
-    let typed = if programs.is_empty() {
-        None
-    } else {
-        let analysis = type_check_modules(&programs, &links);
-        diagnostics.extend_from_slice(analysis.diagnostics());
-        analysis.typed().cloned()
-    };
+    let analysis = type_check_modules(&programs, &links);
+    diagnostics.extend_from_slice(analysis.diagnostics());
+    let typed = analysis.typed().cloned();
 
     diagnostics.sort_by_key(diagnostic_position);
     let typed = typed.filter(|_| {

@@ -1,0 +1,6 @@
+import { Hidden, Missing } from "./library.ft";
+
+export function main(value: Int, value: Int): Unit {
+  const duplicate = 1;
+  const duplicate = unknown;
+}

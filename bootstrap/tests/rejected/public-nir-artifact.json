@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "toolchainVersion": "0.0.8",
+  "toolchainVersion": "0.0.9",
   "languageVersion": "1.0",
   "stage0": {
     "implementation": "rust",
@@ -31,16 +31,18 @@
     "buildDigest": "sha256:03c183622af98e72f667443a1995f96f0314ab8cf9c7e1eaf70dbe114175538b"
   },
   "bootstrapCompiler": {
-    "status": "parser-differential",
-    "version": "0.0.2",
+    "status": "resolver-differential",
+    "version": "0.0.3",
     "profile": "futao-bootstrap-v1",
     "manifest": "bootstrap/compiler/bootstrap-compiler.json",
-    "treeDigest": "sha256:fc654f1177071faabea6fec294ff7b768391b551102555611f6679d6e301c51b",
-    "implementedPhases": ["lexer", "parser"],
+    "treeDigest": "sha256:c0eb83d8736893cc82ce38f96dbea4265136af23696ca5ed540d3ffdc77129c2",
+    "implementedPhases": ["lexer", "parser", "resolver"],
     "lexerSnapshotSchemaVersion": 1,
     "differentialCaseCount": 11,
     "parserSnapshotSchemaVersion": 1,
     "parserDifferentialCaseCount": 21,
+    "resolverSnapshotSchemaVersion": 1,
+    "resolverDifferentialCaseCount": 6,
     "defaultImplementation": "rust-reference"
   },
   "bootstrapOutput": {
@@ -51,7 +53,7 @@
     "artifactMagic": "FUTAO-NIR",
     "nirSchemaVersion": 1,
     "verifierCrate": "nexa_nir",
-    "verifierVersion": "0.0.8",
+    "verifierVersion": "0.0.9",
     "targetProfile": "target-neutral-v1",
     "featureFlags": ["n1-scalar-cfg-v1"],
     "canonicalEncoding": "strict-json",

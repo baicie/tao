@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.0.9 - 2026-08-03
+
+- Add the third executable Futao-written compiler phase: deterministic module
+  graph construction and name resolution under `futao-bootstrap-v1`.
+- Freeze resolver snapshot schema 1 for module graph, symbols, scopes, bindings,
+  resolved names, and source-aware diagnostics with deterministic cycle witnesses.
+- Gate one accepted graph, one rejected graph, and four resolver fuzz seeds
+  through real Rust/Futao adapters with no suppression list.
+- Bind resolver protocol, source tree digest, schema, and corpus counts into the
+  Stage 0 contract and add local, CI, fuzz, bootstrap, and release gates.
+- Keep the Rust resolver as the production default while later self-hosting
+  phases remain incomplete.
+
 ## 0.0.8 - 2026-08-02
 
 - Add the second executable Futao-written compiler phase: a pure parser that

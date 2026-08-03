@@ -1,0 +1,256 @@
+import {
+  ResolverBinding,
+  ResolverDiagnostic,
+  ResolverLabel,
+  ResolverName,
+  ResolverOutcome,
+  ResolverResult,
+  ResolverScope,
+  ResolverSpan,
+  ResolverSymbol,
+  ResolverTarget
+} from "./resolver.ft";
+import { resolveEncoded } from "./resolver_bridge.ft";
+
+function emitSpan(span: ResolverSpan): Unit {
+  print(span.source);
+  print(span.start);
+  print(span.end);
+}
+
+function symbolKindName(kind: Int): String {
+  if (kind === 0) {
+    return "function";
+  }
+  if (kind === 1) {
+    return "record";
+  }
+  return "union";
+}
+
+function visibilityName(visibility: Int): String {
+  if (visibility === 0) {
+    return "private";
+  }
+  return "exported";
+}
+
+function scopeKindName(kind: Int): String {
+  if (kind === 0) {
+    return "function";
+  }
+  if (kind === 1) {
+    return "block";
+  }
+  if (kind === 2) {
+    return "for";
+  }
+  if (kind === 3) {
+    return "match-arm";
+  }
+  return "closure";
+}
+
+function diagnosticCode(code: Int): String {
+  if (code === 0) {
+    return "E2001";
+  }
+  if (code === 1) {
+    return "E2002";
+  }
+  if (code === 2) {
+    return "E4002";
+  }
+  if (code === 3) {
+    return "E4003";
+  }
+  if (code === 4) {
+    return "E4004";
+  }
+  return "E4005";
+}
+
+function emitSymbol(symbol: ResolverSymbol): Unit {
+  print(symbolKindName(symbol.kind));
+  print(symbol.module);
+  print(symbol.index);
+  print(visibilityName(symbol.visibility));
+  emitSpan(symbol.nameSpan);
+}
+
+function emitScope(scope: ResolverScope): Unit {
+  print(scope.module);
+  print(scope.functionIndex);
+  print(scope.index);
+  if (scope.parent < 0) {
+    print("none");
+  } else {
+    print("some");
+    print(scope.parent);
+  }
+  print(scopeKindName(scope.kind));
+  emitSpan(scope.span);
+}
+
+function emitBinding(binding: ResolverBinding): Unit {
+  print(binding.module);
+  print(binding.functionIndex);
+  print(binding.local);
+  print(binding.scope);
+  emitSpan(binding.nameSpan);
+  print(binding.mutable);
+}
+
+function emitLocalTarget(
+  moduleId: Int,
+  functionIndex: Int,
+  localIndex: Int
+): Unit {
+  print("local");
+  print(moduleId);
+  print(functionIndex);
+  print(localIndex);
+}
+
+function emitDefinitionTarget(
+  kind: String,
+  moduleId: Int,
+  definitionIndex: Int
+): Unit {
+  print(kind);
+  print(moduleId);
+  print(definitionIndex);
+}
+
+function emitFieldTarget(
+  moduleId: Int,
+  recordIndex: Int,
+  fieldIndex: Int
+): Unit {
+  print("field");
+  print(moduleId);
+  print(recordIndex);
+  print(fieldIndex);
+}
+
+function emitVariantTarget(
+  moduleId: Int,
+  unionIndex: Int,
+  variantIndex: Int
+): Unit {
+  print("variant");
+  print(moduleId);
+  print(unionIndex);
+  print(variantIndex);
+}
+
+function emitPayloadTarget(
+  moduleId: Int,
+  unionIndex: Int,
+  variantIndex: Int,
+  payloadIndex: Int
+): Unit {
+  print("payload");
+  print(moduleId);
+  print(unionIndex);
+  print(variantIndex);
+  print(payloadIndex);
+}
+
+function emitTypeParameterTarget(
+  ownerKind: Int,
+  moduleId: Int,
+  ownerIndex: Int,
+  parameterIndex: Int
+): Unit {
+  print("type-parameter");
+  print(ownerKind);
+  print(moduleId);
+  print(ownerIndex);
+  print(parameterIndex);
+}
+
+function emitTarget(target: ResolverTarget): Unit {
+  match (target) {
+    case ResolverTarget.Local(moduleId, functionIndex, localIndex) =>
+      emitLocalTarget(moduleId, functionIndex, localIndex);
+    case ResolverTarget.Function(moduleId, definitionIndex) =>
+      emitDefinitionTarget("function", moduleId, definitionIndex);
+    case ResolverTarget.Record(moduleId, definitionIndex) =>
+      emitDefinitionTarget("record", moduleId, definitionIndex);
+    case ResolverTarget.Field(moduleId, recordIndex, fieldIndex) =>
+      emitFieldTarget(moduleId, recordIndex, fieldIndex);
+    case ResolverTarget.Union(moduleId, definitionIndex) =>
+      emitDefinitionTarget("union", moduleId, definitionIndex);
+    case ResolverTarget.Variant(moduleId, unionIndex, variantIndex) =>
+      emitVariantTarget(moduleId, unionIndex, variantIndex);
+    case ResolverTarget.Payload(moduleId, unionIndex, variantIndex, payloadIndex) =>
+      emitPayloadTarget(moduleId, unionIndex, variantIndex, payloadIndex);
+    case ResolverTarget.TypeParameter(ownerKind, moduleId, ownerIndex, parameterIndex) =>
+      emitTypeParameterTarget(ownerKind, moduleId, ownerIndex, parameterIndex);
+    case ResolverTarget.Print() => print("print");
+    case ResolverTarget.ToString() => print("to-string");
+    case ResolverTarget.ParseInt() => print("parse-int");
+  };
+}
+
+function emitName(name: ResolverName): Unit {
+  emitSpan(name.span);
+  emitTarget(name.target);
+}
+
+function emitLabel(label: ResolverLabel): Unit {
+  if (label.style === 0) {
+    print("primary");
+  } else {
+    print("secondary");
+  }
+  emitSpan(label.span);
+}
+
+function emitDiagnostic(diagnostic: ResolverDiagnostic): Unit {
+  print(diagnosticCode(diagnostic.code));
+  print("error");
+  print(diagnostic.labels.length);
+  for (const label of diagnostic.labels) {
+    emitLabel(label);
+  }
+}
+
+function emitResult(result: ResolverResult): Unit {
+  print(result.symbols.length);
+  for (const symbol of result.symbols) {
+    emitSymbol(symbol);
+  }
+  print(result.scopes.length);
+  for (const scope of result.scopes) {
+    emitScope(scope);
+  }
+  print(result.bindings.length);
+  for (const binding of result.bindings) {
+    emitBinding(binding);
+  }
+  print(result.names.length);
+  for (const name of result.names) {
+    emitName(name);
+  }
+  print(result.diagnostics.length);
+  for (const diagnostic of result.diagnostics) {
+    emitDiagnostic(diagnostic);
+  }
+}
+
+function emitResolved(result: ResolverResult): Unit {
+  print("ok");
+  emitResult(result);
+}
+
+function main(arguments: String[]): Unit {
+  const outcome = resolveEncoded(arguments);
+  print("FUTAO-RESOLVER-1");
+  match (outcome) {
+    case ResolverOutcome.InvalidInput() => print("invalid-input");
+    case ResolverOutcome.ParserInvalid() => print("parser-invalid");
+    case ResolverOutcome.Resolved(result) => emitResolved(result);
+  };
+}
