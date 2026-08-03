@@ -5,8 +5,10 @@
 - Added the first ADR-004 shared-ownership slice with allocator-accounted
   `Shared<T>`/`Weak<T>`, last-owner Drop, weak upgrade rejection after release,
   and typed borrow-conflict errors.
-- Kept `Box<T>`, partial initialization, cross-backend layout conformance, and
-  stable external descriptors deferred to their own implementation gates.
+- Added allocator-accounted unique `StorageBox<T>` ownership with Move,
+  `DerefMut`, logical OOM value recovery, and ZST Drop coverage.
+- Kept partial initialization, cross-backend layout conformance, and stable
+  external descriptors deferred to their own implementation gates.
 
 ## Compiler Package 0.0.10 (Futao Type Checker Kernel)
 
