@@ -1,0 +1,4 @@
+export function fail(): Unit {
+  print(8);
+  const invalid = 1 / 0;
+}

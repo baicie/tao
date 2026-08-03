@@ -1,0 +1,11 @@
+export type Sample = {
+  value: Int;
+};
+
+export function make(): Sample {
+  return { value: 21 };
+}
+
+export function scale(value: Int): Int {
+  return value * 2;
+}

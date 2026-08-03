@@ -1,0 +1,5 @@
+function main(): Unit {
+  if (42) {
+    return;
+  }
+}

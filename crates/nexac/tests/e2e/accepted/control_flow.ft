@@ -1,0 +1,19 @@
+function main(): Unit {
+  let index: Int = 0;
+  let total: Int = 0;
+
+  while (index < 10 && total < 12) {
+    index = index + 1;
+
+    if (index === 2 || index === 5) {
+      continue;
+    }
+
+    total = total + 3;
+    if (total === 12 && index >= 6) {
+      break;
+    }
+  }
+
+  print(total);
+}

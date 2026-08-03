@@ -1,0 +1,6 @@
+import { fail } from "./runtime_library.ft";
+
+function main(): Unit {
+  print(7);
+  fail();
+}

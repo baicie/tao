@@ -1,0 +1,5 @@
+import { make, scale } from "./support.ft";
+
+function main(): Unit {
+  print(scale(make().value));
+}
