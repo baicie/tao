@@ -21,6 +21,8 @@ struct CorpusCase {
     id: String,
     path: PathBuf,
     input: TypecheckInput,
+    expected_types: Vec<String>,
+    expected_diagnostics: Vec<FixtureDiagnostic>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -28,6 +30,16 @@ struct CorpusCase {
 struct Fixture {
     source_length: u32,
     nodes: Vec<FixtureNode>,
+    expected_types: Vec<String>,
+    expected_diagnostics: Vec<FixtureDiagnostic>,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+struct FixtureDiagnostic {
+    code: String,
+    source: u32,
+    start: u32,
+    end: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,6 +64,34 @@ pub(crate) fn run() -> Result<()> {
         let report = harness
             .run_case(&case.id, &case.input)
             .with_context(|| format!("type checker failed for {}", case.id))?;
+        ensure!(
+            report.reference_snapshot().types() == case.expected_types.as_slice(),
+            "semantic oracle type mismatch for {}: expected {:?}, found {:?}",
+            case.id,
+            case.expected_types,
+            report.reference_snapshot().types()
+        );
+        let actual_diagnostics = report
+            .reference_snapshot()
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| {
+                let span = diagnostic.span();
+                FixtureDiagnostic {
+                    code: diagnostic.code().to_owned(),
+                    source: span.source,
+                    start: span.start,
+                    end: span.end,
+                }
+            })
+            .collect::<Vec<_>>();
+        ensure!(
+            actual_diagnostics == case.expected_diagnostics,
+            "semantic oracle diagnostic mismatch for {}: expected {:?}, found {:?}",
+            case.id,
+            case.expected_diagnostics,
+            actual_diagnostics
+        );
         if report.outcome() != nexa_compiler::TypecheckDifferentialOutcome::Match {
             let artifacts = retain_mismatch(&root, case, &report)?;
             let observables = report
@@ -111,7 +151,7 @@ fn discover_cases(root: &Path) -> Result<Vec<CorpusCase>> {
             );
             let fixture: Fixture = serde_json::from_str(&fs::read_to_string(&path)?)
                 .with_context(|| format!("invalid type-checker fixture {}", path.display()))?;
-            let input = fixture_to_input(fixture)
+            let input = fixture_to_input(&fixture)
                 .with_context(|| format!("invalid type-checker fixture {}", path.display()))?;
             let stem = path
                 .file_stem()
@@ -121,6 +161,8 @@ fn discover_cases(root: &Path) -> Result<Vec<CorpusCase>> {
                 id: format!("{category}/{stem}"),
                 path,
                 input,
+                expected_types: fixture.expected_types,
+                expected_diagnostics: fixture.expected_diagnostics,
             });
         }
     }
@@ -128,9 +170,9 @@ fn discover_cases(root: &Path) -> Result<Vec<CorpusCase>> {
     Ok(cases)
 }
 
-fn fixture_to_input(fixture: Fixture) -> Result<TypecheckInput> {
+fn fixture_to_input(fixture: &Fixture) -> Result<TypecheckInput> {
     let mut nodes = Vec::with_capacity(fixture.nodes.len());
-    for node in fixture.nodes {
+    for node in &fixture.nodes {
         let kind = match node.kind.as_str() {
             "int" => TypecheckNodeKind::Int,
             "bool" => TypecheckNodeKind::Bool,

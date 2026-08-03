@@ -2,17 +2,18 @@
 
 ## Status
 
-Planned and implemented as the first `0.0.10` slice on top of the `0.0.9`
-resolver baseline. The Rust type checker remains the reference and production
-implementation.
+Implemented and contract-closed as the first `0.0.10` slice on top of the
+`0.0.9` resolver baseline. The Rust type checker remains the reference and
+production implementation.
 
 ## Scope
 
 This slice freezes a small semantic input contract rather than teaching the
 type checker to read CST events. Host code supplies a resolved, source-spanned
 expression table in canonical node order. Children must precede their parent,
-which keeps the Futao implementation deterministic and independent of parser
-tokens, syntax trees, filesystem state, and hash-map iteration.
+node fields must match the declared kind, and at most 1024 nodes are accepted.
+These rules keep the Futao implementation deterministic and independent of
+parser tokens, syntax trees, filesystem state, and hash-map iteration.
 
 Supported expression nodes are integer, boolean, string, and unit literals;
 integer negation; boolean negation; integer addition; scalar equality;
@@ -39,16 +40,21 @@ diagnosticCode source start end * diagnosticCount
 ```
 
 Type tags are `int`, `bool`, `string`, `unit`, or `unknown`. Every diagnostic
-has one primary source span. Malformed input, unknown node kinds, forward child
-references, out-of-range spans, trailing fields, and malformed output fail
-closed in the Rust adapter.
+has one primary source span. The output node count must equal the input node
+count; diagnostic counts are bounded to 2048 because one conditional can emit
+both a condition and branch diagnostic. Diagnostics are ordered by
+`(source, start, end, code)`. Malformed input, invalid node shapes, unknown
+node/type/diagnostic tags, forward child references, out-of-range spans,
+trailing fields, inverse diagnostic order, and malformed output fail closed in
+the Rust adapter.
 
 ## Acceptance and Rejection Corpus
 
-The accepted fixture covers literals, arithmetic, equality, boolean operators,
-and a conditional. Rejected fixtures cover arithmetic with a boolean,
-non-boolean conditions, and invalid return types. Rust and Futao adapters must
-produce byte-for-byte equivalent canonical snapshots for every fixture.
+The accepted fixture covers all 12 expression node kinds. The rejected fixture
+covers invalid unary, equality, boolean, conditional, and return checks. Each
+fixture carries an explicit semantic oracle for inferred types and diagnostics;
+Rust and Futao adapters must also produce byte-for-byte equivalent canonical
+snapshots for every fixture.
 
 ## Verification
 

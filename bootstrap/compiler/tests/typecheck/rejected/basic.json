@@ -4,8 +4,23 @@
     {"kind": "bool", "start": 0, "end": 4},
     {"kind": "int", "start": 5, "end": 6},
     {"kind": "add", "left": 0, "right": 1, "start": 0, "end": 6},
-    {"kind": "int", "start": 7, "end": 8},
-    {"kind": "if", "left": 3, "right": 1, "extra": 1, "start": 7, "end": 8},
+    {"kind": "not", "left": 1, "start": 5, "end": 6},
+    {"kind": "equal", "left": 0, "right": 1, "start": 0, "end": 6},
+    {"kind": "or", "left": 0, "right": 1, "start": 0, "end": 6},
+    {"kind": "int", "start": 6, "end": 7},
+    {"kind": "if", "left": 6, "right": 0, "extra": 1, "start": 6, "end": 7},
     {"kind": "return", "left": 1, "expected": "bool", "start": 5, "end": 6}
+  ],
+  "expectedTypes": [
+    "bool", "int", "unknown", "unknown", "unknown", "unknown", "int", "unknown", "unit"
+  ],
+  "expectedDiagnostics": [
+    {"code": "E3001", "source": 0, "start": 0, "end": 6},
+    {"code": "E3001", "source": 0, "start": 0, "end": 6},
+    {"code": "E3001", "source": 0, "start": 0, "end": 6},
+    {"code": "E3001", "source": 0, "start": 5, "end": 6},
+    {"code": "E3003", "source": 0, "start": 5, "end": 6},
+    {"code": "E3001", "source": 0, "start": 6, "end": 7},
+    {"code": "E3002", "source": 0, "start": 6, "end": 7}
   ]
 }

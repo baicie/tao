@@ -71,7 +71,26 @@ fn futao_type_checker_matches_accepted_and_rejected_inputs(
             .iter()
             .map(|diagnostic| diagnostic.code())
             .collect::<Vec<_>>(),
-        ["E3001", "E3002", "E3003"]
+        ["E3001", "E3003", "E3002"]
     );
+    Ok(())
+}
+
+#[test]
+fn futao_type_checker_accepts_the_maximum_diagnostic_budget(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut nodes = vec![
+        TypecheckNode::literal(TypecheckNodeKind::Bool, 0, 1),
+        TypecheckNode::literal(TypecheckNodeKind::Int, 1, 2),
+    ];
+    while nodes.len() < 1024 {
+        nodes.push(TypecheckNode::conditional(1, 0, 1, 0, 2));
+    }
+    let input = TypecheckInput::new(2, nodes);
+    let futao = FutaoTypeCheckerAdapter::new()?;
+    let snapshot = futao.check(&input)?;
+
+    assert_eq!(snapshot.types().len(), 1024);
+    assert_eq!(snapshot.diagnostics().len(), 2044);
     Ok(())
 }

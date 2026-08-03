@@ -215,11 +215,12 @@ bindings、names 和 diagnostics 六类 observable；accepted/rejected 图与 4 
 和双侧 SHA-256 digest 均 fail closed。Rust Resolver 仍为默认路径。详细合同见
 [`futao-resolver-differential-0.0.9.md`](futao-resolver-differential-0.0.9.md)。
 
-`0.0.10` 首个 slice 已实现：Rust/Futao adapter 以 schema 1 比较已解析、带稳定 source
-span 的表达式表，覆盖 `Int`、`Bool`、`String`、`Unit`、一元/二元运算、条件表达式和
-return 检查，并 fail closed 验证 `E3001`、`E3002`、`E3003`。accepted/rejected 两个
-fixture 均零差异；泛型替换、match exhaustiveness、ownership 和 mutable capture 仍是
-后续 `0.0.10` slices。详细合同见
+`0.0.10` 首个 slice 已实现并完成合同收口：Rust/Futao adapter 以 schema 1 比较已解析、
+带稳定 source span 的表达式表，覆盖全部 12 种节点，严格验证 node shape、输入绑定的
+node count、2048 条 bounded diagnostics、canonical diagnostic order 和未知 tag，并以
+semantic oracle 固定 accepted/rejected 结果。`E3001`、`E3002`、`E3003` 均 fail closed；
+泛型替换、match exhaustiveness、ownership 和 mutable capture 仍是后续 `0.0.10` slices。
+详细合同见
 [`futao-type-checker-0.0.10.md`](futao-type-checker-0.0.10.md)。
 
 Phase B5 的 parser scalability 前置已实现：chunked persistent sequence 取代大数组逐项
