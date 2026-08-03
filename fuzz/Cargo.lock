@@ -141,7 +141,7 @@ dependencies = [
 
 [[package]]
 name = "nexa_compiler"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "nexa_diagnostics",
  "nexa_hir",
@@ -160,14 +160,14 @@ dependencies = [
 
 [[package]]
 name = "nexa_diagnostics"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "nexa_span",
 ]
 
 [[package]]
 name = "nexa_hir"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "nexa_diagnostics",
  "nexa_span",
@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "nexa_mir"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "nexa_hir",
  "nexa_span",
@@ -184,7 +184,7 @@ dependencies = [
 
 [[package]]
 name = "nexa_nir"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "serde",
  "serde_json",
@@ -194,7 +194,7 @@ dependencies = [
 
 [[package]]
 name = "nexa_parser"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "nexa_diagnostics",
  "nexa_span",
@@ -204,7 +204,7 @@ dependencies = [
 
 [[package]]
 name = "nexa_source"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "nexa_span",
  "thiserror",
@@ -212,11 +212,11 @@ dependencies = [
 
 [[package]]
 name = "nexa_span"
-version = "0.0.9"
+version = "0.0.10"
 
 [[package]]
 name = "nexa_syntax"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "nexa_span",
  "rowan",

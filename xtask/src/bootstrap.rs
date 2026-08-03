@@ -1231,7 +1231,7 @@ mod tests {
         assert_eq!(manifest.bootstrap_output.artifact_magic, "FUTAO-NIR");
         assert_eq!(manifest.bootstrap_output.nir_schema_version, 1);
         assert_eq!(manifest.bootstrap_output.verifier_crate, "nexa_nir");
-        assert_eq!(manifest.bootstrap_output.verifier_version, "0.0.9");
+        assert_eq!(manifest.bootstrap_output.verifier_version, "0.0.10");
         assert_eq!(
             manifest.bootstrap_output.target_profile,
             "target-neutral-v1"

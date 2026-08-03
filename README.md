@@ -19,7 +19,7 @@ and the completed integration evidence is retained in the
 
 The language compatibility version and compiler package version are separate.
 The complete Language 1.0 reference core currently ships as the self-use
-`nexac 0.0.9`; Rust crate APIs and distribution remain intentionally unstable.
+`nexac 0.0.10`; Rust crate APIs and distribution remain intentionally unstable.
 
 ## Layout
 
@@ -116,11 +116,11 @@ on Apple Silicon macOS, and `.msi` on 64-bit Windows. These installers place
 `nexac` on the system command path, so no manual `PATH` configuration is
 needed. The compiler remains a prerelease and is not published to crates.io.
 
-After `v0.0.9` is published, the same version can be installed reproducibly
+After `v0.0.10` is published, the same version can be installed reproducibly
 from its tag:
 
 ```bash
-cargo install --locked --git https://github.com/baicie/tao --tag v0.0.9 nexac
+cargo install --locked --git https://github.com/baicie/tao --tag v0.0.10 nexac
 ```
 
 Nexa intentionally borrows familiar TypeScript surface syntax without

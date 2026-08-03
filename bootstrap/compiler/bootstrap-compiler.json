@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "name": "futao-bootstrap-compiler",
   "version": "0.0.3",
-  "toolchainVersion": "0.0.9",
+  "toolchainVersion": "0.0.10",
   "profile": "futao-bootstrap-v1",
   "profileEntry": "src/resolver_profile.ft",
   "driverEntry": "src/resolver_driver.ft",
