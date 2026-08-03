@@ -22,10 +22,11 @@ The observable result contains one inferred type per node and source-aware
 diagnostics `E3001` (type mismatch), `E3002` (non-boolean condition), and
 `E3003` (invalid return type).
 
-Generic substitution, function signatures, match exhaustiveness, ownership,
-and mutable-capture checks remain later `0.0.10` slices. This boundary is
-intentional: it proves the type-checker protocol and inference kernel without
-coupling semantic checking to the parser or lowering implementation.
+Generic substitution, function signatures, match exhaustiveness,
+immutable-owned facts, and mutable-capture checks remain `0.0.11` prerequisite
+slices. This boundary is intentional: it proves the type-checker protocol and
+inference kernel without coupling semantic checking to the parser or lowering
+implementation, while the published `v0.0.10` contract stays closed.
 
 ## Protocol
 
@@ -75,6 +76,8 @@ merged. The Rust implementation remains the default compiler path.
 
 ## Deferred Work
 
-The next slices extend the same schema with inferred generic arguments,
-function/record/union signatures, match coverage, and ownership facts before
-any default-path migration.
+`FUTAO-TYPECHECK-1` and the published `v0.0.10` tag remain permanently closed.
+The `0.0.11` compiler-core milestone introduces a separately versioned schema
+2 for inferred generic arguments, function/record/union signatures, match
+coverage, immutable-owned and capture facts, and complete structured labels.
+It must not widen schema 1 or rewrite the existing release.

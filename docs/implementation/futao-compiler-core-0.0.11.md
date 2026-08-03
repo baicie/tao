@@ -37,6 +37,9 @@ package-manager behavior.
    requests to `mvp`; the package version changes only in the closing PR.
 6. `bootstrapCompiler.defaultImplementation` remains `rust-reference` in
    `0.0.11`; changing it belongs exclusively to the `0.1.0` release PR.
+7. `v0.0.10` is an immutable published expression-kernel release. This
+   milestone recovers its deferred semantic work as `0.0.11` prerequisites;
+   it does not move, rewrite, or republish the `v0.0.10` tag.
 
 ## Current Baseline
 
@@ -105,8 +108,9 @@ The contract must cover:
 - function, Record, and Union signatures with closed generic substitution;
 - direct and indirect calls, constructors, fields, indexing, and intrinsics;
 - exhaustive and unreachable match analysis with payload bindings;
-- the entry-module `main` signature and the complete frozen `E2003` through
-  `E2006` and `E3001` through `E3004` diagnostic families;
+- the entry-module `main` signature and every checker-owned Language 1.0
+  diagnostic: `E2001` through `E2006`, `E3001` through `E3012`, and `E4003`
+  through `E4005`, including labels, ordering, recovery, and suppression;
 - immutable-owned value classification, assignment rules, capture snapshots,
   and mutable-capture rejection required by the frozen language baseline;
 - accepted and rejected multi-module inputs with deterministic diagnostic order.
@@ -114,6 +118,9 @@ The contract must cover:
 Bootstrap Profile v1 exposes no source-level ownership operations. Move/Drop,
 use-after-move, and cleanup lowering therefore remain NIR/ADR-002 work and must
 not be introduced as new Language 1.0 type-checker behavior in this milestone.
+Parser-owned `E1001`, loader/resolver-owned `E4001`/`E4002`, and profile-owned
+`E6201` through `E6203` remain in their existing phases; the complete adapter
+must preserve their canonical output without re-emitting them from the checker.
 
 ### HIR and MIR
 
@@ -152,6 +159,15 @@ canonical `LayoutId`/`TargetLayoutId` table required by ADR-004. `0.0.11`
 implements the records needed by the Bootstrap Profile and compiler self-graph;
 it does not claim the remaining Application/Freestanding allocator, ABI, or
 cross-backend ADR-004 gates.
+
+Target layout is explicit compiler input, never Host discovery. All `0.0.11`
+differential, stdlib, self-graph, and reproducibility gates use the versioned
+`bootstrap-layout-64le-v1` descriptor: 64-bit pointers, 8-byte pointer
+alignment, 16-byte aggregate and stack alignment, and little-endian byte order.
+The descriptor and `TargetLayoutId` are bound into the candidate protocol;
+byte equality across Hosts always means equality for this same descriptor.
+Logical NIR operations remain target-neutral; the private layout table is a
+target-qualified verification record, not public ABI or Host-derived state.
 
 Language 1.0 MIR currently erases generic values at runtime, while ADR-003 NIR
 requires deterministic monomorphized function instances. The canonical HIR
@@ -221,7 +237,11 @@ to remain independently reviewable.
    - Prove malformed candidates fail closed before the full Futao adapter can
      implement `CompilerAdapter`.
 
-### Phase A: Close `0.0.10` Semantics
+### Phase A: Recover Deferred Semantics for `0.0.11`
+
+The published `v0.0.10` tag remains the closed expression-kernel release. The
+following work restores the roadmap's originally intended semantic coverage as
+prerequisites of `0.0.11`; none of these slices is a replacement `0.0.10`.
 
 3. **Semantic schema and type graph**
    - Freeze a strict schema 2 for canonical types, declarations, identities,
@@ -233,8 +253,8 @@ to remain independently reviewable.
 4. **Primitive, local, and control-flow semantics**
    - Implement primitive operators, local bindings, assignments, returns,
      branches, loops, and loop control against the frozen Rust reference.
-   - Cover `E2004` and `E3001` through `E3004`, including invalid `main`
-     signatures, exact spans, recovery, and deterministic diagnostic order.
+   - Cover `E2001` through `E2004` and `E3001` through `E3004`, including
+     invalid `main` signatures, exact labels, recovery, and deterministic order.
 
 5. **Array, String, and intrinsic semantics**
    - Implement homogeneous/contextual Array rules, indexing, String behavior,
@@ -245,20 +265,23 @@ to remain independently reviewable.
    - Implement function/Record/Union signatures, inference, explicit type
      arguments, arity checks, and non-regular/budget rejection.
    - Compare accepted and rejected Rust/Futao snapshots with no suppression.
+   - Cover duplicate/arity/type failures plus `E3008` through `E3010` and
+     `E3012`, including their derivative-diagnostic suppression rules.
    - Verify with `cargo xtask typecheck-differential`.
 
 7. **Record, Union, and match semantics**
    - Implement constructors, fields, variant payloads, exhaustive coverage,
      duplicate/unreachable arms, and generic payload substitution.
-   - Cover `E2003`, `E2005`, `E2006`, nested generic unions, and multi-module
-     declarations.
+   - Cover `E2002`, `E2003`, `E2005`, `E2006`, and `E3005` through `E3007`,
+     including nested generic unions and multi-module declarations.
    - Verify focused tests plus the complete semantic corpus.
 
 8. **Immutable ownership and closure facts**
    - Implement immutable-owned classification, assignment facts, function
      values, capture snapshots, and mutable-capture rejection.
-   - Add accepted and compile-fail cases with exact diagnostic spans.
-   - Close `0.0.10` only when all semantic observables match.
+   - Cover `E3011` and module-facing `E4003` through `E4005` with exact primary
+     and secondary labels, suppression, and accepted/compile-fail cases.
+   - Start HIR work only when all recovered semantic observables match.
 
 9. **Type-checker fuzz and CI gate**
    - Add a dedicated bounded Type Checker fuzz target and deterministic seed
@@ -268,9 +291,11 @@ to remain independently reviewable.
 
 ### Phase B: Complete `0.0.11` Lowering
 
-10. **Canonical HIR builder**
+10. **Canonical HIR and closed-instance contract**
    - Produce complete canonical typed HIR from the verified Futao semantic
      result without reusing Rust HIR construction.
+   - Freeze the complete closed generic-instance set in this HIR schema with
+     stable declaration and type-argument order before any MIR slice lands.
    - Compare accepted and rejected multi-module corpus snapshots.
 
 11. **Strict MIR decoder and structural verifier**
@@ -290,11 +315,11 @@ to remain independently reviewable.
      captures, and supported intrinsics.
    - Retain source spans and deterministic identities in every path.
 
-14. **Closed generic instances and monomorphization**
-   - Add the checker-computed closed generic-instance set to the canonical HIR
-     observation with stable declaration and type-argument ordering.
-   - Deterministically assign one NIR function-instance identity per closed
-     instance and reject non-regular or over-budget expansion before lowering.
+14. **Deterministic monomorphization**
+   - Consume the already frozen canonical HIR closed-instance set and assign one
+     NIR function-instance identity per declaration and type-argument tuple.
+   - Reject non-regular or over-budget expansion before lowering without
+     changing the HIR schema established by slice 10.
 
 15. **Cleanup and Drop elaboration**
    - Classify Copy and owned values, add initialization state and cleanup edges
@@ -313,12 +338,17 @@ to remain independently reviewable.
    - Add canonical `LayoutId` and `TargetLayoutId` records for every
      materializable Bootstrap Profile type, including size, alignment, value
      category, fields, and Drop glue identity.
+   - Add `bootstrap-layout-64le-v1` as an explicit versioned compiler option and
+     bind that exact descriptor into candidate input and comparison evidence.
    - Make the independent verifier reject missing, duplicate, inconsistent,
      recursive, overflowing, or target-mismatched layout records.
 
 18. **String, Array, and intrinsic NIR reference**
-   - Add independently verified target-neutral operations and types for owned
-     String, Array, indexing, mutation, iteration, and runtime intrinsics.
+   - Add independently verified operations and types for owned String,
+     immutable Array construction, indexing, iteration, and copy-returning
+     `append`/`concat` intrinsics.
+   - Keep any lowering-internal aggregate fill unobservable; do not add a
+     source-level mutable Array or growable collection operation.
    - Require complete Rust reference lowering and fail-closed artifact tests.
 
 19. **Record and Union NIR reference**
@@ -336,23 +366,37 @@ to remain independently reviewable.
    - Lower complete Futao MIR to target-neutral NIR and pass the independent
      Rust verifier.
    - Require deterministic canonical bytes across source insertion order,
-     working directory, locale, and supported Hosts.
+     working directory, locale, and supported Hosts when given the same
+     explicit target descriptor.
 
 ### Phase C: Integrate and Release
 
-22. **Complete compiler adapter and corpus gate**
+22. **Compiler self-graph resource contract**
+    - Freeze manifest ceilings and measurement rules for source count/UTF-8
+      bytes, syntax and semantic nodes, types and closed instances, HIR nodes,
+      MIR locals/blocks/operations, NIR types/functions/blocks/instructions and
+      layouts, protocol bytes, call depth, and interpreter steps.
+    - Add exact-bound and one-over rejection tests for every protocol dimension;
+      record the complete compiler self-graph measurements below the ceilings.
+    - Fail closed with structured resource errors before unbounded allocation,
+      recursion, interpretation, or canonical serialization can begin.
+
+23. **Complete compiler adapter and corpus gate**
     - Replace the explicit `Unavailable` state with a real Futao adapter.
-    - Compare all six canonical artifacts for accepted, rejected, fuzz-seed,
-      Bootstrap Stdlib, compiler self-graph, and CLI E2E inputs.
+    - Compare all six phase statuses and all available canonical bytes for
+      accepted, rejected, fuzz-seed, Bootstrap Stdlib, compiler self-graph, and
+      CLI E2E inputs. Non-Bootstrap Language 1.0 cases may match as NIR
+      `Deferred`/`Blocked`; Bootstrap Profile, stdlib, and self-graph cases must
+      be `Produced` and independently verified.
     - Retain mismatching snapshots and reject every unclassified difference.
 
-23. **Explicit candidate driver path**
+24. **Explicit candidate driver path**
     - Expose Futao and Rust compiler implementations through explicit driver
       selection while keeping Rust as the release default.
     - Make required CI and differential commands execute the Futao path; never
       silently fall back after candidate execution starts.
 
-24. **`0.0.11` closure**
+25. **`0.0.11` closure**
     - Update Cargo/package versions, bootstrap manifests, tree digests,
       changelog, guides, and release metadata.
     - Run the complete local, MSRV, documentation, security, bootstrap, E2E,
@@ -423,8 +467,8 @@ The milestone is complete only when all of the following are proven:
 3. The bootstrap manifest binds every compiler source, including semantic and
    lowering modules, and rejects undeclared or mutated source trees.
 4. Tokens, CST, diagnostics, HIR, and MIR match canonically for every Language
-   1.0 gate case; NIR matches for every reference-supported case, with no
-   suppression list at either boundary.
+   1.0 gate case. All six phase statuses and available bytes match; non-Bootstrap
+   NIR may be identically `Deferred`/`Blocked`, with no suppression list.
 5. Every supported Bootstrap Profile input, the Bootstrap Stdlib, and the
    compiler self-graph produce verified NIR with canonical layout identities
    instead of `Deferred` or fabricated output.
@@ -433,9 +477,12 @@ The milestone is complete only when all of the following are proven:
 7. CLI E2E proves accepted output, rejected diagnostics, runtime failures,
    multi-file source locations, and explicit candidate/reference selection;
    the release manifest still records `rust-reference` as the default.
-8. Repeated and reordered inputs are byte-for-byte deterministic; Rust 1.80,
-   stable Rust, documentation, security, bootstrap, and release checks pass.
-9. Version `0.0.11` and all bootstrap/source digests describe the exact merged
+8. The self-graph stays within manifest-bound resource ceilings and every
+   protocol dimension has exact-bound and one-over fail-closed tests.
+9. Repeated and reordered inputs are byte-for-byte deterministic for the same
+   explicit target descriptor; Rust 1.80, stable Rust, documentation, security,
+   bootstrap, and release checks pass.
+10. Version `0.0.11` and all bootstrap/source digests describe the exact merged
    sources; every delivery PR is squash merged to `mvp` and its topic branch is
    removed.
 
