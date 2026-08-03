@@ -26,7 +26,7 @@ struct CorpusCase {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct Fixture {
     source_length: u32,
     nodes: Vec<FixtureNode>,
@@ -35,6 +35,7 @@ struct Fixture {
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 struct FixtureDiagnostic {
     code: String,
     source: u32,
@@ -43,6 +44,7 @@ struct FixtureDiagnostic {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FixtureNode {
     kind: String,
     left: Option<usize>,
@@ -172,7 +174,7 @@ fn discover_cases(root: &Path) -> Result<Vec<CorpusCase>> {
 
 fn fixture_to_input(fixture: &Fixture) -> Result<TypecheckInput> {
     let mut nodes = Vec::with_capacity(fixture.nodes.len());
-    for node in &fixture.nodes {
+    for (index, node) in fixture.nodes.iter().enumerate() {
         let kind = match node.kind.as_str() {
             "int" => TypecheckNodeKind::Int,
             "bool" => TypecheckNodeKind::Bool,
@@ -188,6 +190,49 @@ fn fixture_to_input(fixture: &Fixture) -> Result<TypecheckInput> {
             "return" => TypecheckNodeKind::Return,
             value => bail!("unknown node kind `{value}`"),
         };
+        let shape_valid = match kind {
+            TypecheckNodeKind::Int
+            | TypecheckNodeKind::Bool
+            | TypecheckNodeKind::String
+            | TypecheckNodeKind::Unit => {
+                node.left.is_none()
+                    && node.right.is_none()
+                    && node.extra.is_none()
+                    && node.expected.is_none()
+            }
+            TypecheckNodeKind::Neg | TypecheckNodeKind::Not => {
+                node.left.is_some()
+                    && node.right.is_none()
+                    && node.extra.is_none()
+                    && node.expected.is_none()
+            }
+            TypecheckNodeKind::Add
+            | TypecheckNodeKind::Equal
+            | TypecheckNodeKind::And
+            | TypecheckNodeKind::Or => {
+                node.left.is_some()
+                    && node.right.is_some()
+                    && node.extra.is_none()
+                    && node.expected.is_none()
+            }
+            TypecheckNodeKind::If => {
+                node.left.is_some()
+                    && node.right.is_some()
+                    && node.extra.is_some()
+                    && node.expected.is_none()
+            }
+            TypecheckNodeKind::Return => {
+                node.left.is_some()
+                    && node.right.is_none()
+                    && node.extra.is_none()
+                    && node.expected.is_some()
+            }
+        };
+        ensure!(
+            shape_valid,
+            "node {index} `{}` has an invalid fixture shape",
+            node.kind
+        );
         let value = match kind {
             TypecheckNodeKind::Int
             | TypecheckNodeKind::Bool
@@ -260,6 +305,8 @@ fn workspace_root() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use super::{fixture_to_input, Fixture, FixtureDiagnostic, FixtureNode};
+
     #[test]
     fn checked_in_corpus_has_stable_case_order() -> Result<(), Box<dyn std::error::Error>> {
         let cases = super::discover_cases(&super::workspace_root())?;
@@ -271,5 +318,102 @@ mod tests {
             ["accepted/basic", "rejected/basic"]
         );
         Ok(())
+    }
+
+    #[test]
+    fn fixture_rejects_fields_not_owned_by_the_node_kind() -> anyhow::Result<()> {
+        let invalid_nodes = [
+            FixtureNode {
+                kind: "int".to_owned(),
+                left: Some(0),
+                right: None,
+                extra: None,
+                expected: None,
+                start: 0,
+                end: 1,
+            },
+            FixtureNode {
+                kind: "neg".to_owned(),
+                left: Some(0),
+                right: Some(0),
+                extra: None,
+                expected: None,
+                start: 0,
+                end: 1,
+            },
+            FixtureNode {
+                kind: "add".to_owned(),
+                left: Some(0),
+                right: Some(0),
+                extra: Some(0),
+                expected: None,
+                start: 0,
+                end: 1,
+            },
+            FixtureNode {
+                kind: "if".to_owned(),
+                left: Some(0),
+                right: Some(0),
+                extra: Some(0),
+                expected: Some("int".to_owned()),
+                start: 0,
+                end: 1,
+            },
+            FixtureNode {
+                kind: "return".to_owned(),
+                left: Some(0),
+                right: Some(0),
+                extra: None,
+                expected: Some("int".to_owned()),
+                start: 0,
+                end: 1,
+            },
+        ];
+
+        for node in invalid_nodes {
+            let kind = node.kind.clone();
+            let fixture = Fixture {
+                source_length: 1,
+                nodes: vec![node],
+                expected_types: Vec::new(),
+                expected_diagnostics: Vec::<FixtureDiagnostic>::new(),
+            };
+            let Err(error) = fixture_to_input(&fixture) else {
+                anyhow::bail!("invalid {kind} shape was accepted");
+            };
+            assert!(error.to_string().contains(&kind));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn fixture_rejects_unknown_json_fields() {
+        let fixtures = [
+            r#"{
+  "sourceLength": 1,
+  "nodes": [{"kind": "int", "start": 0, "end": 1}],
+  "expectedTypes": ["int"],
+  "expectedDiagnostics": [],
+  "mystery": true
+}"#,
+            r#"{
+  "sourceLength": 1,
+  "nodes": [{"kind": "int", "start": 0, "end": 1, "mystery": true}],
+  "expectedTypes": ["int"],
+  "expectedDiagnostics": []
+}"#,
+            r#"{
+  "sourceLength": 1,
+  "nodes": [{"kind": "int", "start": 0, "end": 1}],
+  "expectedTypes": ["int"],
+  "expectedDiagnostics": [
+    {"code": "E3001", "source": 0, "start": 0, "end": 1, "mystery": true}
+  ]
+}"#,
+        ];
+
+        for fixture in fixtures {
+            assert!(serde_json::from_str::<Fixture>(fixture).is_err());
+        }
     }
 }

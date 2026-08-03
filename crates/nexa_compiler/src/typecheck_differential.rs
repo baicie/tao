@@ -969,7 +969,10 @@ impl Display for TypecheckImplementation {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_output, RustTypeCheckerAdapter, TypecheckAdapter, TypecheckAdapterError};
+    use super::{
+        parse_output, RustTypeCheckerAdapter, TypecheckAdapter, TypecheckAdapterError,
+        TYPECHECK_MAX_DIAGNOSTICS, TYPECHECK_MAX_NODES,
+    };
     use crate::{TypecheckInput, TypecheckNode, TypecheckNodeKind};
 
     #[test]
@@ -987,6 +990,31 @@ mod tests {
     }
 
     #[test]
+    fn rust_rejects_more_than_the_maximum_input_nodes() {
+        let nodes =
+            vec![TypecheckNode::literal(TypecheckNodeKind::Int, 0, 1); TYPECHECK_MAX_NODES + 1];
+
+        assert!(matches!(
+            RustTypeCheckerAdapter.check(&TypecheckInput::new(1, nodes)),
+            Err(TypecheckAdapterError::InputTooLarge)
+        ));
+    }
+
+    #[test]
+    fn rust_rejects_a_forward_child_reference() {
+        let input = TypecheckInput::new(
+            1,
+            vec![TypecheckNode::unary(TypecheckNodeKind::Neg, 0, 0, 1)],
+        );
+
+        assert!(matches!(
+            RustTypeCheckerAdapter.check(&input),
+            Err(TypecheckAdapterError::InvalidInput(message))
+                if message.contains("not a prior node")
+        ));
+    }
+
+    #[test]
     fn parser_rejects_a_candidate_node_count_that_differs_from_input() {
         let output = ["FUTAO-TYPECHECK-1", "ok", "1", "0", "0"].map(str::to_owned);
 
@@ -994,6 +1022,101 @@ mod tests {
             parse_output(&output, 1, 1),
             Err(TypecheckAdapterError::InvalidSnapshot(message))
                 if message.contains("node count")
+        ));
+    }
+
+    #[test]
+    fn parser_rejects_an_unknown_schema_version() {
+        let mut output = valid_output();
+        output[2] = "2".to_owned();
+
+        assert!(matches!(
+            parse_output(&output, 1, 1),
+            Err(TypecheckAdapterError::InvalidSnapshot(message))
+                if message.contains("schema version")
+        ));
+    }
+
+    #[test]
+    fn parser_rejects_unknown_type_and_diagnostic_tags() {
+        let mut unknown_type = valid_output();
+        unknown_type[4] = "future-type".to_owned();
+        assert!(matches!(
+            parse_output(&unknown_type, 1, 1),
+            Err(TypecheckAdapterError::Protocol(message))
+                if message.contains("unknown type tag")
+        ));
+
+        let unknown_diagnostic = diagnostic_output("E3999", 0, 0, 1);
+        assert!(matches!(
+            parse_output(&unknown_diagnostic, 1, 1),
+            Err(TypecheckAdapterError::Protocol(message))
+                if message.contains("unknown diagnostic code")
+        ));
+    }
+
+    #[test]
+    fn parser_rejects_invalid_diagnostic_spans() {
+        for (source, start, end) in [(1, 0, 1), (0, 1, 1), (0, 1, 0), (0, 0, 2)] {
+            let output = diagnostic_output("E3001", source, start, end);
+            assert!(matches!(
+                parse_output(&output, 1, 1),
+                Err(TypecheckAdapterError::InvalidSnapshot(message))
+                    if message.contains("diagnostic span")
+            ));
+        }
+    }
+
+    #[test]
+    fn parser_rejects_missing_and_trailing_protocol_fields() {
+        let missing_type = ["FUTAO-TYPECHECK-1", "ok", "1", "1"].map(str::to_owned);
+        assert!(matches!(
+            parse_output(&missing_type, 1, 1),
+            Err(TypecheckAdapterError::Protocol(message))
+                if message.contains("missing type tag")
+        ));
+
+        let mut missing_diagnostic_end = diagnostic_output("E3001", 0, 0, 1);
+        let _ = missing_diagnostic_end.pop();
+        assert!(matches!(
+            parse_output(&missing_diagnostic_end, 1, 1),
+            Err(TypecheckAdapterError::Protocol(message))
+                if message.contains("missing diagnostic end")
+        ));
+
+        let mut trailing = valid_output();
+        trailing.push("unexpected".to_owned());
+        assert!(matches!(
+            parse_output(&trailing, 1, 1),
+            Err(TypecheckAdapterError::Protocol(message))
+                if message.contains("trailing output fields")
+        ));
+    }
+
+    #[test]
+    fn parser_accepts_exactly_the_maximum_diagnostic_count() -> Result<(), TypecheckAdapterError> {
+        let mut output = ["FUTAO-TYPECHECK-1", "ok", "1", "1", "int"]
+            .map(str::to_owned)
+            .to_vec();
+        output.push(TYPECHECK_MAX_DIAGNOSTICS.to_string());
+        for _ in 0..TYPECHECK_MAX_DIAGNOSTICS {
+            output.extend(["E3001", "0", "0", "1"].map(str::to_owned));
+        }
+
+        let snapshot = parse_output(&output, 1, 1)?;
+        assert_eq!(snapshot.diagnostics().len(), TYPECHECK_MAX_DIAGNOSTICS);
+        Ok(())
+    }
+
+    #[test]
+    fn parser_rejects_a_diagnostic_count_above_the_bound() {
+        let mut output = valid_output();
+        output[5] = (TYPECHECK_MAX_DIAGNOSTICS + 1).to_string();
+
+        assert!(matches!(
+            parse_output(&output, 1, 1),
+            Err(TypecheckAdapterError::Protocol(message))
+                if message.contains("diagnostic count") && message.contains("exceeds")
         ));
     }
 
@@ -1041,5 +1164,26 @@ mod tests {
             result,
             Ok(snapshot) if snapshot.diagnostics().len() == 2044
         ));
+    }
+
+    fn valid_output() -> Vec<String> {
+        ["FUTAO-TYPECHECK-1", "ok", "1", "1", "int", "0"]
+            .map(str::to_owned)
+            .to_vec()
+    }
+
+    fn diagnostic_output(code: &str, source: u32, start: u32, end: u32) -> Vec<String> {
+        vec![
+            "FUTAO-TYPECHECK-1".to_owned(),
+            "ok".to_owned(),
+            "1".to_owned(),
+            "1".to_owned(),
+            "int".to_owned(),
+            "1".to_owned(),
+            code.to_owned(),
+            source.to_string(),
+            start.to_string(),
+            end.to_string(),
+        ]
     }
 }
