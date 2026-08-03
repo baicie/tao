@@ -90,6 +90,7 @@ export default defineConfig({
             { text: "0.0.8 Parser Self-Graph", link: "/implementation/futao-parser-self-graph-scalability-0.0.8" },
             { text: "0.0.9 Resolver Differential", link: "/implementation/futao-resolver-differential-0.0.9" },
             { text: "0.0.10 Type Checker Kernel", link: "/implementation/futao-type-checker-0.0.10" },
+            { text: "0.0.10 CLI E2E Tests", link: "/implementation/futao-cli-e2e-0.0.10" },
             { text: "ADR-004 Shared and Weak", link: "/implementation/adr-004-shared-weak" },
             { text: "ADR-004 Owned Box", link: "/implementation/adr-004-owned-box" },
           ],
