@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -484,6 +485,10 @@ fn verify_bootstrap_inputs(manifest: &BootstrapManifest, root: &Path) -> Result<
 }
 
 fn verify_bootstrap_compiler(manifest: &BootstrapManifest, root: &Path) -> Result<()> {
+    let bootstrap_root = root.join("bootstrap");
+    ensure_real_directory(&bootstrap_root, "bootstrap root")?;
+    let compiler_root = bootstrap_root.join("compiler");
+    ensure_real_directory(&compiler_root, "bootstrap compiler root")?;
     let compiler_path = root.join(&manifest.bootstrap_compiler.manifest);
     let compiler_metadata = std::fs::symlink_metadata(&compiler_path)
         .with_context(|| format!("failed to inspect {}", compiler_path.display()))?;
@@ -576,7 +581,6 @@ fn verify_bootstrap_compiler(manifest: &BootstrapManifest, root: &Path) -> Resul
         &manifest.bootstrap_compiler.default_implementation,
     )?;
 
-    let compiler_root = root.join("bootstrap/compiler");
     reject_undeclared_compiler_entries(&compiler_root, &compiler.source_roots)?;
     let discovered = discover_compiler_sources(&compiler_root, &compiler.source_roots)?;
     ensure!(
@@ -602,6 +606,17 @@ fn verify_bootstrap_compiler(manifest: &BootstrapManifest, root: &Path) -> Resul
     Ok(())
 }
 
+fn ensure_real_directory(path: &Path, description: &str) -> Result<()> {
+    let metadata = std::fs::symlink_metadata(path)
+        .with_context(|| format!("failed to inspect {}", path.display()))?;
+    ensure!(
+        metadata.file_type().is_dir(),
+        "{description} must be a directory, not a symlink: {}",
+        path.display()
+    );
+    Ok(())
+}
+
 fn discover_compiler_sources(root: &Path, source_roots: &[String]) -> Result<Vec<String>> {
     let mut sources = Vec::new();
     for source_root in source_roots {
@@ -616,14 +631,10 @@ fn discover_compiler_sources(root: &Path, source_roots: &[String]) -> Result<Vec
         discover_compiler_source_directory(root, &path, &mut sources)?;
     }
     sources.sort();
-    for (index, source) in sources.iter().enumerate() {
-        ensure!(
-            sources[index + 1..]
-                .iter()
-                .all(|other| !source.eq_ignore_ascii_case(other)),
-            "compiler source paths must be unique on case-insensitive filesystems"
-        );
-    }
+    case_folded_path_set(
+        &sources,
+        "compiler source paths must be unique on case-insensitive filesystems",
+    )?;
     Ok(sources)
 }
 
@@ -861,17 +872,14 @@ fn validate_compiler_source_roots(source_roots: &[String]) -> Result<()> {
         source_roots.windows(2).all(|pair| pair[0] < pair[1]),
         "compiler sourceRoots must be unique and sorted by portable path"
     );
-    for (index, source_root) in source_roots.iter().enumerate() {
-        for other in &source_roots[index + 1..] {
-            let source_root = source_root.to_ascii_lowercase();
-            let other = other.to_ascii_lowercase();
+    let folded_roots = case_folded_path_set(
+        source_roots,
+        "compiler sourceRoots must be unique and sorted by portable path",
+    )?;
+    for source_root in &folded_roots {
+        for (index, _) in source_root.match_indices('/') {
             ensure!(
-                source_root != other,
-                "compiler sourceRoots must be unique and sorted by portable path"
-            );
-            ensure!(
-                !other.starts_with(&format!("{source_root}/"))
-                    && !source_root.starts_with(&format!("{other}/")),
+                !folded_roots.contains(&source_root[..index]),
                 "compiler sourceRoots must not overlap"
             );
         }
@@ -892,25 +900,39 @@ fn validate_compiler_source_files(source_files: &[String], source_roots: &[Strin
         source_files.windows(2).all(|pair| pair[0] < pair[1]),
         "compiler sourceFiles must be unique and sorted by portable path"
     );
-    for (index, source_file) in source_files.iter().enumerate() {
+    case_folded_path_set(
+        source_files,
+        "compiler sourceFiles must be unique on case-insensitive filesystems",
+    )?;
+    let source_root_set = source_roots
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    for source_file in source_files {
         ensure!(
             source_file.ends_with(".ft"),
             "compiler sourceFiles entries must use .ft"
         );
         ensure!(
-            source_roots
-                .iter()
-                .any(|root| source_file.starts_with(&format!("{root}/"))),
+            source_file
+                .match_indices('/')
+                .any(|(index, _)| source_root_set.contains(&source_file[..index])),
             "compiler sourceFiles entries must be below a declared source root"
-        );
-        ensure!(
-            source_files[index + 1..]
-                .iter()
-                .all(|other| !source_file.eq_ignore_ascii_case(other)),
-            "compiler sourceFiles must be unique on case-insensitive filesystems"
         );
     }
     Ok(())
+}
+
+fn case_folded_path_set(values: &[String], duplicate_message: &str) -> Result<BTreeSet<String>> {
+    let mut folded = BTreeSet::new();
+    for value in values {
+        ensure!(
+            folded.insert(value.to_ascii_lowercase()),
+            "{}",
+            duplicate_message
+        );
+    }
+    Ok(folded)
 }
 
 fn validate_portable_relative_path(field: &str, value: &str) -> Result<()> {
@@ -1802,6 +1824,27 @@ mod tests {
     }
 
     #[test]
+    fn compiler_tree_digest_matches_the_schema_two_fixed_vector(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let directory = TestDirectory::new()?;
+        fs::create_dir(directory.path().join("src"))?;
+        fs::write(
+            directory.path().join("src/main.ft"),
+            b"function main(): Unit {}\n",
+        )?;
+        let mut compiler: Value = serde_json::from_str(COMPILER)?;
+        compiler["sourceRoots"] = json!(["src"]);
+        compiler["sourceFiles"] = json!(["src/main.ft"]);
+        let compiler: super::BootstrapCompilerManifest = serde_json::from_value(compiler)?;
+
+        assert_eq!(
+            compiler_tree_digest(&compiler, directory.path())?,
+            "sha256:6f092de2710a2a723a993ac86e1d0afbb6c8d11e9efa5c565789578289bc3889"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn bootstrap_compiler_provenance_rejects_an_undeclared_file_in_a_source_root(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
@@ -2056,6 +2099,42 @@ mod tests {
         })?;
 
         assert!(error.contains("must not be a symlink"));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_a_compiler_root_symlink(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use std::os::unix::fs::symlink;
+
+        let error = compiler_fixture_error(|root| {
+            let compiler = root.join("bootstrap/compiler");
+            let compiler_target = root.join("bootstrap/compiler-target");
+            fs::rename(&compiler, &compiler_target)?;
+            symlink("compiler-target", compiler)?;
+            Ok(())
+        })?;
+
+        assert!(error.contains("bootstrap compiler root must be a directory, not a symlink"));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_a_bootstrap_root_symlink(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use std::os::unix::fs::symlink;
+
+        let error = compiler_fixture_error(|root| {
+            let bootstrap = root.join("bootstrap");
+            let bootstrap_target = root.join("bootstrap-target");
+            fs::rename(&bootstrap, &bootstrap_target)?;
+            symlink("bootstrap-target", bootstrap)?;
+            Ok(())
+        })?;
+
+        assert!(error.contains("bootstrap root must be a directory, not a symlink"));
         Ok(())
     }
 

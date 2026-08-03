@@ -20,6 +20,25 @@ The compiler source tree digest for this milestone is:
 sha256:1982421cdc786e056ca420aad0cc0410b3d790253391e7ced4d4f605d9c8da10
 ```
 
+Schema 2 computes that digest over the following byte sequence, where
+`frame(bytes) = u64be(bytes.length) || bytes` and every count is encoded as
+unsigned big-endian bytes before framing:
+
+```text
+SHA256(
+  "FUTAO-BOOTSTRAP-COMPILER-TREE-V2\0"
+  || frame(u32be(schemaVersion))
+  || frame(u64be(sourceRoots.length))
+  || each source root as frame(UTF-8 path), in manifest order
+  || frame(u64be(sourceFiles.length))
+  || each source file as frame(UTF-8 path) || frame(raw UTF-8 contents),
+     in manifest order
+)
+```
+
+Paths are normalized portable relative paths. File contents participate as
+checked in, including line endings; the digest performs no text normalization.
+
 Validate the manifest, referenced bootstrap inputs, Git objects, and digests:
 
 ```bash
