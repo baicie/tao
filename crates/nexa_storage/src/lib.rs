@@ -40,6 +40,7 @@ mod arena;
 mod collections;
 mod layout;
 mod ownership;
+mod shared;
 mod storage;
 
 pub use allocator::{
@@ -55,6 +56,7 @@ pub use ownership::{
     CleanupAction, OwnershipEffect, OwnershipError, OwnershipErrorKind, OwnershipFrame, PlaceId,
     PlaceKind, PlaceState,
 };
+pub use shared::{Shared, SharedAccessError, SharedError, Weak};
 pub use storage::{
     PushError, StorageArray, StorageError, StorageString, StorageStringBuilder, StorageVec,
 };
