@@ -13,6 +13,7 @@ const I64: TypeId = TypeId::new(1);
 const UNIT: TypeId = TypeId::new(2);
 const OWNED_I64: TypeId = TypeId::new(3);
 const OWNED_STRUCT: TypeId = TypeId::new(4);
+const OWNED_UNION: TypeId = TypeId::new(5);
 const MAIN: FunctionId = FunctionId::new(0);
 const ENTRY: BlockId = BlockId::new(0);
 const SPAN: NirSpan = NirSpan::new(0, 0, 1);
@@ -36,6 +37,14 @@ fn minimal_module() -> ModuleBuilder {
             OWNED_STRUCT,
             NirType::Struct {
                 fields: vec![OWNED_I64],
+            },
+        )
+        .expect("type id is unique");
+    module
+        .define_type(
+            OWNED_UNION,
+            NirType::TaggedUnion {
+                variants: vec![I64, OWNED_I64],
             },
         )
         .expect("type id is unique");
@@ -106,7 +115,7 @@ fn builder_rejects_invalid_handle_kinds() {
 
     let error = module
         .define_type(
-            TypeId::new(5),
+            TypeId::new(6),
             NirType::Handle {
                 handle_kind: "../host-file".to_owned(),
                 ownership: nexa_nir::ValueOwnership::Owned,
@@ -246,6 +255,42 @@ fn verifier_rejects_unknown_type_ids() {
     let error = Verifier::verify(module).expect_err("unknown type ids must fail closed");
 
     assert_eq!(error.code(), VerificationCode::UnknownType);
+}
+
+#[test]
+fn verifier_rejects_unknown_tagged_union_payload_types() {
+    let mut module = minimal_module();
+    module
+        .define_type(
+            TypeId::new(6),
+            NirType::TaggedUnion {
+                variants: vec![TypeId::new(99)],
+            },
+        )
+        .expect("type id is unique");
+
+    let error = Verifier::verify(module.finish())
+        .expect_err("unknown union payload types must fail closed");
+
+    assert_eq!(error.code(), VerificationCode::UnknownType);
+}
+
+#[test]
+fn verifier_rejects_tagged_unions_without_variants() {
+    let mut module = minimal_module();
+    module
+        .define_type(
+            TypeId::new(6),
+            NirType::TaggedUnion {
+                variants: Vec::new(),
+            },
+        )
+        .expect("type id is unique");
+
+    let error = Verifier::verify(module.finish())
+        .expect_err("an empty union must use the canonical Never type");
+
+    assert_eq!(error.code(), VerificationCode::InvalidType);
 }
 
 #[test]
@@ -459,6 +504,65 @@ fn verifier_accepts_an_owned_value_dropped_once() {
         .expect("terminator is unique");
 
     Verifier::verify(module.finish()).expect("one drop consumes the owned value");
+}
+
+#[test]
+fn verifier_requires_cleanup_for_tagged_unions_with_owned_payloads() {
+    let mut module = minimal_module();
+    module
+        .define_function(
+            MAIN,
+            "main",
+            [TypedValue::new(ValueId::new(0), OWNED_UNION)],
+            UNIT,
+            ENTRY,
+        )
+        .expect("function definition is valid");
+    module
+        .define_block(MAIN, ENTRY, [])
+        .expect("entry block is unique");
+    module
+        .set_terminator(MAIN, ENTRY, Terminator::Return { value: None }, SPAN)
+        .expect("terminator is unique");
+
+    let error = Verifier::verify(module.finish())
+        .expect_err("a union with any owned payload requires cleanup");
+
+    assert_eq!(error.code(), VerificationCode::OwnedValueNotConsumed);
+}
+
+#[test]
+fn verifier_accepts_an_owned_tagged_union_dropped_once() {
+    let mut module = minimal_module();
+    module
+        .define_function(
+            MAIN,
+            "main",
+            [TypedValue::new(ValueId::new(0), OWNED_UNION)],
+            UNIT,
+            ENTRY,
+        )
+        .expect("function definition is valid");
+    module
+        .define_block(MAIN, ENTRY, [])
+        .expect("entry block is unique");
+    module
+        .append_instruction(
+            MAIN,
+            ENTRY,
+            InstructionId::new(0),
+            None,
+            Operation::Drop {
+                value: ValueId::new(0),
+            },
+            SPAN,
+        )
+        .expect("instruction is valid");
+    module
+        .set_terminator(MAIN, ENTRY, Terminator::Return { value: None }, SPAN)
+        .expect("terminator is unique");
+
+    Verifier::verify(module.finish()).expect("one drop consumes the owned union");
 }
 
 #[test]

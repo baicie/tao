@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::{UnverifiedModule, VerificationError, VerifiedModule, Verifier};
+use crate::{NirType, UnverifiedModule, VerificationError, VerifiedModule, Verifier};
 
 /// Magic string for private compiler NIR artifacts.
 pub const NIR_ARTIFACT_MAGIC: &str = "FUTAO-NIR";
@@ -196,11 +196,14 @@ impl CanonicalArtifact {
     ///
     /// # Errors
     ///
-    /// Returns [`ArtifactErrorCode::Serialization`] if encoding fails.
+    /// Returns [`ArtifactErrorCode::UnsupportedSchema`] when the module uses a
+    /// type shape not frozen in schema 1, or [`ArtifactErrorCode::Serialization`]
+    /// if encoding fails.
     pub fn serialize(
         module: &VerifiedModule,
         metadata: &ArtifactMetadata,
     ) -> Result<Vec<u8>, ArtifactError> {
+        ensure_schema_supported(module.module())?;
         let content_hash = content_hash(module.module(), metadata)?;
         let envelope = ArtifactEnvelope {
             magic: NIR_ARTIFACT_MAGIC.to_owned(),
@@ -245,6 +248,7 @@ impl CanonicalArtifact {
                 ),
             );
         }
+        ensure_schema_supported(&envelope.module)?;
         if envelope.compiler_version != compatibility.compiler_version {
             return artifact_error(
                 ArtifactErrorCode::IncompatibleCompiler,
@@ -291,6 +295,20 @@ impl CanonicalArtifact {
         }
         Ok(verified)
     }
+}
+
+fn ensure_schema_supported(module: &UnverifiedModule) -> Result<(), ArtifactError> {
+    if module
+        .types
+        .iter()
+        .any(|definition| matches!(&definition.ty, NirType::TaggedUnion { .. }))
+    {
+        return artifact_error(
+            ArtifactErrorCode::UnsupportedSchema,
+            format!("NIR schema {NIR_SCHEMA_VERSION} does not encode tagged-union types"),
+        );
+    }
+    Ok(())
 }
 
 fn content_hash(

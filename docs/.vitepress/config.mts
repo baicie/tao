@@ -94,6 +94,7 @@ export default defineConfig({
             { text: "ADR-004 Shared and Weak", link: "/implementation/adr-004-shared-weak" },
             { text: "ADR-004 Owned Box", link: "/implementation/adr-004-owned-box" },
             { text: "ADR-004 Partial Init", link: "/implementation/adr-004-partial-init" },
+            { text: "ADR-004 Tagged Union Layout", link: "/implementation/adr-004-tagged-union-layout" },
           ],
         },
         {

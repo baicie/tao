@@ -71,6 +71,22 @@ fn compatibility() -> ArtifactCompatibility {
     ArtifactCompatibility::exact(env!("CARGO_PKG_VERSION"))
 }
 
+fn verified_tagged_union_module() -> nexa_nir::VerifiedModule {
+    let mut module = ModuleBuilder::new("union-layout").expect("module identity is valid");
+    module
+        .define_type(TypeId::new(0), NirType::Unit)
+        .expect("type id is unique");
+    module
+        .define_type(
+            TypeId::new(1),
+            NirType::TaggedUnion {
+                variants: vec![TypeId::new(0)],
+            },
+        )
+        .expect("type id is unique");
+    Verifier::verify(module.finish()).expect("tagged union module should verify")
+}
+
 #[test]
 fn canonical_artifact_round_trip_preserves_exact_bytes() {
     let bytes = CanonicalArtifact::serialize(&verified_module(false), &metadata())
@@ -81,6 +97,37 @@ fn canonical_artifact_round_trip_preserves_exact_bytes() {
         CanonicalArtifact::serialize(&decoded, &metadata()).expect("decoded NIR serializes");
 
     assert_eq!(round_trip, bytes);
+}
+
+#[test]
+fn schema_one_serializer_rejects_tagged_union_modules() {
+    let error = CanonicalArtifact::serialize(&verified_tagged_union_module(), &metadata())
+        .expect_err("schema 1 must not silently gain a new type shape");
+
+    assert_eq!(error.code(), ArtifactErrorCode::UnsupportedSchema);
+}
+
+#[test]
+fn schema_one_deserializer_rejects_tagged_union_modules_before_hash_validation() {
+    let bytes = CanonicalArtifact::serialize(&verified_module(false), &metadata())
+        .expect("schema 1 module serializes");
+    let mut value: Value = serde_json::from_slice(&bytes).expect("artifact is JSON");
+    value["module"]["types"]
+        .as_array_mut()
+        .expect("types are an array")
+        .push(serde_json::json!({
+            "id": 2,
+            "ty": {
+                "kind": "tagged-union",
+                "variants": [1]
+            }
+        }));
+    let bytes = serde_json::to_vec(&value).expect("mutated artifact serializes");
+
+    let error = CanonicalArtifact::deserialize(&bytes, &compatibility())
+        .expect_err("schema 1 readers must reject the unsupported type shape");
+
+    assert_eq!(error.code(), ArtifactErrorCode::UnsupportedSchema);
 }
 
 #[test]

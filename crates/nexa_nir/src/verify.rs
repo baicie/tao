@@ -31,6 +31,8 @@ pub enum VerificationCode {
     UseAfterConsume,
     /// An owned value reaches a block exit without being moved or dropped.
     OwnedValueNotConsumed,
+    /// A logical type has no canonical NIR meaning.
+    InvalidType,
 }
 
 impl VerificationCode {
@@ -48,6 +50,7 @@ impl VerificationCode {
             Self::MissingTerminator => "E5107",
             Self::UseAfterConsume => "E5108",
             Self::OwnedValueNotConsumed => "E5109",
+            Self::InvalidType => "E5120",
         }
     }
 }
@@ -123,6 +126,18 @@ impl Verifier {
         for definition in &module.types {
             if let NirType::Handle { handle_kind, .. } = &definition.ty {
                 verify_identifier(handle_kind, "handle kind")?;
+            }
+            if matches!(
+                &definition.ty,
+                NirType::TaggedUnion { variants } if variants.is_empty()
+            ) {
+                return fail(
+                    VerificationCode::InvalidType,
+                    format!(
+                        "tagged union type {} must declare at least one variant",
+                        definition.id.index()
+                    ),
+                );
             }
             for referenced in definition.ty.referenced_types() {
                 require_type(&types, referenced, "type definition")?;
@@ -653,7 +668,7 @@ fn ownership_inner(
         NirType::BorrowPtr { .. } => ValueOwnership::Borrowed,
         NirType::MutBorrowPtr { .. } => ValueOwnership::MutBorrowed,
         NirType::Handle { ownership, .. } => *ownership,
-        NirType::Struct { fields } => {
+        NirType::Struct { fields } | NirType::TaggedUnion { variants: fields } => {
             let mut aggregate = ValueOwnership::Copy;
             for field in fields {
                 aggregate = combine_ownership(aggregate, ownership_inner(types, *field, visiting)?);

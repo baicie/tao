@@ -28,6 +28,8 @@ pub enum LayoutErrorCode {
     RecursiveAggregate,
     /// Size or padding arithmetic exceeded the canonical `u64` range.
     SizeOverflow,
+    /// A tagged union has no representable explicit discriminant.
+    InvalidTaggedUnion,
 }
 
 impl LayoutErrorCode {
@@ -40,6 +42,7 @@ impl LayoutErrorCode {
             Self::UnknownType => "E5502",
             Self::RecursiveAggregate => "E5503",
             Self::SizeOverflow => "E5504",
+            Self::InvalidTaggedUnion => "E5505",
         }
     }
 }
@@ -71,6 +74,41 @@ impl LayoutError {
 pub struct ValueLayout {
     size: u64,
     alignment: u64,
+}
+
+/// Checked private layout details for one target-specific tagged union.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaggedUnionLayout {
+    tag: ValueLayout,
+    payload: ValueLayout,
+    payload_offset: u64,
+    total: ValueLayout,
+}
+
+impl TaggedUnionLayout {
+    /// Returns the explicit discriminant layout.
+    #[must_use]
+    pub const fn tag_layout(&self) -> ValueLayout {
+        self.tag
+    }
+
+    /// Returns the maximum size and alignment reserved for variant payloads.
+    #[must_use]
+    pub const fn payload_layout(&self) -> ValueLayout {
+        self.payload
+    }
+
+    /// Returns the checked byte offset where overlapping payload storage begins.
+    #[must_use]
+    pub const fn payload_offset(&self) -> u64 {
+        self.payload_offset
+    }
+
+    /// Returns the complete tagged-union size and alignment.
+    #[must_use]
+    pub const fn total_layout(&self) -> ValueLayout {
+        self.total
+    }
 }
 
 impl ValueLayout {
@@ -209,22 +247,35 @@ impl TargetLayout {
         self.layout_inner(module, ty, &mut BTreeSet::new())
     }
 
+    /// Computes detailed private layout information when `ty` is a tagged union.
+    ///
+    /// Returns `Ok(None)` for another known NIR type.
+    ///
+    /// # Errors
+    ///
+    /// Rejects missing payload types, recursive by-value aggregates, invalid
+    /// discriminant capacity, and arithmetic overflow.
+    pub fn tagged_union_layout_of(
+        &self,
+        module: &VerifiedModule,
+        ty: TypeId,
+    ) -> Result<Option<TaggedUnionLayout>, LayoutError> {
+        let nir_type = require_type(module, ty)?;
+        match nir_type {
+            NirType::TaggedUnion { variants } => self
+                .tagged_union_layout(module, ty, variants, &mut BTreeSet::new())
+                .map(Some),
+            _ => Ok(None),
+        }
+    }
+
     fn layout_inner(
         &self,
         module: &VerifiedModule,
         id: TypeId,
         visiting: &mut BTreeSet<TypeId>,
     ) -> Result<ValueLayout, LayoutError> {
-        let ty = module
-            .module()
-            .types
-            .iter()
-            .find(|definition| definition.id == id)
-            .map(|definition| &definition.ty)
-            .ok_or_else(|| LayoutError {
-                code: LayoutErrorCode::UnknownType,
-                message: format!("type {} is not defined", id.index()),
-            })?;
+        let ty = require_type(module, id)?;
         let scalar = |size: u64| ValueLayout::new(size, size.min(self.aggregate_alignment).max(1));
         match ty {
             NirType::I1 | NirType::I8 | NirType::U8 => Ok(scalar(1)),
@@ -250,7 +301,63 @@ impl TargetLayout {
                 let size = stride.checked_mul(*length).ok_or_else(size_overflow)?;
                 Ok(ValueLayout::new(size, element.alignment))
             }
+            NirType::TaggedUnion { variants } => self
+                .tagged_union_layout(module, id, variants, visiting)
+                .map(|layout| layout.total_layout()),
         }
+    }
+
+    fn tagged_union_layout(
+        &self,
+        module: &VerifiedModule,
+        id: TypeId,
+        variants: &[TypeId],
+        visiting: &mut BTreeSet<TypeId>,
+    ) -> Result<TaggedUnionLayout, LayoutError> {
+        enter_aggregate(id, visiting)?;
+        let result = (|| {
+            let tag = self.tag_layout(variants.len())?;
+            let mut payload = ValueLayout::new(0, 1);
+            for variant in variants {
+                let variant = self.layout_inner(module, *variant, visiting)?;
+                payload.size = payload.size.max(variant.size);
+                payload.alignment = payload.alignment.max(variant.alignment);
+            }
+            let payload_offset = align_up(tag.size, payload.alignment)?;
+            let payload_end = payload_offset
+                .checked_add(payload.size)
+                .ok_or_else(size_overflow)?;
+            let alignment = tag.alignment.max(payload.alignment);
+            let total = ValueLayout::new(align_up(payload_end, alignment)?, alignment);
+            Ok(TaggedUnionLayout {
+                tag,
+                payload,
+                payload_offset,
+                total,
+            })
+        })();
+        visiting.remove(&id);
+        result
+    }
+
+    fn tag_layout(&self, variant_count: usize) -> Result<ValueLayout, LayoutError> {
+        let max_discriminant = u64::try_from(variant_count)
+            .ok()
+            .and_then(|count| count.checked_sub(1))
+            .ok_or_else(|| LayoutError {
+                code: LayoutErrorCode::InvalidTaggedUnion,
+                message: "tagged union variant count has no representable discriminant".to_owned(),
+            })?;
+        let size = if max_discriminant <= u64::from(u8::MAX) {
+            1
+        } else if max_discriminant <= u64::from(u16::MAX) {
+            2
+        } else if max_discriminant <= u64::from(u32::MAX) {
+            4
+        } else {
+            8
+        };
+        Ok(ValueLayout::new(size, size.min(self.aggregate_alignment)))
     }
 
     fn aggregate_layout(
@@ -276,6 +383,19 @@ impl TargetLayout {
         visiting.remove(&id);
         result
     }
+}
+
+fn require_type(module: &VerifiedModule, id: TypeId) -> Result<&NirType, LayoutError> {
+    module
+        .module()
+        .types
+        .iter()
+        .find(|definition| definition.id == id)
+        .map(|definition| &definition.ty)
+        .ok_or_else(|| LayoutError {
+            code: LayoutErrorCode::UnknownType,
+            message: format!("type {} is not defined", id.index()),
+        })
 }
 
 fn enter_aggregate(id: TypeId, visiting: &mut BTreeSet<TypeId>) -> Result<(), LayoutError> {
