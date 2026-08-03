@@ -24,6 +24,9 @@
   through real Rust and Futao adapters with no suppression or expected divergence.
 - Bound resolver source, protocol, schema, corpus counts, and tree digest into
   the Stage 0 bootstrap contract; malformed output and mismatches fail closed.
+- Hardened resolver fail-closed behavior: unknown internal enum values now emit
+  invalid tags, and snapshot validation rejects discontinuous child identities
+  or payloads without a declared variant target.
 - Kept the Rust resolver as the default path until type checking, lowering, and
   the ADR-011 self-hosting gate are complete.
 

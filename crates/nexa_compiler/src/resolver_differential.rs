@@ -702,6 +702,11 @@ impl ResolverSnapshot {
                 ));
             }
         }
+        if !child_identity_indices_are_contiguous(&self.names, &symbols) {
+            return Err(ResolverAdapterError::InvalidSnapshot(
+                "child semantic identities must use contiguous owner-local ids".to_owned(),
+            ));
+        }
 
         for diagnostic in &self.diagnostics {
             if !matches!(
@@ -823,6 +828,98 @@ fn target_is_valid(
                 | "parse-int"
         ),
     }
+}
+
+fn child_identity_indices_are_contiguous(
+    names: &[ResolverNameSnapshot],
+    symbols: &HashSet<(ResolverSymbolKind, u32, u32)>,
+) -> bool {
+    let mut fields = HashMap::<(u32, u32), HashSet<u32>>::new();
+    let mut variants = HashMap::<(u32, u32), HashSet<u32>>::new();
+    let mut variant_ids = HashSet::new();
+    let mut payloads = HashMap::<(u32, u32, u32), HashSet<u32>>::new();
+    let mut type_parameters = HashMap::<(ResolverSymbolKind, u32, u32), HashSet<u32>>::new();
+
+    for name in names {
+        match &name.target {
+            ResolverTargetSnapshot::Field {
+                module,
+                record,
+                index,
+            } => {
+                if !symbols.contains(&(ResolverSymbolKind::Record, *module, *record)) {
+                    return false;
+                }
+                fields.entry((*module, *record)).or_default().insert(*index);
+            }
+            ResolverTargetSnapshot::Variant {
+                module,
+                union,
+                index,
+            } => {
+                if !symbols.contains(&(ResolverSymbolKind::Union, *module, *union)) {
+                    return false;
+                }
+                variants
+                    .entry((*module, *union))
+                    .or_default()
+                    .insert(*index);
+                variant_ids.insert((*module, *union, *index));
+            }
+            ResolverTargetSnapshot::Payload {
+                module,
+                union,
+                variant,
+                index,
+            } => {
+                payloads
+                    .entry((*module, *union, *variant))
+                    .or_default()
+                    .insert(*index);
+            }
+            ResolverTargetSnapshot::TypeParameter {
+                owner_kind,
+                module,
+                owner,
+                index,
+            } => {
+                if !symbols.contains(&(*owner_kind, *module, *owner)) {
+                    return false;
+                }
+                type_parameters
+                    .entry((*owner_kind, *module, *owner))
+                    .or_default()
+                    .insert(*index);
+            }
+            _ => {}
+        }
+    }
+
+    if payloads
+        .keys()
+        .any(|identity| !variant_ids.contains(identity))
+    {
+        return false;
+    }
+
+    fn are_contiguous<K>(groups: &HashMap<K, HashSet<u32>>) -> bool
+    where
+        K: Eq + std::hash::Hash,
+    {
+        groups.values().all(|indices| {
+            let mut sorted = indices.iter().copied().collect::<Vec<_>>();
+            sorted.sort_unstable();
+            sorted
+                .iter()
+                .enumerate()
+                .all(|(expected, actual)| *actual == expected as u32)
+        })
+    }
+
+    are_contiguous(&fields)
+        && are_contiguous(&variants)
+        && are_contiguous(&payloads)
+        && are_contiguous(&type_parameters)
 }
 
 /// Failure while building or executing a resolver adapter.
@@ -2088,6 +2185,78 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_rejects_non_contiguous_child_identity_indices(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"type Pair<T> = {
+  left: T;
+  right: T;
+};
+
+type Choice<T> =
+  | Some(value: T)
+  | None();
+
+function main<T>(value: T): T {
+  match(value) {
+    case Choice.Some(payload) => payload;
+    default => value;
+  };
+}
+"#;
+        let baseline = super::RustResolverAdapter.resolve(&CompilerInput::new(
+            "main.ft",
+            [CompilerSource::new("main.ft", source)],
+        ))?;
+
+        let mut field = baseline.clone();
+        let field_name = field
+            .names
+            .iter_mut()
+            .find(|name| matches!(name.target, ResolverTargetSnapshot::Field { .. }))
+            .ok_or_else(|| std::io::Error::other("expected a field target"))?;
+        if let ResolverTargetSnapshot::Field { index, .. } = &mut field_name.target {
+            *index = 99;
+        }
+        assert!(field.validate(&[source.len()]).is_err());
+
+        let mut variant = baseline.clone();
+        let variant_name = variant
+            .names
+            .iter_mut()
+            .find(|name| matches!(name.target, ResolverTargetSnapshot::Variant { .. }))
+            .ok_or_else(|| std::io::Error::other("expected a variant target"))?;
+        if let ResolverTargetSnapshot::Variant { index, .. } = &mut variant_name.target {
+            *index = 99;
+        }
+        assert!(variant.validate(&[source.len()]).is_err());
+
+        let mut payload = baseline.clone();
+        let payload_name = payload
+            .names
+            .iter_mut()
+            .find(|name| matches!(name.target, ResolverTargetSnapshot::Payload { .. }))
+            .ok_or_else(|| std::io::Error::other("expected a payload target"))?;
+        if let ResolverTargetSnapshot::Payload { index, .. } = &mut payload_name.target {
+            *index = 99;
+        }
+        assert!(payload.validate(&[source.len()]).is_err());
+
+        let mut type_parameter = baseline;
+        let type_parameter_name = type_parameter
+            .names
+            .iter_mut()
+            .find(|name| matches!(name.target, ResolverTargetSnapshot::TypeParameter { .. }))
+            .ok_or_else(|| std::io::Error::other("expected a type-parameter target"))?;
+        if let ResolverTargetSnapshot::TypeParameter { index, .. } = &mut type_parameter_name.target
+        {
+            *index = 99;
+        }
+        assert!(type_parameter.validate(&[source.len()]).is_err());
+
+        Ok(())
+    }
+
+    #[test]
     fn snapshot_rejects_names_outside_canonical_source_order() {
         let mut snapshot = minimal_snapshot();
         snapshot.names.swap(0, 1);
@@ -2232,6 +2401,41 @@ mod tests {
         assert!(
             matches!(error, Some(ResolverAdapterError::Protocol(message)) if message == "1 trailing line(s)")
         );
+    }
+
+    #[test]
+    fn futao_driver_rejects_unknown_enum_values_instead_of_emitting_legal_tags(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let main_start = super::FUTAO_DRIVER_ENTRY
+            .find("function main(arguments: String[]): Unit {")
+            .ok_or_else(|| std::io::Error::other("resolver driver main was not found"))?;
+        let probe = format!(
+            "{}function main(arguments: String[]): Unit {{\n  print(symbolKindName(99));\n  print(visibilityName(99));\n  print(scopeKindName(99));\n  print(diagnosticCode(99));\n  emitLabel({{ style: 99, span: {{ source: 0, start: 0, end: 0 }} }});\n}}\n",
+            &super::FUTAO_DRIVER_ENTRY[..main_start]
+        );
+        let output = super::compile(&CompilerInput::new(
+            "resolver_driver_probe.ft",
+            super::futao_resolver_sources("resolver_driver_probe.ft", &probe),
+        ))?;
+        super::ensure_futao_resolver_compiled("driver probe", &output)?;
+        let program = output
+            .mir()
+            .ok_or_else(|| std::io::Error::other("driver probe produced no MIR"))?;
+        let execution = super::run_mir_with_args(program, &[], 1_000_000)?;
+        assert_eq!(
+            execution.output(),
+            [
+                "invalid-symbol-kind",
+                "invalid-visibility",
+                "invalid-scope-kind",
+                "invalid-diagnostic",
+                "invalid-label-style",
+                "0",
+                "0",
+                "0"
+            ]
+        );
+        Ok(())
     }
 
     #[derive(Clone)]

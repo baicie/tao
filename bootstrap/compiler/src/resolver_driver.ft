@@ -47,14 +47,20 @@ function symbolKindName(kind: Int): String {
   if (kind === 1) {
     return "record";
   }
-  return "union";
+  if (kind === 2) {
+    return "union";
+  }
+  return "invalid-symbol-kind";
 }
 
 function visibilityName(visibility: Int): String {
   if (visibility === 0) {
     return "private";
   }
-  return "exported";
+  if (visibility === 1) {
+    return "exported";
+  }
+  return "invalid-visibility";
 }
 
 function scopeKindName(kind: Int): String {
@@ -70,7 +76,10 @@ function scopeKindName(kind: Int): String {
   if (kind === 3) {
     return "match-arm";
   }
-  return "closure";
+  if (kind === 4) {
+    return "closure";
+  }
+  return "invalid-scope-kind";
 }
 
 function diagnosticCode(code: Int): String {
@@ -89,7 +98,20 @@ function diagnosticCode(code: Int): String {
   if (code === 4) {
     return "E4004";
   }
-  return "E4005";
+  if (code === 5) {
+    return "E4005";
+  }
+  return "invalid-diagnostic";
+}
+
+function labelStyleName(style: Int): String {
+  if (style === 0) {
+    return "primary";
+  }
+  if (style === 1) {
+    return "secondary";
+  }
+  return "invalid-label-style";
 }
 
 function emitSymbol(symbol: ResolverSymbol): Unit {
@@ -222,11 +244,7 @@ function emitName(name: ResolverName): Unit {
 }
 
 function emitLabel(label: ResolverLabel): Unit {
-  if (label.style === 0) {
-    print("primary");
-  } else {
-    print("secondary");
-  }
+  print(labelStyleName(label.style));
   emitSpan(label.span);
 }
 
