@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use nexa_diagnostics::{LabelStyle, Severity};
 use nexa_hir::{
-    lower_module, resolve_modules, Builtin, DefId, NameResolution, ResolvedImport,
+    lower_module, resolve_modules, Builtin, DefId, NameResolution, Program, ResolvedImport,
     ResolverScopeKind as HirScopeKind, TypeParameterOwner, Visibility,
 };
 use nexa_mir::{run_with_args_and_step_limit as run_mir_with_args, MirProgram, RuntimeFailure};
@@ -431,6 +431,158 @@ impl ResolverNameSnapshot {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ResolverChildIdentity {
+    Field(u32, u32, u32),
+    Variant(u32, u32, u32),
+    Payload(u32, u32, u32, u32),
+    TypeParameter(ResolverSymbolKind, u32, u32, u32),
+}
+
+impl ResolverChildIdentity {
+    fn from_target(target: &ResolverTargetSnapshot) -> Option<Self> {
+        match target {
+            ResolverTargetSnapshot::Field {
+                module,
+                record,
+                index,
+            } => Some(Self::Field(*module, *record, *index)),
+            ResolverTargetSnapshot::Variant {
+                module,
+                union,
+                index,
+            } => Some(Self::Variant(*module, *union, *index)),
+            ResolverTargetSnapshot::Payload {
+                module,
+                union,
+                variant,
+                index,
+            } => Some(Self::Payload(*module, *union, *variant, *index)),
+            ResolverTargetSnapshot::TypeParameter {
+                owner_kind,
+                module,
+                owner,
+                index,
+            } => Some(Self::TypeParameter(*owner_kind, *module, *owner, *index)),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct ResolverChildDeclarations {
+    spans: HashMap<ResolverChildIdentity, ResolverSpanSnapshot>,
+}
+
+impl ResolverChildDeclarations {
+    fn from_programs(programs: &[Program]) -> Result<Self, ResolverAdapterError> {
+        let mut declarations = Self::default();
+        for program in programs {
+            let module = schema_u32(program.module.index())?;
+            for (record_index, record) in program.records.iter().enumerate() {
+                let record_index = schema_u32(record_index)?;
+                declarations.insert_type_parameters(
+                    ResolverSymbolKind::Record,
+                    module,
+                    record_index,
+                    &record.type_parameters,
+                )?;
+                for (field_index, field) in record.fields.iter().enumerate() {
+                    declarations.insert(
+                        ResolverChildIdentity::Field(
+                            module,
+                            record_index,
+                            schema_u32(field_index)?,
+                        ),
+                        field.name.span,
+                    )?;
+                }
+            }
+            for (union_index, union) in program.unions.iter().enumerate() {
+                let union_index = schema_u32(union_index)?;
+                declarations.insert_type_parameters(
+                    ResolverSymbolKind::Union,
+                    module,
+                    union_index,
+                    &union.type_parameters,
+                )?;
+                for (variant_index, variant) in union.variants.iter().enumerate() {
+                    let variant_index = schema_u32(variant_index)?;
+                    declarations.insert(
+                        ResolverChildIdentity::Variant(module, union_index, variant_index),
+                        variant.name.span,
+                    )?;
+                    for (payload_index, payload) in variant.payloads.iter().enumerate() {
+                        declarations.insert(
+                            ResolverChildIdentity::Payload(
+                                module,
+                                union_index,
+                                variant_index,
+                                schema_u32(payload_index)?,
+                            ),
+                            payload.name.span,
+                        )?;
+                    }
+                }
+            }
+            for (function_index, function) in program.functions.iter().enumerate() {
+                declarations.insert_type_parameters(
+                    ResolverSymbolKind::Function,
+                    module,
+                    schema_u32(function_index)?,
+                    &function.type_parameters,
+                )?;
+            }
+        }
+        Ok(declarations)
+    }
+
+    fn insert_type_parameters(
+        &mut self,
+        owner_kind: ResolverSymbolKind,
+        module: u32,
+        owner: u32,
+        parameters: &[nexa_hir::TypeParameter],
+    ) -> Result<(), ResolverAdapterError> {
+        for (index, parameter) in parameters.iter().enumerate() {
+            self.insert(
+                ResolverChildIdentity::TypeParameter(owner_kind, module, owner, schema_u32(index)?),
+                parameter.name.span,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn insert(
+        &mut self,
+        identity: ResolverChildIdentity,
+        span: SourceSpan,
+    ) -> Result<(), ResolverAdapterError> {
+        if self.spans.insert(identity, resolver_span(span)?).is_some() {
+            return Err(ResolverAdapterError::InvalidInput(
+                "source declarations produced duplicate child identities".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn contains_target(&self, target: &ResolverTargetSnapshot) -> bool {
+        ResolverChildIdentity::from_target(target)
+            .is_some_and(|identity| self.spans.contains_key(&identity))
+    }
+
+    fn all_declarations_are_observed(&self, names: &[ResolverNameSnapshot]) -> bool {
+        let observed = names
+            .iter()
+            .filter_map(|name| {
+                let identity = ResolverChildIdentity::from_target(&name.target)?;
+                (self.spans.get(&identity) == Some(&name.span)).then_some(identity)
+            })
+            .collect::<HashSet<_>>();
+        observed.len() == self.spans.len()
+    }
+}
+
 /// Canonical resolver diagnostic severity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -574,7 +726,11 @@ impl ResolverSnapshot {
         serde_json::to_string(self)
     }
 
-    fn validate(&self, source_lengths: &[usize]) -> Result<(), ResolverAdapterError> {
+    fn validate(
+        &self,
+        source_lengths: &[usize],
+        child_declarations: &ResolverChildDeclarations,
+    ) -> Result<(), ResolverAdapterError> {
         if self.schema_version != RESOLVER_SNAPSHOT_SCHEMA_VERSION {
             return Err(ResolverAdapterError::InvalidSnapshot(
                 "unsupported schemaVersion".to_owned(),
@@ -696,11 +852,23 @@ impl ResolverSnapshot {
             ));
         }
         for name in &self.names {
-            if !target_is_valid(&name.target, name.span, &symbols, &bindings) {
+            if !target_is_valid(
+                &name.target,
+                name.span,
+                &symbols,
+                &bindings,
+                child_declarations,
+            ) {
                 return Err(ResolverAdapterError::InvalidSnapshot(
                     "resolved name targets an unknown semantic identity".to_owned(),
                 ));
             }
+        }
+        if !child_declarations.all_declarations_are_observed(&self.names) {
+            return Err(ResolverAdapterError::InvalidSnapshot(
+                "child declarations must retain their source spans and semantic identities"
+                    .to_owned(),
+            ));
         }
 
         for diagnostic in &self.diagnostics {
@@ -783,6 +951,7 @@ fn target_is_valid(
     span: ResolverSpanSnapshot,
     symbols: &HashSet<(ResolverSymbolKind, u32, u32)>,
     bindings: &HashSet<(u32, u32, u32)>,
+    child_declarations: &ResolverChildDeclarations,
 ) -> bool {
     match target {
         ResolverTargetSnapshot::Local {
@@ -798,6 +967,7 @@ fn target_is_valid(
         }
         ResolverTargetSnapshot::Field { module, record, .. } => {
             symbols.contains(&(ResolverSymbolKind::Record, *module, *record))
+                && child_declarations.contains_target(target)
         }
         ResolverTargetSnapshot::Union { module, index } => {
             symbols.contains(&(ResolverSymbolKind::Union, *module, *index))
@@ -805,13 +975,18 @@ fn target_is_valid(
         ResolverTargetSnapshot::Variant { module, union, .. }
         | ResolverTargetSnapshot::Payload { module, union, .. } => {
             symbols.contains(&(ResolverSymbolKind::Union, *module, *union))
+                && child_declarations.contains_target(target)
         }
         ResolverTargetSnapshot::TypeParameter {
             owner_kind,
             module,
             owner,
             ..
-        } => span.source == *module && symbols.contains(&(*owner_kind, *module, *owner)),
+        } => {
+            span.source == *module
+                && symbols.contains(&(*owner_kind, *module, *owner))
+                && child_declarations.contains_target(target)
+        }
         ResolverTargetSnapshot::Builtin { name } => matches!(
             name.as_str(),
             "print"
@@ -1128,7 +1303,32 @@ fn validate_snapshot_against_input(
                 })
         })
         .collect::<Result<Vec<_>, _>>()?;
-    snapshot.validate(&source_lengths)
+    let session = explicit_session(input)?;
+    if !session.diagnostics().is_empty() {
+        let summary = session
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.code().as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+        return Err(ResolverAdapterError::InvalidInput(summary));
+    }
+    let programs = lower_session_modules(&session)?;
+    let child_declarations = ResolverChildDeclarations::from_programs(&programs)?;
+    snapshot.validate(&source_lengths, &child_declarations)
+}
+
+fn lower_session_modules<P>(
+    session: &crate::CompilerSession<P>,
+) -> Result<Vec<Program>, ResolverAdapterError> {
+    session
+        .modules()
+        .iter()
+        .map(|module| {
+            lower_module(module.id(), module.file(), &module.parse().syntax())
+                .map_err(ResolverAdapterError::from)
+        })
+        .collect()
 }
 
 fn snapshot_digest(snapshot: &ResolverSnapshot) -> Result<String, ResolverAdapterError> {
@@ -1179,14 +1379,7 @@ impl ResolverAdapter for RustResolverAdapter {
             return Err(ResolverAdapterError::InvalidInput(summary));
         }
 
-        let programs = session
-            .modules()
-            .iter()
-            .map(|module| {
-                lower_module(module.id(), module.file(), &module.parse().syntax())
-                    .map_err(ResolverAdapterError::from)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let programs = lower_session_modules(&session)?;
         let links = session
             .edges()
             .iter()
@@ -1304,7 +1497,8 @@ impl ResolverAdapter for RustResolverAdapter {
             diagnostics,
         };
         let source_lengths = session_source_lengths(&session)?;
-        snapshot.validate(&source_lengths)?;
+        let child_declarations = ResolverChildDeclarations::from_programs(&programs)?;
+        snapshot.validate(&source_lengths, &child_declarations)?;
         Ok(snapshot)
     }
 }
@@ -2022,11 +2216,12 @@ fn validate_span(
 mod tests {
     use super::{
         parse_futao_resolver_output, ResolverAdapter, ResolverAdapterError,
-        ResolverBindingSnapshot, ResolverDifferentialHarness, ResolverDifferentialOutcome,
-        ResolverEdgeSnapshot, ResolverImplementation, ResolverModuleSnapshot, ResolverNameSnapshot,
-        ResolverObservable, ResolverScopeKind, ResolverScopeSnapshot, ResolverSnapshot,
-        ResolverSpanSnapshot, ResolverSymbolKind, ResolverSymbolSnapshot, ResolverTargetSnapshot,
-        ResolverVisibility, RESOLVER_SNAPSHOT_SCHEMA_VERSION,
+        ResolverBindingSnapshot, ResolverChildDeclarations, ResolverDifferentialHarness,
+        ResolverDifferentialOutcome, ResolverEdgeSnapshot, ResolverImplementation,
+        ResolverModuleSnapshot, ResolverNameSnapshot, ResolverObservable, ResolverScopeKind,
+        ResolverScopeSnapshot, ResolverSnapshot, ResolverSpanSnapshot, ResolverSymbolKind,
+        ResolverSymbolSnapshot, ResolverTargetSnapshot, ResolverVisibility,
+        RESOLVER_SNAPSHOT_SCHEMA_VERSION,
     };
     use crate::{CompilerInput, CompilerSource};
 
@@ -2040,22 +2235,22 @@ mod tests {
             path_span: span(0, 8, 22),
         });
 
-        assert!(snapshot.validate(&[64]).is_err());
+        assert!(validate_without_children(&snapshot, &[64]).is_err());
     }
 
     #[test]
     fn snapshot_rejects_discontinuous_symbol_scope_and_local_ids() {
         let mut symbol = minimal_snapshot();
         symbol.symbols[0].index = 1;
-        assert!(symbol.validate(&[64]).is_err());
+        assert!(validate_without_children(&symbol, &[64]).is_err());
 
         let mut scope = minimal_snapshot();
         scope.scopes[0].index = 1;
-        assert!(scope.validate(&[64]).is_err());
+        assert!(validate_without_children(&scope, &[64]).is_err());
 
         let mut binding = minimal_snapshot();
         binding.bindings[0].local = 1;
-        assert!(binding.validate(&[64]).is_err());
+        assert!(validate_without_children(&binding, &[64]).is_err());
     }
 
     #[test]
@@ -2069,11 +2264,11 @@ mod tests {
             kind: ResolverScopeKind::Block,
             span: span(0, 16, 32),
         });
-        assert!(parent.validate(&[64]).is_err());
+        assert!(validate_without_children(&parent, &[64]).is_err());
 
         let mut binding = minimal_snapshot();
         binding.bindings[0].scope = 1;
-        assert!(binding.validate(&[64]).is_err());
+        assert!(validate_without_children(&binding, &[64]).is_err());
     }
 
     #[test]
@@ -2084,7 +2279,116 @@ mod tests {
             index: 1,
         };
 
-        assert!(snapshot.validate(&[64]).is_err());
+        assert!(validate_without_children(&snapshot, &[64]).is_err());
+    }
+
+    #[test]
+    fn snapshot_rejects_non_contiguous_child_identity_indices(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"type Pair<T> = {
+  left: T;
+  right: T;
+};
+
+type Choice<T> =
+  | Some(value: T)
+  | None();
+
+function main<T>(value: T): T {
+  match(value) {
+    case Choice.Some(payload) => payload;
+    default => value;
+  };
+}
+"#;
+        let input = CompilerInput::new("main.ft", [CompilerSource::new("main.ft", source)]);
+        let baseline = super::RustResolverAdapter.resolve(&input)?;
+
+        let mut field = baseline.clone();
+        let field_name = field
+            .names
+            .iter_mut()
+            .find(|name| matches!(name.target, ResolverTargetSnapshot::Field { .. }))
+            .ok_or_else(|| std::io::Error::other("expected a field target"))?;
+        if let ResolverTargetSnapshot::Field { index, .. } = &mut field_name.target {
+            *index = 99;
+        }
+        assert!(super::validate_snapshot_against_input(&input, &field).is_err());
+
+        let mut variant = baseline.clone();
+        let variant_name = variant
+            .names
+            .iter_mut()
+            .find(|name| matches!(name.target, ResolverTargetSnapshot::Variant { .. }))
+            .ok_or_else(|| std::io::Error::other("expected a variant target"))?;
+        if let ResolverTargetSnapshot::Variant { index, .. } = &mut variant_name.target {
+            *index = 99;
+        }
+        assert!(super::validate_snapshot_against_input(&input, &variant).is_err());
+
+        let mut payload = baseline.clone();
+        let payload_name = payload
+            .names
+            .iter_mut()
+            .find(|name| matches!(name.target, ResolverTargetSnapshot::Payload { .. }))
+            .ok_or_else(|| std::io::Error::other("expected a payload target"))?;
+        if let ResolverTargetSnapshot::Payload { index, .. } = &mut payload_name.target {
+            *index = 99;
+        }
+        assert!(super::validate_snapshot_against_input(&input, &payload).is_err());
+
+        let mut type_parameter = baseline;
+        let type_parameter_name = type_parameter
+            .names
+            .iter_mut()
+            .find(|name| matches!(name.target, ResolverTargetSnapshot::TypeParameter { .. }))
+            .ok_or_else(|| std::io::Error::other("expected a type-parameter target"))?;
+        if let ResolverTargetSnapshot::TypeParameter { index, .. } = &mut type_parameter_name.target
+        {
+            *index = 99;
+        }
+        assert!(super::validate_snapshot_against_input(&input, &type_parameter).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn snapshot_rejects_an_undeclared_contiguous_child_identity(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"type Pair<T> = {
+  left: T;
+  right: T;
+};
+
+function main(): Unit {
+  print("ok");
+}
+"#;
+        let input = CompilerInput::new("main.ft", [CompilerSource::new("main.ft", source)]);
+        let mut snapshot = super::RustResolverAdapter.resolve(&input)?;
+        let reference = snapshot
+            .names
+            .iter_mut()
+            .filter(|name| {
+                matches!(
+                    name.target,
+                    ResolverTargetSnapshot::TypeParameter {
+                        owner_kind: ResolverSymbolKind::Record,
+                        module: 0,
+                        owner: 0,
+                        index: 0,
+                    }
+                )
+            })
+            .nth(1)
+            .ok_or_else(|| std::io::Error::other("expected a type-parameter reference"))?;
+        if let ResolverTargetSnapshot::TypeParameter { index, .. } = &mut reference.target {
+            *index = 1;
+        }
+
+        assert!(super::validate_snapshot_against_input(&input, &snapshot).is_err());
+
+        Ok(())
     }
 
     #[test]
@@ -2092,7 +2396,7 @@ mod tests {
         let mut snapshot = minimal_snapshot();
         snapshot.names.swap(0, 1);
 
-        assert!(snapshot.validate(&[64]).is_err());
+        assert!(validate_without_children(&snapshot, &[64]).is_err());
     }
 
     #[test]
@@ -2234,6 +2538,41 @@ mod tests {
         );
     }
 
+    #[test]
+    fn futao_driver_rejects_unknown_enum_values_instead_of_emitting_legal_tags(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let main_start = super::FUTAO_DRIVER_ENTRY
+            .find("function main(arguments: String[]): Unit {")
+            .ok_or_else(|| std::io::Error::other("resolver driver main was not found"))?;
+        let probe = format!(
+            "{}function main(arguments: String[]): Unit {{\n  print(symbolKindName(99));\n  print(visibilityName(99));\n  print(scopeKindName(99));\n  print(diagnosticCode(99));\n  emitLabel({{ style: 99, span: {{ source: 0, start: 0, end: 0 }} }});\n}}\n",
+            &super::FUTAO_DRIVER_ENTRY[..main_start]
+        );
+        let output = super::compile(&CompilerInput::new(
+            "resolver_driver_probe.ft",
+            super::futao_resolver_sources("resolver_driver_probe.ft", &probe),
+        ))?;
+        super::ensure_futao_resolver_compiled("driver probe", &output)?;
+        let program = output
+            .mir()
+            .ok_or_else(|| std::io::Error::other("driver probe produced no MIR"))?;
+        let execution = super::run_mir_with_args(program, &[], 1_000_000)?;
+        assert_eq!(
+            execution.output(),
+            [
+                "invalid-symbol-kind",
+                "invalid-visibility",
+                "invalid-scope-kind",
+                "invalid-diagnostic",
+                "invalid-label-style",
+                "0",
+                "0",
+                "0"
+            ]
+        );
+        Ok(())
+    }
+
     #[derive(Clone)]
     struct SnapshotAdapter {
         implementation: ResolverImplementation,
@@ -2251,6 +2590,13 @@ mod tests {
         ) -> Result<ResolverSnapshot, ResolverAdapterError> {
             Ok(self.snapshot.clone())
         }
+    }
+
+    fn validate_without_children(
+        snapshot: &ResolverSnapshot,
+        source_lengths: &[usize],
+    ) -> Result<(), ResolverAdapterError> {
+        snapshot.validate(source_lengths, &ResolverChildDeclarations::default())
     }
 
     fn minimal_snapshot() -> ResolverSnapshot {

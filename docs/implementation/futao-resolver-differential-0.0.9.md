@@ -22,8 +22,10 @@ HIR/MIR/NIR lowering, and compiler-driver migration remain later milestones.
 
 The resolver runs under `futao-bootstrap-v1` and emits a strict private protocol
 with header `FUTAO-RESOLVER-2`. The Rust adapter validates every field, integer
-bound, source span, identity, ordering rule, and terminal status before a
-snapshot can enter the differential comparison.
+bound, source span, identity, ordering rule, enum tag, and terminal status before
+a snapshot can enter the differential comparison. Unknown internal enum values
+are emitted as invalid tags and fail closed instead of being coerced to a legal
+observable value.
 
 ## Resolver Snapshot Schema 1
 
@@ -45,7 +47,12 @@ Module ids, symbol ids, scope ids, binding ids, and name ids are assigned from
 canonical source and traversal order, never from hash-map iteration or the order
 in which the caller supplied equivalent source collections. All spans use stable
 source ordinals and UTF-8 byte offsets. Diagnostics preserve source order and
-include deterministic cycle witnesses.
+include deterministic cycle witnesses. The Host derives owner-local child
+identities and declaration spans from lowered source declarations; every record
+field, union variant, named payload, and type-parameter target must match that
+contract. This rejects undeclared contiguous indices as well as gaps, and makes
+payload ownership depend on a source-declared variant rather than another
+observed reference.
 
 The snapshot compares six observables independently: module graph, symbols,
 scopes, bindings, resolved names, and diagnostics. A difference in any one is a
@@ -95,7 +102,7 @@ protocol entry points, schema version, and exact corpus counts. The source-tree
 digest for this milestone is:
 
 ```text
-sha256:0a84ac381ace43b4d7be650f1082aedd1bfc92c10002b50d2d6b223fef6b7ebc
+sha256:085e030264fd56e3232ce0fcef480dc2b3f0fe79bb41d8bb7b7823d2a026ded8
 ```
 
 `bootstrap/stage0/bootstrap-manifest.json` repeats the digest and records
