@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "toolchainVersion": "0.0.10",
   "languageVersion": "1.0",
   "stage0": {
@@ -35,16 +35,68 @@
     "version": "0.0.3",
     "profile": "futao-bootstrap-v1",
     "manifest": "bootstrap/compiler/bootstrap-compiler.json",
-    "manifestSchemaVersion": 2,
+    "manifestSchemaVersion": 3,
     "sourceRoots": ["src", "typecheck"],
-    "treeDigest": "sha256:1982421cdc786e056ca420aad0cc0410b3d790253391e7ced4d4f605d9c8da10",
+    "treeDigest": "sha256:93336b05e9779f97c3c5c04cbfb64a1b711e178a580915de24141ff397eede84",
     "implementedPhases": ["lexer", "parser", "resolver"],
-    "lexerSnapshotSchemaVersion": 1,
-    "differentialCaseCount": 11,
-    "parserSnapshotSchemaVersion": 1,
-    "parserDifferentialCaseCount": 21,
-    "resolverSnapshotSchemaVersion": 1,
-    "resolverDifferentialCaseCount": 6,
+    "phaseRecords": [
+      {
+        "name": "lexer",
+        "profileEntry": "src/lexer_profile.ft",
+        "driverEntry": "src/lexer_driver.ft",
+        "observationSchemaVersion": 1,
+        "protocolSchemaVersion": 1,
+        "acceptedCaseCount": 4,
+        "acceptedCorpusDigest": "sha256:4bc4398f4fcb400fa531f191f9c5e91ec3b0ab82fffc51567827d4401e8b6aa2",
+        "rejectedCaseCount": 3,
+        "rejectedCorpusDigest": "sha256:414b8c352a19c29fef63800956106669f9e97225a3050d71f72b7424c70be0ea",
+        "fuzzSeedCount": 4,
+        "fuzzSeedDigest": "sha256:92c153cf8838665aa2fcac1d3ed7cc14b3a06c41a3dd180d79ca3c356f246590",
+        "targetLayoutDescriptor": null
+      },
+      {
+        "name": "parser",
+        "profileEntry": "src/parser_profile.ft",
+        "driverEntry": "src/parser_driver.ft",
+        "observationSchemaVersion": 1,
+        "protocolSchemaVersion": 1,
+        "acceptedCaseCount": 8,
+        "acceptedCorpusDigest": "sha256:8c3e254c6d96b100e0c351b665c824b408f1843cbc280c32c1b0c93eccfd637d",
+        "rejectedCaseCount": 8,
+        "rejectedCorpusDigest": "sha256:aab06b38412a0f9b71e39c819b01c03f79f43b3d4c7bab88ed7ab60284659832",
+        "fuzzSeedCount": 5,
+        "fuzzSeedDigest": "sha256:182256071c54fb1e615a02b7cab5f839341f736dbe4ffa1da2da5710dd442f42",
+        "targetLayoutDescriptor": null
+      },
+      {
+        "name": "resolver",
+        "profileEntry": "src/resolver_profile.ft",
+        "driverEntry": "src/resolver_driver.ft",
+        "observationSchemaVersion": 1,
+        "protocolSchemaVersion": 2,
+        "acceptedCaseCount": 1,
+        "acceptedCorpusDigest": "sha256:c5cb09f7ad8aa9193583569ca6b8a96b2a88eb73fcbba31c7a5b38bacdc76f7a",
+        "rejectedCaseCount": 1,
+        "rejectedCorpusDigest": "sha256:855948e11257e3cd1058ec95a9a19cd91bae846f078dc6e7158e619155d371f5",
+        "fuzzSeedCount": 4,
+        "fuzzSeedDigest": "sha256:4162155d3dc9f8967c618bc6156def7bd07b735b3d20f1108d312136a01b972d",
+        "targetLayoutDescriptor": null
+      },
+      {
+        "name": "typecheck-expression-kernel",
+        "profileEntry": "typecheck/typecheck_profile.ft",
+        "driverEntry": "typecheck/typecheck_driver.ft",
+        "observationSchemaVersion": 1,
+        "protocolSchemaVersion": 1,
+        "acceptedCaseCount": 1,
+        "acceptedCorpusDigest": "sha256:deb57511cdc0332d903ff78c7a9c72e06e0772adaac655e68d35b9dac5922b90",
+        "rejectedCaseCount": 1,
+        "rejectedCorpusDigest": "sha256:55278c6ec4bcd4caf0f797f5c885b63418df72601eb270a04384a2153769939f",
+        "fuzzSeedCount": 0,
+        "fuzzSeedDigest": "sha256:58a78ba5d24b522c8d580b44ebf75da0bcf0539c79a293ffb4c5c2d8a397804b",
+        "targetLayoutDescriptor": null
+      }
+    ],
     "defaultImplementation": "rust-reference"
   },
   "bootstrapOutput": {

@@ -5,7 +5,8 @@ use std::process::{Command, Stdio};
 
 use anyhow::{bail, ensure, Context, Result};
 use nexa_compiler::{
-    LEXER_SNAPSHOT_SCHEMA_VERSION, PARSER_SNAPSHOT_SCHEMA_VERSION, RESOLVER_SNAPSHOT_SCHEMA_VERSION,
+    LEXER_SNAPSHOT_SCHEMA_VERSION, PARSER_SNAPSHOT_SCHEMA_VERSION,
+    RESOLVER_SNAPSHOT_SCHEMA_VERSION, TYPECHECK_SNAPSHOT_SCHEMA_VERSION,
 };
 use nexa_nir::{
     ArtifactCompatibility, ArtifactErrorCode, CanonicalArtifact, NIR_ARTIFACT_MAGIC,
@@ -87,12 +88,7 @@ struct BootstrapCompiler {
     source_roots: Vec<String>,
     tree_digest: String,
     implemented_phases: Vec<String>,
-    lexer_snapshot_schema_version: u32,
-    differential_case_count: usize,
-    parser_snapshot_schema_version: u32,
-    parser_differential_case_count: usize,
-    resolver_snapshot_schema_version: u32,
-    resolver_differential_case_count: usize,
+    phase_records: Vec<PhaseRecord>,
     default_implementation: String,
 }
 
@@ -104,30 +100,125 @@ struct BootstrapCompilerManifest {
     version: String,
     toolchain_version: String,
     profile: String,
-    profile_entry: String,
-    driver_entry: String,
     implemented_phases: Vec<String>,
     source_roots: Vec<String>,
     source_files: Vec<String>,
     tree_hash_algorithm: String,
     tree_digest: String,
-    lexer_snapshot_schema_version: u32,
-    differential_corpus: DifferentialCorpus,
-    parser_snapshot_schema_version: u32,
-    parser_differential_corpus: DifferentialCorpus,
-    resolver_snapshot_schema_version: u32,
-    resolver_differential_corpus: DifferentialCorpus,
+    phase_records: Vec<PhaseRecord>,
     default_implementation: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct DifferentialCorpus {
-    accepted: usize,
-    rejected: usize,
-    fuzz_seeds: usize,
-    total: usize,
+struct PhaseRecord {
+    name: String,
+    profile_entry: String,
+    driver_entry: String,
+    observation_schema_version: u32,
+    protocol_schema_version: u32,
+    accepted_case_count: usize,
+    accepted_corpus_digest: String,
+    rejected_case_count: usize,
+    rejected_corpus_digest: String,
+    fuzz_seed_count: usize,
+    fuzz_seed_digest: String,
+    target_layout_descriptor: serde_json::Value,
 }
+
+#[derive(Clone, Copy)]
+enum PhaseCaseModel {
+    Files,
+    SingleGraph,
+}
+
+#[derive(Clone, Copy)]
+struct PhaseInputSpec {
+    root: Option<&'static str>,
+    extension: Option<&'static str>,
+    absent_root: Option<&'static str>,
+    case_model: PhaseCaseModel,
+}
+
+#[derive(Clone, Copy)]
+struct PhaseSpec {
+    name: &'static str,
+    profile_entry: &'static str,
+    driver_entry: &'static str,
+    observation_schema_version: u32,
+    protocol_schema_version: u32,
+    accepted: PhaseInputSpec,
+    rejected: PhaseInputSpec,
+    fuzz: PhaseInputSpec,
+}
+
+const fn phase_files(root: &'static str, extension: &'static str) -> PhaseInputSpec {
+    PhaseInputSpec {
+        root: Some(root),
+        extension: Some(extension),
+        absent_root: None,
+        case_model: PhaseCaseModel::Files,
+    }
+}
+
+const fn phase_graph(root: &'static str, extension: &'static str) -> PhaseInputSpec {
+    PhaseInputSpec {
+        root: Some(root),
+        extension: Some(extension),
+        absent_root: None,
+        case_model: PhaseCaseModel::SingleGraph,
+    }
+}
+
+const EMPTY_PHASE_INPUT: PhaseInputSpec = PhaseInputSpec {
+    root: None,
+    extension: None,
+    absent_root: Some("fuzz/corpus/typecheck"),
+    case_model: PhaseCaseModel::Files,
+};
+
+const PHASE_SPECS: [PhaseSpec; 4] = [
+    PhaseSpec {
+        name: "lexer",
+        profile_entry: "src/lexer_profile.ft",
+        driver_entry: "src/lexer_driver.ft",
+        observation_schema_version: LEXER_SNAPSHOT_SCHEMA_VERSION,
+        protocol_schema_version: 1,
+        accepted: phase_files("bootstrap/compiler/tests/lexer/accepted", "ft"),
+        rejected: phase_files("bootstrap/compiler/tests/lexer/rejected", "ft"),
+        fuzz: phase_files("fuzz/corpus/lexer", "ft"),
+    },
+    PhaseSpec {
+        name: "parser",
+        profile_entry: "src/parser_profile.ft",
+        driver_entry: "src/parser_driver.ft",
+        observation_schema_version: PARSER_SNAPSHOT_SCHEMA_VERSION,
+        protocol_schema_version: 1,
+        accepted: phase_files("bootstrap/compiler/tests/parser/accepted", "ft"),
+        rejected: phase_files("bootstrap/compiler/tests/parser/rejected", "ft"),
+        fuzz: phase_files("fuzz/corpus/parser", "ft"),
+    },
+    PhaseSpec {
+        name: "resolver",
+        profile_entry: "src/resolver_profile.ft",
+        driver_entry: "src/resolver_driver.ft",
+        observation_schema_version: RESOLVER_SNAPSHOT_SCHEMA_VERSION,
+        protocol_schema_version: 2,
+        accepted: phase_graph("bootstrap/compiler/tests/resolver/accepted", "ft"),
+        rejected: phase_graph("bootstrap/compiler/tests/resolver/rejected", "ft"),
+        fuzz: phase_files("fuzz/corpus/resolver", "ft"),
+    },
+    PhaseSpec {
+        name: "typecheck-expression-kernel",
+        profile_entry: "typecheck/typecheck_profile.ft",
+        driver_entry: "typecheck/typecheck_driver.ft",
+        observation_schema_version: TYPECHECK_SNAPSHOT_SCHEMA_VERSION,
+        protocol_schema_version: 1,
+        accepted: phase_files("bootstrap/compiler/tests/typecheck/accepted", "json"),
+        rejected: phase_files("bootstrap/compiler/tests/typecheck/rejected", "json"),
+        fuzz: EMPTY_PHASE_INPUT,
+    },
+];
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -200,7 +291,7 @@ fn parse_manifest(text: &str) -> Result<BootstrapManifest> {
 
 impl BootstrapManifest {
     fn validate(&self) -> Result<()> {
-        ensure!(self.schema_version == 2, "schemaVersion must be 2");
+        ensure!(self.schema_version == 3, "schemaVersion must be 3");
         expect(
             "toolchainVersion",
             &self.toolchain_version,
@@ -301,8 +392,8 @@ impl BootstrapManifest {
             "bootstrap/compiler/bootstrap-compiler.json",
         )?;
         ensure!(
-            self.bootstrap_compiler.manifest_schema_version == 2,
-            "bootstrapCompiler.manifestSchemaVersion must be 2"
+            self.bootstrap_compiler.manifest_schema_version == 3,
+            "bootstrapCompiler.manifestSchemaVersion must be 3"
         );
         ensure!(
             self.bootstrap_compiler.source_roots == ["src", "typecheck"],
@@ -316,32 +407,7 @@ impl BootstrapManifest {
             self.bootstrap_compiler.implemented_phases == ["lexer", "parser", "resolver"],
             "bootstrapCompiler.implementedPhases must contain lexer, parser, then resolver"
         );
-        ensure!(
-            self.bootstrap_compiler.lexer_snapshot_schema_version == LEXER_SNAPSHOT_SCHEMA_VERSION,
-            "bootstrapCompiler.lexerSnapshotSchemaVersion must be {LEXER_SNAPSHOT_SCHEMA_VERSION}"
-        );
-        ensure!(
-            self.bootstrap_compiler.differential_case_count == 11,
-            "bootstrapCompiler.differentialCaseCount must be 11"
-        );
-        ensure!(
-            self.bootstrap_compiler.parser_snapshot_schema_version
-                == PARSER_SNAPSHOT_SCHEMA_VERSION,
-            "bootstrapCompiler.parserSnapshotSchemaVersion must be {PARSER_SNAPSHOT_SCHEMA_VERSION}"
-        );
-        ensure!(
-            self.bootstrap_compiler.parser_differential_case_count == 21,
-            "bootstrapCompiler.parserDifferentialCaseCount must be 21"
-        );
-        ensure!(
-            self.bootstrap_compiler.resolver_snapshot_schema_version
-                == RESOLVER_SNAPSHOT_SCHEMA_VERSION,
-            "bootstrapCompiler.resolverSnapshotSchemaVersion must be {RESOLVER_SNAPSHOT_SCHEMA_VERSION}"
-        );
-        ensure!(
-            self.bootstrap_compiler.resolver_differential_case_count == 6,
-            "bootstrapCompiler.resolverDifferentialCaseCount must be 6"
-        );
+        validate_phase_record_shape(&self.bootstrap_compiler.phase_records)?;
         expect(
             "bootstrapCompiler.defaultImplementation",
             &self.bootstrap_compiler.default_implementation,
@@ -522,16 +588,6 @@ fn verify_bootstrap_compiler(manifest: &BootstrapManifest, root: &Path) -> Resul
         &compiler.profile,
         &manifest.bootstrap_compiler.profile,
     )?;
-    expect(
-        "compiler.profileEntry",
-        &compiler.profile_entry,
-        "src/resolver_profile.ft",
-    )?;
-    expect(
-        "compiler.driverEntry",
-        &compiler.driver_entry,
-        "src/resolver_driver.ft",
-    )?;
     ensure!(
         compiler.implemented_phases == manifest.bootstrap_compiler.implemented_phases,
         "compiler implementedPhases do not match the top-level contract"
@@ -552,29 +608,29 @@ fn verify_bootstrap_compiler(manifest: &BootstrapManifest, root: &Path) -> Resul
         &compiler.tree_digest,
         &manifest.bootstrap_compiler.tree_digest,
     )?;
+    validate_phase_record_shape(&compiler.phase_records)?;
     ensure!(
-        compiler.lexer_snapshot_schema_version
-            == manifest.bootstrap_compiler.lexer_snapshot_schema_version,
-        "compiler lexerSnapshotSchemaVersion does not match the top-level contract"
+        compiler.phase_records == manifest.bootstrap_compiler.phase_records,
+        "compiler phaseRecords do not match the top-level contract"
     );
-    ensure!(
-        compiler.differential_corpus.accepted == 4
-            && compiler.differential_corpus.rejected == 3
-            && compiler.differential_corpus.fuzz_seeds == 4
-            && compiler.differential_corpus.total
-                == manifest.bootstrap_compiler.differential_case_count,
-        "compiler differentialCorpus must describe 4 accepted, 3 rejected, and 4 fuzz cases"
-    );
-    ensure!(
-        compiler.parser_snapshot_schema_version
-            == manifest.bootstrap_compiler.parser_snapshot_schema_version,
-        "compiler parserSnapshotSchemaVersion does not match the top-level contract"
-    );
-    ensure!(
-        compiler.resolver_snapshot_schema_version
-            == manifest.bootstrap_compiler.resolver_snapshot_schema_version,
-        "compiler resolverSnapshotSchemaVersion does not match the top-level contract"
-    );
+    for record in &compiler.phase_records {
+        ensure!(
+            compiler
+                .source_files
+                .iter()
+                .any(|source| source == &record.profile_entry),
+            "compiler phase profileEntry is not bound by sourceFiles: {}",
+            record.profile_entry
+        );
+        ensure!(
+            compiler
+                .source_files
+                .iter()
+                .any(|source| source == &record.driver_entry),
+            "compiler phase driverEntry is not bound by sourceFiles: {}",
+            record.driver_entry
+        );
+    }
     expect(
         "compiler.defaultImplementation",
         &compiler.default_implementation,
@@ -593,16 +649,7 @@ fn verify_bootstrap_compiler(manifest: &BootstrapManifest, root: &Path) -> Resul
         "bootstrap compiler tree digest mismatch: expected {}, found {actual}",
         compiler.tree_digest
     );
-    validate_parser_corpus(
-        &compiler.parser_differential_corpus,
-        manifest.bootstrap_compiler.parser_differential_case_count,
-        root,
-    )?;
-    validate_resolver_corpus(
-        &compiler.resolver_differential_corpus,
-        manifest.bootstrap_compiler.resolver_differential_case_count,
-        root,
-    )?;
+    verify_phase_inputs(&compiler.phase_records, root)?;
     Ok(())
 }
 
@@ -743,119 +790,260 @@ fn discover_compiler_source_directory(
     Ok(())
 }
 
-fn validate_parser_corpus(
-    declared: &DifferentialCorpus,
-    expected_total: usize,
-    root: &Path,
-) -> Result<()> {
-    let accepted = count_parser_cases(
-        &root.join("bootstrap/compiler/tests/parser/accepted"),
-        Some("ft"),
-    )?;
-    let rejected = count_parser_cases(
-        &root.join("bootstrap/compiler/tests/parser/rejected"),
-        Some("ft"),
-    )?;
-    let fuzz_seeds = count_parser_cases(&root.join("fuzz/corpus/parser"), Some("ft"))?;
-    let actual_total = accepted
-        .checked_add(rejected)
-        .and_then(|count| count.checked_add(fuzz_seeds))
-        .context("parser differential corpus count overflow")?;
-
+fn validate_phase_record_shape(records: &[PhaseRecord]) -> Result<()> {
     ensure!(
-        accepted > 0 && rejected > 0 && fuzz_seeds > 0,
-        "parser differential corpus categories must not be empty"
+        records.len() == PHASE_SPECS.len(),
+        "bootstrap compiler phaseRecords must contain exactly four records"
     );
-    ensure!(
-        declared.accepted == accepted
-            && declared.rejected == rejected
-            && declared.fuzz_seeds == fuzz_seeds
-            && declared.total == actual_total
-            && declared.total == expected_total,
-        "compiler parserDifferentialCorpus counts do not match the checked-in parser corpus"
-    );
-    Ok(())
-}
-
-fn validate_resolver_corpus(
-    declared: &DifferentialCorpus,
-    expected_total: usize,
-    root: &Path,
-) -> Result<()> {
-    let accepted_sources =
-        count_resolver_sources(&root.join("bootstrap/compiler/tests/resolver/accepted"))?;
-    let rejected_sources =
-        count_resolver_sources(&root.join("bootstrap/compiler/tests/resolver/rejected"))?;
-    let fuzz_seeds = count_resolver_sources(&root.join("fuzz/corpus/resolver"))?;
-    ensure!(
-        accepted_sources > 0 && rejected_sources > 0 && fuzz_seeds > 0,
-        "resolver differential corpus categories must not be empty"
-    );
-    let actual_total = 2usize
-        .checked_add(fuzz_seeds)
-        .context("resolver differential corpus count overflow")?;
-    ensure!(
-        declared.accepted == 1
-            && declared.rejected == 1
-            && declared.fuzz_seeds == fuzz_seeds
-            && declared.total == actual_total
-            && declared.total == expected_total,
-        "compiler resolverDifferentialCorpus counts do not match the checked-in resolver corpus"
-    );
-    Ok(())
-}
-
-fn count_resolver_sources(directory: &Path) -> Result<usize> {
-    let entries = std::fs::read_dir(directory)
-        .with_context(|| format!("failed to read resolver corpus {}", directory.display()))?;
-    let mut count = 0usize;
-    for entry in entries {
-        let entry = entry.with_context(|| {
-            format!("failed to inspect resolver corpus {}", directory.display())
-        })?;
-        let path = entry.path();
+    for (record, expected) in records.iter().zip(PHASE_SPECS) {
+        expect("phaseRecords.name", &record.name, expected.name)?;
+        expect(
+            "phaseRecords.profileEntry",
+            &record.profile_entry,
+            expected.profile_entry,
+        )?;
+        expect(
+            "phaseRecords.driverEntry",
+            &record.driver_entry,
+            expected.driver_entry,
+        )?;
         ensure!(
-            entry.file_type()?.is_file(),
-            "resolver corpus entry must be a file: {}",
-            path.display()
+            record.observation_schema_version == expected.observation_schema_version,
+            "{} observationSchemaVersion must be {}",
+            record.name,
+            expected.observation_schema_version
         );
         ensure!(
-            path.extension().and_then(|value| value.to_str()) == Some("ft"),
-            "resolver corpus entry must use .ft: {}",
-            path.display()
+            record.protocol_schema_version == expected.protocol_schema_version,
+            "{} protocolSchemaVersion must be {}",
+            record.name,
+            expected.protocol_schema_version
         );
-        count = count
-            .checked_add(1)
-            .context("resolver differential corpus count overflow")?;
+        validate_sha256(
+            &format!("{}.acceptedCorpusDigest", record.name),
+            &record.accepted_corpus_digest,
+        )?;
+        validate_sha256(
+            &format!("{}.rejectedCorpusDigest", record.name),
+            &record.rejected_corpus_digest,
+        )?;
+        validate_sha256(
+            &format!("{}.fuzzSeedDigest", record.name),
+            &record.fuzz_seed_digest,
+        )?;
+        ensure!(
+            record.target_layout_descriptor.is_null(),
+            "{} targetLayoutDescriptor must be null for a front-end phase",
+            record.name
+        );
     }
-    Ok(count)
+    Ok(())
 }
 
-fn count_parser_cases(directory: &Path, extension: Option<&str>) -> Result<usize> {
-    let entries = std::fs::read_dir(directory)
-        .with_context(|| format!("failed to read parser corpus {}", directory.display()))?;
-    let mut count = 0usize;
-    for entry in entries {
-        let entry = entry
-            .with_context(|| format!("failed to inspect parser corpus {}", directory.display()))?;
-        let path = entry.path();
+fn verify_phase_inputs(records: &[PhaseRecord], workspace_root: &Path) -> Result<()> {
+    for (record, spec) in records.iter().zip(PHASE_SPECS) {
+        let accepted =
+            phase_input_observation(workspace_root, spec.name, "accepted", spec.accepted)?;
+        let rejected =
+            phase_input_observation(workspace_root, spec.name, "rejected", spec.rejected)?;
+        let fuzz = phase_input_observation(workspace_root, spec.name, "fuzz", spec.fuzz)?;
+
         ensure!(
-            entry.file_type()?.is_file(),
-            "parser corpus entry must be a file: {}",
-            path.display()
+            record.accepted_case_count == accepted.0,
+            "{} acceptedCaseCount does not match checked-in inputs",
+            record.name
         );
-        if let Some(expected) = extension {
+        ensure!(
+            record.accepted_corpus_digest == accepted.1,
+            "{} acceptedCorpusDigest does not match checked-in inputs: found {}",
+            record.name,
+            accepted.1
+        );
+        ensure!(
+            record.rejected_case_count == rejected.0,
+            "{} rejectedCaseCount does not match checked-in inputs",
+            record.name
+        );
+        ensure!(
+            record.rejected_corpus_digest == rejected.1,
+            "{} rejectedCorpusDigest does not match checked-in inputs: found {}",
+            record.name,
+            rejected.1
+        );
+        ensure!(
+            record.fuzz_seed_count == fuzz.0,
+            "{} fuzzSeedCount does not match checked-in inputs",
+            record.name
+        );
+        ensure!(
+            record.fuzz_seed_digest == fuzz.1,
+            "{} fuzzSeedDigest does not match checked-in inputs: found {}",
+            record.name,
+            fuzz.1
+        );
+    }
+    Ok(())
+}
+
+fn phase_input_observation(
+    workspace_root: &Path,
+    phase: &str,
+    category: &str,
+    spec: PhaseInputSpec,
+) -> Result<(usize, String)> {
+    let files = match (spec.root, spec.extension, spec.absent_root) {
+        (Some(relative_root), Some(extension), None) => {
+            discover_phase_input_files(workspace_root, relative_root, extension)?
+        }
+        (None, None, Some(absent_root)) => {
+            validate_portable_relative_path("absent phase input root", absent_root)?;
+            let path = workspace_root.join(absent_root);
+            match std::fs::symlink_metadata(&path) {
+                Ok(_) => bail!(
+                    "{phase} {category} input root must remain absent: {}",
+                    path.display()
+                ),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(error).with_context(|| {
+                        format!(
+                            "failed to inspect absent phase input root {}",
+                            path.display()
+                        )
+                    });
+                }
+            }
+            Vec::new()
+        }
+        _ => {
+            bail!("phase input root, extension, and absent root do not form a valid input contract")
+        }
+    };
+    let case_count = match spec.case_model {
+        PhaseCaseModel::Files => files.len(),
+        PhaseCaseModel::SingleGraph => {
             ensure!(
-                path.extension().and_then(|value| value.to_str()) == Some(expected),
-                "parser corpus entry must use .{expected}: {}",
+                files.iter().any(|relative| relative == "main.ft"),
+                "{phase} {category} source graph must contain main.ft"
+            );
+            1
+        }
+    };
+    if spec.root.is_some() {
+        ensure!(
+            !files.is_empty(),
+            "{phase} {category} phase input set must not be empty"
+        );
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(b"FUTAO-BOOTSTRAP-PHASE-INPUTS-V1\0");
+    hash_tree_field(&mut hasher, phase.as_bytes())?;
+    hash_tree_field(&mut hasher, category.as_bytes())?;
+    hash_tree_field(&mut hasher, spec.root.unwrap_or_default().as_bytes())?;
+    hash_tree_field(
+        &mut hasher,
+        &u64::try_from(case_count)
+            .context("too many phase input cases")?
+            .to_be_bytes(),
+    )?;
+    hash_tree_field(
+        &mut hasher,
+        &u64::try_from(files.len())
+            .context("too many phase input files")?
+            .to_be_bytes(),
+    )?;
+    if let Some(relative_root) = spec.root {
+        let input_root = workspace_root.join(relative_root);
+        for relative in &files {
+            let path = input_root.join(relative);
+            let metadata = std::fs::symlink_metadata(&path)
+                .with_context(|| format!("failed to inspect {}", path.display()))?;
+            ensure!(
+                metadata.file_type().is_file(),
+                "phase input must be a regular file, not a symlink: {}",
                 path.display()
             );
+            let bytes = std::fs::read(&path)
+                .with_context(|| format!("failed to read {}", path.display()))?;
+            std::str::from_utf8(&bytes)
+                .with_context(|| format!("phase input must be UTF-8: {}", path.display()))?;
+            hash_tree_field(&mut hasher, relative.as_bytes())?;
+            hash_tree_field(&mut hasher, &bytes)?;
         }
-        count = count
-            .checked_add(1)
-            .context("parser differential corpus count overflow")?;
     }
-    Ok(count)
+    Ok((case_count, format!("sha256:{:x}", hasher.finalize())))
+}
+
+fn discover_phase_input_files(
+    workspace_root: &Path,
+    relative_root: &str,
+    extension: &str,
+) -> Result<Vec<String>> {
+    validate_portable_relative_path("phase input root", relative_root)?;
+    ensure_real_directory_chain(workspace_root, relative_root)?;
+    let input_root = workspace_root.join(relative_root);
+    let mut files = Vec::new();
+    discover_phase_input_files_below(&input_root, &input_root, extension, &mut files)?;
+    files.sort();
+    case_folded_path_set(
+        &files,
+        "phase input paths must be unique on case-insensitive filesystems",
+    )?;
+    Ok(files)
+}
+
+fn discover_phase_input_files_below(
+    input_root: &Path,
+    directory: &Path,
+    extension: &str,
+    files: &mut Vec<String>,
+) -> Result<()> {
+    let entries = std::fs::read_dir(directory)
+        .with_context(|| format!("failed to read phase inputs {}", directory.display()))?;
+    for entry in entries {
+        let entry = entry
+            .with_context(|| format!("failed to inspect phase inputs {}", directory.display()))?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("failed to inspect phase input {}", path.display()))?;
+        ensure!(
+            !file_type.is_symlink(),
+            "phase input entry must not be a symlink: {}",
+            path.display()
+        );
+        if file_type.is_dir() {
+            discover_phase_input_files_below(input_root, &path, extension, files)?;
+            continue;
+        }
+        ensure!(
+            file_type.is_file(),
+            "phase input entry must be a regular file: {}",
+            path.display()
+        );
+        ensure!(
+            path.extension().and_then(|value| value.to_str()) == Some(extension),
+            "phase input entry must use .{extension}: {}",
+            path.display()
+        );
+        let relative = portable_relative_path(
+            path.strip_prefix(input_root)
+                .context("phase input escaped its declared root")?,
+            "phase input path",
+        )?;
+        files.push(relative);
+    }
+    Ok(())
+}
+
+fn ensure_real_directory_chain(workspace_root: &Path, relative: &str) -> Result<()> {
+    let mut directory = workspace_root.to_path_buf();
+    for component in relative.split('/') {
+        directory.push(component);
+        ensure_real_directory(&directory, "phase input directory")?;
+    }
+    Ok(())
 }
 
 fn validate_compiler_source_roots(source_roots: &[String]) -> Result<()> {
@@ -1430,9 +1618,10 @@ mod tests {
 
     use super::{
         canonical_fixture_bytes, compiler_tree_digest, discover_compiler_sources, parse_manifest,
-        project_bootstrap_stdlib_for_stage0, project_source_for_stage0, stage0_target_dir,
-        validate_compiler_source_roots, verify_bootstrap_compiler, verify_bootstrap_inputs,
-        verify_digest, verify_source, workspace_root,
+        phase_input_observation, project_bootstrap_stdlib_for_stage0, project_source_for_stage0,
+        stage0_target_dir, validate_compiler_source_roots, verify_bootstrap_compiler,
+        verify_bootstrap_inputs, verify_digest, verify_source, workspace_root, PhaseCaseModel,
+        PhaseInputSpec, PHASE_SPECS,
     };
     use serde_json::{json, Value};
 
@@ -1447,7 +1636,7 @@ mod tests {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let manifest = parse_manifest(ACCEPTED)?;
 
-        assert_eq!(manifest.schema_version, 2);
+        assert_eq!(manifest.schema_version, 3);
         assert_eq!(manifest.stage0.compiler_version, "0.0.1");
         assert_eq!(manifest.bootstrap_profile.id, "futao-bootstrap-v1");
         assert_eq!(
@@ -1468,7 +1657,7 @@ mod tests {
         assert_eq!(manifest.bootstrap_compiler.status, "resolver-differential");
         assert_eq!(manifest.bootstrap_compiler.version, "0.0.3");
         assert_eq!(manifest.bootstrap_compiler.profile, "futao-bootstrap-v1");
-        assert_eq!(manifest.bootstrap_compiler.manifest_schema_version, 2);
+        assert_eq!(manifest.bootstrap_compiler.manifest_schema_version, 3);
         assert_eq!(
             manifest.bootstrap_compiler.source_roots,
             ["src", "typecheck"]
@@ -1479,26 +1668,9 @@ mod tests {
         );
         assert_eq!(
             manifest.bootstrap_compiler.tree_digest,
-            "sha256:1982421cdc786e056ca420aad0cc0410b3d790253391e7ced4d4f605d9c8da10"
+            "sha256:93336b05e9779f97c3c5c04cbfb64a1b711e178a580915de24141ff397eede84"
         );
-        assert_eq!(manifest.bootstrap_compiler.lexer_snapshot_schema_version, 1);
-        assert_eq!(manifest.bootstrap_compiler.differential_case_count, 11);
-        assert_eq!(
-            manifest.bootstrap_compiler.parser_snapshot_schema_version,
-            1
-        );
-        assert_eq!(
-            manifest.bootstrap_compiler.parser_differential_case_count,
-            21
-        );
-        assert_eq!(
-            manifest.bootstrap_compiler.resolver_snapshot_schema_version,
-            1
-        );
-        assert_eq!(
-            manifest.bootstrap_compiler.resolver_differential_case_count,
-            6
-        );
+        assert_eq!(manifest.bootstrap_compiler.phase_records.len(), 4);
         assert_eq!(
             manifest.bootstrap_compiler.default_implementation,
             "rust-reference"
@@ -1533,7 +1705,7 @@ mod tests {
         let stage0 = parse_manifest(ACCEPTED)?;
         let compiler: super::BootstrapCompilerManifest = serde_json::from_str(COMPILER)?;
 
-        assert_eq!(compiler.schema_version, 2);
+        assert_eq!(compiler.schema_version, 3);
         assert_eq!(compiler.source_roots, ["src", "typecheck"]);
         assert_eq!(
             compiler.source_files,
@@ -1566,6 +1738,42 @@ mod tests {
             stage0.bootstrap_compiler.source_roots
         );
         assert_eq!(compiler.tree_digest, stage0.bootstrap_compiler.tree_digest);
+        Ok(())
+    }
+
+    #[test]
+    fn checked_in_manifests_bind_phase_provenance_records() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let compiler: Value = serde_json::from_str(COMPILER)?;
+        let stage0: Value = serde_json::from_str(ACCEPTED)?;
+
+        assert_eq!(compiler["schemaVersion"], json!(3));
+        assert_eq!(stage0["schemaVersion"], json!(3));
+        assert_eq!(
+            compiler["phaseRecords"],
+            stage0["bootstrapCompiler"]["phaseRecords"]
+        );
+        let records = compiler["phaseRecords"]
+            .as_array()
+            .ok_or_else(|| std::io::Error::other("compiler phaseRecords must be an array"))?;
+        assert_eq!(records.len(), 4);
+        assert_eq!(records[0]["name"], "lexer");
+        assert_eq!(records[1]["name"], "parser");
+        assert_eq!(records[2]["name"], "resolver");
+        assert_eq!(records[3]["name"], "typecheck-expression-kernel");
+        for record in records {
+            assert!(record["profileEntry"].is_string());
+            assert!(record["driverEntry"].is_string());
+            assert!(record["observationSchemaVersion"].is_u64());
+            assert!(record["protocolSchemaVersion"].is_u64());
+            assert!(record["acceptedCaseCount"].is_u64());
+            assert!(record["acceptedCorpusDigest"].is_string());
+            assert!(record["rejectedCaseCount"].is_u64());
+            assert!(record["rejectedCorpusDigest"].is_string());
+            assert!(record["fuzzSeedCount"].is_u64());
+            assert!(record["fuzzSeedDigest"].is_string());
+            assert!(record["targetLayoutDescriptor"].is_null());
+        }
         Ok(())
     }
 
@@ -1619,30 +1827,118 @@ mod tests {
     }
 
     #[test]
-    fn parser_rejects_an_incorrect_parser_differential_case_count() {
-        let invalid = ACCEPTED.replace(
-            "\"parserDifferentialCaseCount\": 21",
-            "\"parserDifferentialCaseCount\": 20",
-        );
-        let error = parse_manifest(&invalid).err();
+    fn parser_rejects_noncanonical_phase_record_order() -> Result<(), Box<dyn std::error::Error>> {
+        let mut manifest: Value = serde_json::from_str(ACCEPTED)?;
+        manifest["bootstrapCompiler"]["phaseRecords"]
+            .as_array_mut()
+            .ok_or_else(|| std::io::Error::other("phaseRecords must be an array"))?
+            .swap(0, 1);
+
+        let error = parse_manifest(&serde_json::to_string(&manifest)?).err();
 
         assert!(matches!(
             error,
-            Some(error) if error.to_string().contains("parserDifferentialCaseCount")
+            Some(error) if error.to_string().contains("phaseRecords.name")
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn parser_rejects_a_wrong_phase_observation_schema() -> Result<(), Box<dyn std::error::Error>> {
+        let mut manifest: Value = serde_json::from_str(ACCEPTED)?;
+        manifest["bootstrapCompiler"]["phaseRecords"][0]["observationSchemaVersion"] = json!(2);
+
+        let error = parse_manifest(&serde_json::to_string(&manifest)?).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains("lexer observationSchemaVersion must be 1")
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn parser_rejects_a_wrong_phase_protocol_schema() -> Result<(), Box<dyn std::error::Error>> {
+        let mut manifest: Value = serde_json::from_str(ACCEPTED)?;
+        manifest["bootstrapCompiler"]["phaseRecords"][2]["protocolSchemaVersion"] = json!(1);
+
+        let error = parse_manifest(&serde_json::to_string(&manifest)?).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains("resolver protocolSchemaVersion must be 2")
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn parser_rejects_a_front_end_target_layout_descriptor(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut manifest: Value = serde_json::from_str(ACCEPTED)?;
+        manifest["bootstrapCompiler"]["phaseRecords"][0]["targetLayoutDescriptor"] =
+            json!("x86_64-unknown-linux-gnu");
+
+        let error = parse_manifest(&serde_json::to_string(&manifest)?).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains(
+                "lexer targetLayoutDescriptor must be null for a front-end phase"
+            )
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn parser_rejects_a_missing_target_layout_descriptor() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut manifest: Value = serde_json::from_str(ACCEPTED)?;
+        manifest["bootstrapCompiler"]["phaseRecords"][0]
+            .as_object_mut()
+            .ok_or_else(|| std::io::Error::other("phase record must be an object"))?
+            .remove("targetLayoutDescriptor");
+
+        let error = parse_manifest(&serde_json::to_string(&manifest)?).err();
+
+        let error = error.ok_or_else(|| {
+            std::io::Error::other("missing targetLayoutDescriptor must be rejected")
+        })?;
+        let error_chain = format!("{error:#}");
+        assert!(
+            error_chain.contains("targetLayoutDescriptor"),
+            "unexpected error: {error_chain}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parser_rejects_phase_record_count_drift() -> Result<(), Box<dyn std::error::Error>> {
+        let mut manifest: Value = serde_json::from_str(ACCEPTED)?;
+        manifest["bootstrapCompiler"]["phaseRecords"]
+            .as_array_mut()
+            .ok_or_else(|| std::io::Error::other("phaseRecords must be an array"))?
+            .pop();
+
+        let error = parse_manifest(&serde_json::to_string(&manifest)?).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains("must contain exactly four records")
+        ));
+        Ok(())
     }
 
     #[test]
     fn parser_rejects_the_previous_stage0_manifest_schema() -> Result<(), Box<dyn std::error::Error>>
     {
         let mut manifest: Value = serde_json::from_str(ACCEPTED)?;
-        manifest["schemaVersion"] = json!(1);
+        manifest["schemaVersion"] = json!(2);
 
         let error = parse_manifest(&serde_json::to_string(&manifest)?).err();
 
         assert!(matches!(
             error,
-            Some(error) if error.to_string().contains("schemaVersion must be 2")
+            Some(error) if error.to_string().contains("schemaVersion must be 3")
         ));
         Ok(())
     }
@@ -1651,14 +1947,14 @@ mod tests {
     fn parser_rejects_an_unbound_compiler_manifest_schema() -> Result<(), Box<dyn std::error::Error>>
     {
         let mut manifest: Value = serde_json::from_str(ACCEPTED)?;
-        manifest["bootstrapCompiler"]["manifestSchemaVersion"] = json!(1);
+        manifest["bootstrapCompiler"]["manifestSchemaVersion"] = json!(2);
 
         let error = parse_manifest(&serde_json::to_string(&manifest)?).err();
 
         assert!(matches!(
             error,
             Some(error) if error.to_string().contains(
-                "bootstrapCompiler.manifestSchemaVersion must be 2"
+                "bootstrapCompiler.manifestSchemaVersion must be 3"
             )
         ));
         Ok(())
@@ -1692,7 +1988,7 @@ mod tests {
     fn bootstrap_compiler_provenance_accepts_recursive_declared_source_roots(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let mut manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        let mut manifest = prepare_schema_three_compiler_fixture(directory.path())?;
         let nested = directory
             .path()
             .join("bootstrap/compiler/src/nested/helper.ft");
@@ -1776,6 +2072,255 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_compiler_provenance_rejects_child_phase_record_drift(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let directory = TestDirectory::new()?;
+        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        mutate_compiler_manifest(directory.path(), |compiler| {
+            compiler["phaseRecords"][0]["acceptedCaseCount"] = json!(5);
+        })?;
+
+        let error = verify_bootstrap_compiler(&manifest, directory.path()).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains(
+                "compiler phaseRecords do not match the top-level contract"
+            )
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_phase_case_count_drift(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let directory = TestDirectory::new()?;
+        let mut manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        manifest.bootstrap_compiler.phase_records[0].accepted_case_count = 5;
+        mutate_compiler_manifest(directory.path(), |compiler| {
+            compiler["phaseRecords"][0]["acceptedCaseCount"] = json!(5);
+        })?;
+
+        let error = verify_bootstrap_compiler(&manifest, directory.path()).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains(
+                "lexer acceptedCaseCount does not match checked-in inputs"
+            )
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_bound_phase_digest_drift(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let directory = TestDirectory::new()?;
+        let mut manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        let drift = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        manifest.bootstrap_compiler.phase_records[0].accepted_corpus_digest = drift.to_owned();
+        mutate_compiler_manifest(directory.path(), |compiler| {
+            compiler["phaseRecords"][0]["acceptedCorpusDigest"] = json!(drift);
+        })?;
+
+        let error = verify_bootstrap_compiler(&manifest, directory.path()).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains(
+                "lexer acceptedCorpusDigest does not match checked-in inputs"
+            )
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_a_typecheck_fuzz_seed(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let error = compiler_fixture_error(|root| {
+            let fuzz = root.join("fuzz/corpus/typecheck");
+            fs::create_dir_all(&fuzz)?;
+            fs::write(fuzz.join("expression.json"), b"{}\n")?;
+            Ok(())
+        })?;
+
+        assert!(error.contains("typecheck-expression-kernel fuzz input root must remain absent"));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_accepted_corpus_content_drift(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let error = compiler_fixture_error(|root| {
+            let path = root.join("bootstrap/compiler/tests/lexer/accepted/keywords.ft");
+            let mut source = fs::read_to_string(&path)?;
+            source.push_str("// corpus drift\n");
+            fs::write(path, source)?;
+            Ok(())
+        })?;
+
+        assert!(error.contains("lexer acceptedCorpusDigest does not match checked-in inputs"));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_rejected_corpus_content_drift(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let error = compiler_fixture_error(|root| {
+            let path = root.join("bootstrap/compiler/tests/lexer/rejected/invalid-escapes.ft");
+            let mut source = fs::read_to_string(&path)?;
+            source.push_str("// corpus drift\n");
+            fs::write(path, source)?;
+            Ok(())
+        })?;
+
+        assert!(error.contains("lexer rejectedCorpusDigest does not match checked-in inputs"));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_fuzz_corpus_content_drift(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let error = compiler_fixture_error(|root| {
+            let path = root.join("fuzz/corpus/lexer/long-boundary.ft");
+            let mut source = fs::read_to_string(&path)?;
+            source.push_str("// fuzz drift\n");
+            fs::write(path, source)?;
+            Ok(())
+        })?;
+
+        assert!(error.contains("lexer fuzzSeedDigest does not match checked-in inputs"));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_a_phase_input_with_the_wrong_extension(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let error = compiler_fixture_error(|root| {
+            fs::rename(
+                root.join("bootstrap/compiler/tests/lexer/accepted/keywords.ft"),
+                root.join("bootstrap/compiler/tests/lexer/accepted/keywords.txt"),
+            )?;
+            Ok(())
+        })?;
+
+        assert!(error.contains("phase input entry must use .ft"));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_non_utf8_phase_input(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let error = compiler_fixture_error(|root| {
+            fs::write(
+                root.join("bootstrap/compiler/tests/lexer/accepted/keywords.ft"),
+                [0xff, 0xfe],
+            )?;
+            Ok(())
+        })?;
+
+        assert!(error.contains("phase input must be UTF-8"));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_a_phase_input_root_symlink(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use std::os::unix::fs::symlink;
+
+        let error = compiler_fixture_error(|root| {
+            let lexer = root.join("bootstrap/compiler/tests/lexer");
+            fs::rename(lexer.join("accepted"), lexer.join("accepted-target"))?;
+            symlink("accepted-target", lexer.join("accepted"))?;
+            Ok(())
+        })?;
+
+        assert!(error.contains("phase input directory must be a directory, not a symlink"));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_an_unbound_nested_phase_input(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let error = compiler_fixture_error(|root| {
+            let accepted = root.join("bootstrap/compiler/tests/lexer/accepted");
+            fs::create_dir(accepted.join("nested"))?;
+            fs::write(
+                accepted.join("nested/additional.ft"),
+                "function additional(): Unit {}\n",
+            )?;
+            Ok(())
+        })?;
+
+        assert!(error.contains("lexer acceptedCaseCount does not match checked-in inputs"));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_a_phase_input_directory_symlink(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use std::os::unix::fs::symlink;
+
+        let error = compiler_fixture_error(|root| {
+            let accepted = root.join("bootstrap/compiler/tests/lexer/accepted");
+            symlink(".", accepted.join("nested-link"))?;
+            Ok(())
+        })?;
+
+        assert!(error.contains("phase input entry must not be a symlink"));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_a_phase_input_file_symlink(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use std::os::unix::fs::symlink;
+
+        let error = compiler_fixture_error(|root| {
+            let accepted = root.join("bootstrap/compiler/tests/lexer/accepted");
+            fs::remove_file(accepted.join("keywords.ft"))?;
+            symlink("operators.ft", accepted.join("keywords.ft"))?;
+            Ok(())
+        })?;
+
+        assert!(error.contains("phase input entry must not be a symlink"));
+        Ok(())
+    }
+
+    #[test]
+    fn bootstrap_compiler_provenance_rejects_an_unbound_phase_entry(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let directory = TestDirectory::new()?;
+        let mut manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        let source = directory
+            .path()
+            .join("bootstrap/compiler/src/lexer_profile.ft");
+        fs::remove_file(source)?;
+        let compiler_path = directory
+            .path()
+            .join("bootstrap/compiler/bootstrap-compiler.json");
+        let mut compiler = read_json(&compiler_path)?;
+        compiler["sourceFiles"]
+            .as_array_mut()
+            .ok_or_else(|| std::io::Error::other("sourceFiles must be an array"))?
+            .retain(|entry| entry != "src/lexer_profile.ft");
+        refresh_fixture_digest(directory.path(), &mut manifest, &mut compiler)?;
+
+        let error = verify_bootstrap_compiler(&manifest, directory.path()).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains(
+                "compiler phase profileEntry is not bound by sourceFiles: src/lexer_profile.ft"
+            )
+        ));
+        Ok(())
+    }
+
+    #[test]
     fn compiler_tree_digest_binds_schema_roots_paths_and_contents(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
@@ -1787,7 +2332,7 @@ mod tests {
         let baseline_digest = compiler_tree_digest(&baseline, &compiler_root)?;
 
         let mut schema = original.clone();
-        schema["schemaVersion"] = json!(3);
+        schema["schemaVersion"] = json!(2);
         let schema_manifest: super::BootstrapCompilerManifest = serde_json::from_value(schema)?;
         assert_ne!(
             baseline_digest,
@@ -1824,7 +2369,7 @@ mod tests {
     }
 
     #[test]
-    fn compiler_tree_digest_matches_the_schema_two_fixed_vector(
+    fn compiler_tree_digest_matches_the_tree_v2_fixed_vector(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
         fs::create_dir(directory.path().join("src"))?;
@@ -1833,6 +2378,7 @@ mod tests {
             b"function main(): Unit {}\n",
         )?;
         let mut compiler: Value = serde_json::from_str(COMPILER)?;
+        compiler["schemaVersion"] = json!(2);
         compiler["sourceRoots"] = json!(["src"]);
         compiler["sourceFiles"] = json!(["src/main.ft"]);
         let compiler: super::BootstrapCompilerManifest = serde_json::from_value(compiler)?;
@@ -1845,10 +2391,55 @@ mod tests {
     }
 
     #[test]
+    fn phase_input_digest_matches_the_phase_inputs_v1_fixed_vector(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let directory = TestDirectory::new()?;
+        let root = directory.path().join("fixtures/accepted");
+        fs::create_dir_all(&root)?;
+        fs::write(root.join("z.ft"), b"function z(): Unit {}\n")?;
+        fs::write(root.join("a.ft"), b"function a(): Unit {}\n")?;
+        let spec = PhaseInputSpec {
+            root: Some("fixtures/accepted"),
+            extension: Some("ft"),
+            absent_root: None,
+            case_model: PhaseCaseModel::Files,
+        };
+
+        assert_eq!(
+            phase_input_observation(directory.path(), "fixture", "accepted", spec)?,
+            (
+                2,
+                "sha256:5d8eec01cfb530ff0a4d046d1cb14d3aac4ce5b8f4746033f1e09b4146d7e70f"
+                    .to_owned(),
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn typecheck_zero_fuzz_digest_matches_the_absent_input_fixed_vector(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(
+            phase_input_observation(
+                &workspace_root(),
+                "typecheck-expression-kernel",
+                "fuzz",
+                PHASE_SPECS[3].fuzz,
+            )?,
+            (
+                0,
+                "sha256:58a78ba5d24b522c8d580b44ebf75da0bcf0539c79a293ffb4c5c2d8a397804b"
+                    .to_owned(),
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
     fn bootstrap_compiler_provenance_rejects_an_undeclared_file_in_a_source_root(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
         fs::write(
             directory
                 .path()
@@ -1871,7 +2462,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_an_undeclared_source_root(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
         let source = directory
             .path()
             .join("bootstrap/compiler/lowering/lower.ft");
@@ -1891,7 +2482,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_unsorted_source_roots(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
         mutate_compiler_manifest(directory.path(), |compiler| {
             compiler["sourceRoots"] = json!(["typecheck", "src"]);
         })?;
@@ -1911,7 +2502,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_duplicate_source_roots(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
         mutate_compiler_manifest(directory.path(), |compiler| {
             compiler["sourceRoots"] = json!(["src", "src", "typecheck"]);
         })?;
@@ -1931,7 +2522,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_overlapping_source_roots(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
         mutate_compiler_manifest(directory.path(), |compiler| {
             compiler["sourceRoots"] = json!(["src", "src/nested", "typecheck"]);
         })?;
@@ -1961,7 +2552,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_non_portable_source_roots(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
         mutate_compiler_manifest(directory.path(), |compiler| {
             compiler["sourceRoots"] = json!(["../src", "typecheck"]);
         })?;
@@ -1981,7 +2572,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_unsorted_source_files(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
         mutate_compiler_manifest(directory.path(), |compiler| {
             if let Some(source_files) = compiler["sourceFiles"].as_array_mut() {
                 source_files.swap(0, 1);
@@ -2003,7 +2594,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_duplicate_source_files(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
         mutate_compiler_manifest(directory.path(), |compiler| {
             if let Some(sources) = compiler["sourceFiles"].as_array_mut() {
                 if let Some(first) = sources.first().cloned() {
@@ -2027,7 +2618,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_non_portable_source_files(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
         mutate_compiler_manifest(directory.path(), |compiler| {
             compiler["sourceFiles"][0] = json!("src\\lexer.ft");
         })?;
@@ -2047,7 +2638,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_invalid_utf8_source(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
         let source = directory
             .path()
             .join("bootstrap/compiler/typecheck/typecheck.ft");
@@ -2069,7 +2660,7 @@ mod tests {
         use std::os::unix::fs::symlink;
 
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
         let source = directory.path().join("bootstrap/compiler/src/lexer.ft");
         fs::remove_file(&source)?;
         symlink("sequence.ft", &source)?;
@@ -2176,7 +2767,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_source_drift() -> Result<(), Box<dyn std::error::Error>>
     {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
         let lexer = directory.path().join("bootstrap/compiler/src/lexer.ft");
         let mut source = fs::read_to_string(&lexer)?;
         source.push_str("// provenance drift\n");
@@ -2195,7 +2786,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_typecheck_source_drift(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
         let typecheck = directory
             .path()
             .join("bootstrap/compiler/typecheck/typecheck.ft");
@@ -2283,7 +2874,7 @@ function main(): Unit {
         mutate: impl FnOnce(&Path) -> Result<(), Box<dyn std::error::Error>>,
     ) -> Result<String, Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_two_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
         mutate(directory.path())?;
         match verify_bootstrap_compiler(&manifest, directory.path()) {
             Ok(()) => Err(std::io::Error::new(
@@ -2295,7 +2886,7 @@ function main(): Unit {
         }
     }
 
-    fn prepare_schema_two_compiler_fixture(
+    fn prepare_schema_three_compiler_fixture(
         destination: &Path,
     ) -> Result<super::BootstrapManifest, Box<dyn std::error::Error>> {
         copy_bootstrap_compiler_fixture(destination)?;
@@ -2343,6 +2934,7 @@ function main(): Unit {
     fn copy_bootstrap_compiler_fixture(destination: &Path) -> Result<(), std::io::Error> {
         for relative in [
             "bootstrap/compiler",
+            "fuzz/corpus/lexer",
             "fuzz/corpus/parser",
             "fuzz/corpus/resolver",
         ] {

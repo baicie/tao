@@ -5,22 +5,23 @@ start Futao self-hosting. It records the exact `nexac 0.0.1` commit, canonical
 Git archive and `Cargo.lock` SHA-256 digests, Rust 1.80 toolchain, and locked
 release build recipe.
 
-Futao bootstrap compiler source version `0.0.3` uses compiler manifest schema 2.
+Futao bootstrap compiler source version `0.0.3` uses compiler manifest schema 3.
 The manifest recursively binds the declared `src` and `typecheck` source roots,
-their sorted `.ft` files, and the source-tree digest. It also records three
-snapshot schemas, the 11-case lexer, 21-case parser, and 6-case resolver
-differential corpora, implemented `lexer`, `parser`, and `resolver` phases, and
-the Rust-reference default-path boundary. The Stage 0 schema 2 contract repeats
-the compiler manifest schema, source roots, digest, and phase values and rejects
-any mismatch.
+their sorted `.ft` files, and the source-tree digest. Ordered phase records bind
+the lexer, parser, resolver, and historical typecheck expression kernel profile
+and driver entries, observation and protocol schemas, accepted and rejected
+corpora, fuzz seeds, and nullable target-layout descriptor. The compiler still
+implements only `lexer`, `parser`, and `resolver`; Rust remains the default
+implementation. The Stage 0 schema 3 contract repeats the compiler manifest
+schema, source roots, digest, and phase records and rejects any mismatch.
 
 The compiler source tree digest for this milestone is:
 
 ```text
-sha256:1982421cdc786e056ca420aad0cc0410b3d790253391e7ced4d4f605d9c8da10
+sha256:93336b05e9779f97c3c5c04cbfb64a1b711e178a580915de24141ff397eede84
 ```
 
-Schema 2 computes that digest over the following byte sequence, where
+TREE-V2 computes that digest over the following byte sequence, where
 `frame(bytes) = u64be(bytes.length) || bytes` and every count is encoded as
 unsigned big-endian bytes before framing:
 
@@ -38,6 +39,33 @@ SHA256(
 
 Paths are normalized portable relative paths. File contents participate as
 checked in, including line endings; the digest performs no text normalization.
+
+Each phase-input digest uses the same framing and the following independent
+domain. Resolver accepted and rejected directories each count as one source
+graph and must contain `main.ft`; other present inputs count one case per file.
+The typecheck expression kernel's absent fuzz corpus binds an empty root, zero
+cases, zero files, and the digest of that explicit empty observation. The
+reserved `fuzz/corpus/typecheck` path must remain absent, so adding a future seed
+cannot bypass a manifest update.
+
+```text
+SHA256(
+  "FUTAO-BOOTSTRAP-PHASE-INPUTS-V1\0"
+  || frame(UTF-8 phase name)
+  || frame(UTF-8 category: accepted | rejected | fuzz)
+  || frame(UTF-8 declared root, or empty when absent)
+  || frame(u64be(case count))
+  || frame(u64be(file count))
+  || each file as frame(UTF-8 root-relative path)
+                  || frame(raw UTF-8 contents),
+     sorted by portable root-relative path
+)
+```
+
+Corpus roots and intermediate directories must be real directories rather than
+symlinks. Inputs are discovered recursively; every leaf must be a regular UTF-8
+file with the declared extension and a unique portable root-relative path,
+including on case-insensitive file systems.
 
 Validate the manifest, referenced bootstrap inputs, Git objects, and digests:
 
