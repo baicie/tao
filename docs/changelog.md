@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased (Futao 0.0.10 Type Checker Kernel)
+
+- Added the first executable Futao type-checker expression kernel for primitive
+  inference, operators, conditionals, and return checks.
+- Froze `FUTAO-TYPECHECK-1` schema 1 with strict accepted/rejected fixtures and
+  source-aware `E3001` through `E3003` diagnostics.
+- Kept generic substitution, match coverage, ownership, and the Rust default
+  path deferred to later `0.0.10` slices.
+
 ## Compiler Package 0.0.9 (Futao Resolver Differential)
 
 - Added the third executable Futao-written compiler phase: deterministic module

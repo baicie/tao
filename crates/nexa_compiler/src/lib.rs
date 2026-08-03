@@ -10,6 +10,7 @@ mod nir_lower;
 mod parser_differential;
 mod resolver_differential;
 mod session;
+mod typecheck_differential;
 
 use std::collections::{HashMap, HashSet};
 
@@ -58,6 +59,13 @@ pub use resolver_differential::{
     RESOLVER_SNAPSHOT_SCHEMA_VERSION,
 };
 pub use session::{CompilerSession, ImportEdge, SessionBuildError, SessionModule};
+pub use typecheck_differential::{
+    FutaoTypeCheckerAdapter, RustTypeCheckerAdapter, TypecheckAdapter, TypecheckAdapterError,
+    TypecheckDiagnosticSnapshot, TypecheckDifferentialHarness, TypecheckDifferentialOutcome,
+    TypecheckDifferentialReport, TypecheckImplementation, TypecheckInput, TypecheckNode,
+    TypecheckNodeKind, TypecheckObservable, TypecheckSnapshot, TypecheckSpan, TypecheckType,
+    TYPECHECK_SNAPSHOT_SCHEMA_VERSION,
+};
 
 /// The result of checking one Nexa source file.
 #[derive(Debug, Clone, PartialEq, Eq)]

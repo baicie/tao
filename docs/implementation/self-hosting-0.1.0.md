@@ -26,7 +26,7 @@ Accepted 状态解释为对应实现已经存在。
 * `0.0.7` 已交付真实 Futao Lexer、UTF-8 snapshot schema 与无差异 corpus/fuzz gate。
 * `0.0.8` 已交付真实 Futao Parser、lossless CST/recovery snapshot schema 与无差异 corpus/fuzz gate。
 * `0.0.9` 已交付真实 Futao Resolver、resolver snapshot schema、模块图/作用域/名称可观察合同与无差异 corpus/fuzz gate。
-* 下一里程碑：`0.0.10` Futao Type Checker differential。
+* 当前里程碑：`0.0.10` Futao Type Checker differential 首个 expression-kernel slice。
 
 ## 关键依赖
 
@@ -214,6 +214,13 @@ bindings、names 和 diagnostics 六类 observable；accepted/rejected 图与 4 
 `FUTAO-RESOLVER-1` 协议、双侧快照保留、source-aware runtime failure、snapshot validation
 和双侧 SHA-256 digest 均 fail closed。Rust Resolver 仍为默认路径。详细合同见
 [`futao-resolver-differential-0.0.9.md`](futao-resolver-differential-0.0.9.md)。
+
+`0.0.10` 首个 slice 已实现：Rust/Futao adapter 以 schema 1 比较已解析、带稳定 source
+span 的表达式表，覆盖 `Int`、`Bool`、`String`、`Unit`、一元/二元运算、条件表达式和
+return 检查，并 fail closed 验证 `E3001`、`E3002`、`E3003`。accepted/rejected 两个
+fixture 均零差异；泛型替换、match exhaustiveness、ownership 和 mutable capture 仍是
+后续 `0.0.10` slices。详细合同见
+[`futao-type-checker-0.0.10.md`](futao-type-checker-0.0.10.md)。
 
 Phase B5 的 parser scalability 前置已实现：chunked persistent sequence 取代大数组逐项
 复制，固定顺序叶批处理避免多个分治 runner 叠加越过 64 层调用限制；独立 release gate

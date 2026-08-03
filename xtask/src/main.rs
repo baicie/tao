@@ -6,6 +6,7 @@ mod conformance;
 mod lexer_differential;
 mod parser_differential;
 mod resolver_differential;
+mod typecheck_differential;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -67,6 +68,8 @@ enum Task {
     ParserDifferential,
     /// Compare the Rust and Futao resolvers over the checked-in graph corpus.
     ResolverDifferential,
+    /// Compare the Rust and Futao type checkers over the expression corpus.
+    TypecheckDifferential,
 }
 
 fn main() -> Result<()> {
@@ -103,6 +106,7 @@ fn main() -> Result<()> {
         Task::LexerDifferential => lexer_differential::run()?,
         Task::ParserDifferential => parser_differential::run()?,
         Task::ResolverDifferential => resolver_differential::run()?,
+        Task::TypecheckDifferential => typecheck_differential::run()?,
     }
 
     Ok(())
@@ -117,7 +121,7 @@ fn check() -> Result<()> {
     bootstrap_profile::run()?;
     lexer_differential::run()?;
     parser_differential::run()?;
-    resolver_differential::run()
+    resolver_differential::run().and_then(|_| typecheck_differential::run())
 }
 
 fn lint() -> Result<()> {

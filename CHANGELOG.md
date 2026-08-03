@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased - Futao 0.0.10 Type Checker Kernel
+
+- Add the first Futao type-checker expression kernel for primitive inference,
+  operators, conditionals, and return checks.
+- Freeze `FUTAO-TYPECHECK-1` schema 1 with strict accepted/rejected differential
+  fixtures and `E3001` through `E3003` diagnostics.
+
 ## 0.0.9 - 2026-08-03
 
 - Add the third executable Futao-written compiler phase: deterministic module
