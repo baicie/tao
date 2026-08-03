@@ -211,11 +211,11 @@ jobs:
         env:
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
         run: |
-          $host = ((rustc -vV | Select-String '^host:').ToString().Split(':', 2)[1]).Trim()
+          $targetTriple = ((rustc -vV | Select-String '^host:').ToString().Split(':', 2)[1]).Trim()
           ./scripts/package-msi.ps1 `
             -Version $env:RELEASE_VERSION `
             -Binary 'target/release/nexac.exe' `
-            -Output "dist/nexac-$env:RELEASE_VERSION-$host.msi"
+            -Output "dist/nexac-$env:RELEASE_VERSION-$targetTriple.msi"
 
       - name: Verify native installer
         shell: bash
