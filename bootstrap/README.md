@@ -5,17 +5,19 @@ start Futao self-hosting. It records the exact `nexac 0.0.1` commit, canonical
 Git archive and `Cargo.lock` SHA-256 digests, Rust 1.80 toolchain, and locked
 release build recipe.
 
-Milestone `0.0.9` binds Futao bootstrap compiler source version `0.0.3`. Its
-manifest records the lexer, parser, and resolver source files, the source-tree
-digest, three snapshot schemas, the 11-case lexer, 21-case parser, and 6-case
-resolver differential corpora, implemented `lexer`, `parser`, and `resolver`
-phases, and the Rust-reference default-path boundary. The top-level contract
-repeats these values and rejects any mismatch.
+Futao bootstrap compiler source version `0.0.3` uses compiler manifest schema 2.
+The manifest recursively binds the declared `src` and `typecheck` source roots,
+their sorted `.ft` files, and the source-tree digest. It also records three
+snapshot schemas, the 11-case lexer, 21-case parser, and 6-case resolver
+differential corpora, implemented `lexer`, `parser`, and `resolver` phases, and
+the Rust-reference default-path boundary. The Stage 0 schema 2 contract repeats
+the compiler manifest schema, source roots, digest, and phase values and rejects
+any mismatch.
 
 The compiler source tree digest for this milestone is:
 
 ```text
-sha256:085e030264fd56e3232ce0fcef480dc2b3f0fe79bb41d8bb7b7823d2a026ded8
+sha256:1982421cdc786e056ca420aad0cc0410b3d790253391e7ced4d4f605d9c8da10
 ```
 
 Validate the manifest, referenced bootstrap inputs, Git objects, and digests:

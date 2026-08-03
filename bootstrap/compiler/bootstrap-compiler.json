@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "name": "futao-bootstrap-compiler",
   "version": "0.0.3",
   "toolchainVersion": "0.0.10",
@@ -7,6 +7,7 @@
   "profileEntry": "src/resolver_profile.ft",
   "driverEntry": "src/resolver_driver.ft",
   "implementedPhases": ["lexer", "parser", "resolver"],
+  "sourceRoots": ["src", "typecheck"],
   "sourceFiles": [
     "src/lexer.ft",
     "src/lexer_bridge.ft",
@@ -20,10 +21,14 @@
     "src/resolver_bridge.ft",
     "src/resolver_driver.ft",
     "src/resolver_profile.ft",
-    "src/sequence.ft"
+    "src/sequence.ft",
+    "typecheck/typecheck.ft",
+    "typecheck/typecheck_bridge.ft",
+    "typecheck/typecheck_driver.ft",
+    "typecheck/typecheck_profile.ft"
   ],
   "treeHashAlgorithm": "sha256",
-  "treeDigest": "sha256:085e030264fd56e3232ce0fcef480dc2b3f0fe79bb41d8bb7b7823d2a026ded8",
+  "treeDigest": "sha256:1982421cdc786e056ca420aad0cc0410b3d790253391e7ced4d4f605d9c8da10",
   "lexerSnapshotSchemaVersion": 1,
   "differentialCorpus": {
     "accepted": 4,
