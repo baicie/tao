@@ -213,7 +213,8 @@ bindings、names 和 diagnostics 六类 observable；accepted/rejected 图与 4 
 共 6 个 case 全部由 Rust/Futao 真实 adapter 执行且零差异。严格
 `FUTAO-RESOLVER-2` 协议、双侧快照保留、source-aware runtime failure、snapshot validation
 和双侧 SHA-256 digest 均 fail closed；未知 enum tag 不再回退成合法 observable，owner-local
-child identity 必须连续且 payload 必须引用已声明 variant。Rust Resolver 仍为默认路径。详细合同见
+child identity 与声明 span 必须匹配 lowered source declaration contract，payload owner 也必须是
+源码中声明的 variant。Rust Resolver 仍为默认路径。详细合同见
 [`futao-resolver-differential-0.0.9.md`](futao-resolver-differential-0.0.9.md)。
 
 `0.0.10` 首个 slice 已实现并完成合同收口：Rust/Futao adapter 以 schema 1 比较已解析、

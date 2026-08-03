@@ -15,7 +15,7 @@ repeats these values and rejects any mismatch.
 The compiler source tree digest for this milestone is:
 
 ```text
-sha256:0a84ac381ace43b4d7be650f1082aedd1bfc92c10002b50d2d6b223fef6b7ebc
+sha256:085e030264fd56e3232ce0fcef480dc2b3f0fe79bb41d8bb7b7823d2a026ded8
 ```
 
 Validate the manifest, referenced bootstrap inputs, Git objects, and digests:

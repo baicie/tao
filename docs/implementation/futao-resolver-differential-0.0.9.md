@@ -47,9 +47,12 @@ Module ids, symbol ids, scope ids, binding ids, and name ids are assigned from
 canonical source and traversal order, never from hash-map iteration or the order
 in which the caller supplied equivalent source collections. All spans use stable
 source ordinals and UTF-8 byte offsets. Diagnostics preserve source order and
-include deterministic cycle witnesses. Owner-local child identities for record
-fields, union variants, named payloads, and type parameters use contiguous
-indices; payloads must reference a declared variant identity.
+include deterministic cycle witnesses. The Host derives owner-local child
+identities and declaration spans from lowered source declarations; every record
+field, union variant, named payload, and type-parameter target must match that
+contract. This rejects undeclared contiguous indices as well as gaps, and makes
+payload ownership depend on a source-declared variant rather than another
+observed reference.
 
 The snapshot compares six observables independently: module graph, symbols,
 scopes, bindings, resolved names, and diagnostics. A difference in any one is a

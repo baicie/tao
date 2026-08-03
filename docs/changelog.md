@@ -25,8 +25,8 @@
 - Bound resolver source, protocol, schema, corpus counts, and tree digest into
   the Stage 0 bootstrap contract; malformed output and mismatches fail closed.
 - Hardened resolver fail-closed behavior: unknown internal enum values now emit
-  invalid tags, and snapshot validation rejects discontinuous child identities
-  or payloads without a declared variant target.
+  invalid tags, and snapshot validation rejects child identities or declaration
+  spans absent from the lowered source-declaration contract.
 - Kept the Rust resolver as the default path until type checking, lowering, and
   the ADR-011 self-hosting gate are complete.
 
