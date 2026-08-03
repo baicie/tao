@@ -37,6 +37,7 @@
 
 mod allocator;
 mod arena;
+mod boxed;
 mod collections;
 mod layout;
 mod ownership;
@@ -47,6 +48,7 @@ pub use allocator::{
     AllocationError, AllocationErrorKind, AllocationLease, AllocatorId, StorageAllocator,
 };
 pub use arena::{ArenaAccessError, ArenaHandle, ArenaResetError, DropArena, PlainArena};
+pub use boxed::{StorageBox, StorageBoxError};
 pub use collections::{
     BitSet, BitSetError, DeterministicMap, DeterministicSet, IntMap, IntSet, InternError,
     InternTable, MapCapacityError, SetCapacityError, StringMap, StringSet, SymbolId,
