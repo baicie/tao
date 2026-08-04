@@ -261,6 +261,12 @@ pub struct SourceMap {
 }
 
 impl SourceMap {
+    /// Returns source files in stable registration order.
+    #[must_use]
+    pub fn files(&self) -> &[SourceFile] {
+        &self.files
+    }
+
     /// Registers source text under a path and returns its new file identifier.
     ///
     /// # Errors
@@ -463,6 +469,14 @@ mod tests {
         assert_eq!(
             sources.file(second).map(|file| file.path()),
             Some("second.nexa".as_ref())
+        );
+        assert_eq!(
+            sources
+                .files()
+                .iter()
+                .map(|file| file.path())
+                .collect::<Vec<_>>(),
+            [Path::new("first.nexa"), Path::new("second.nexa")]
         );
 
         Ok(())

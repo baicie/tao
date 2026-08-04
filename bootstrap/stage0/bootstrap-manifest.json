@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "toolchainVersion": "0.0.10",
   "languageVersion": "1.0",
   "stage0": {
@@ -35,9 +35,9 @@
     "version": "0.0.3",
     "profile": "futao-bootstrap-v1",
     "manifest": "bootstrap/compiler/bootstrap-compiler.json",
-    "manifestSchemaVersion": 3,
+    "manifestSchemaVersion": 4,
     "sourceRoots": ["src", "typecheck"],
-    "treeDigest": "sha256:93336b05e9779f97c3c5c04cbfb64a1b711e178a580915de24141ff397eede84",
+    "treeDigest": "sha256:15e4eafa43625e26ae03af2b14d5bd02c94d4239d08fbc3a6ce0cd6bcbea3465",
     "implementedPhases": ["lexer", "parser", "resolver"],
     "phaseRecords": [
       {
@@ -97,6 +97,8 @@
         "targetLayoutDescriptor": null
       }
     ],
+    "candidateImplementation": "futao-bootstrap-candidate",
+    "candidateObservationSchemaVersion": 1,
     "defaultImplementation": "rust-reference"
   },
   "bootstrapOutput": {

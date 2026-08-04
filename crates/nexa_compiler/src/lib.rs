@@ -2,6 +2,7 @@
 //! Compiler-driver entry points for the Nexa language front end.
 
 mod bootstrap_profile;
+mod candidate_observation;
 mod canonical;
 mod core;
 mod differential;
@@ -23,6 +24,18 @@ use nexa_mir::{lower as lower_mir, run_with_args as run_mir_with_args, Execution
 use nexa_parser::parse_source;
 use nexa_span::FileId;
 
+pub use candidate_observation::{
+    CandidateCompilationStatus, CandidateDiagnosticObservation, CandidateLabelObservation,
+    CandidateObservation, CandidateObservationError, CandidateObservationErrorCode,
+    CandidatePhaseStatus, CompilerArtifactObservation, CompilerImplementation, CompilerObservation,
+    CompilerSourceObservation, CANDIDATE_OBSERVATION_MAX_BYTES,
+    CANDIDATE_OBSERVATION_MAX_DIAGNOSTICS, CANDIDATE_OBSERVATION_MAX_JSON_DEPTH,
+    CANDIDATE_OBSERVATION_MAX_LABELS_PER_DIAGNOSTIC, CANDIDATE_OBSERVATION_MAX_MESSAGE_BYTES,
+    CANDIDATE_OBSERVATION_MAX_SOURCES, CANDIDATE_OBSERVATION_MAX_SOURCE_BYTES,
+    CANDIDATE_OBSERVATION_MAX_SOURCE_IDENTITY_BYTES, CANDIDATE_OBSERVATION_MAX_TOTAL_LABELS,
+    CANDIDATE_OBSERVATION_MAX_TOTAL_SOURCE_BYTES, CANDIDATE_OBSERVATION_SCHEMA_VERSION,
+    CANDIDATE_PHASE_CONTENT_MAX_BYTES, FUTAO_BOOTSTRAP_CANDIDATE_IMPLEMENTATION,
+};
 pub use core::{
     compile, compile_session, CanonicalArtifact, CanonicalArtifactState, CanonicalArtifactStatus,
     CanonicalDiagnostic, CanonicalDumps, CanonicalLabel, CanonicalLabelStyle, CanonicalPhase,
@@ -30,9 +43,9 @@ pub use core::{
     CompilerProfile, CompilerSource, LanguageVersion, CANONICAL_DUMP_SCHEMA_VERSION,
 };
 pub use differential::{
-    CompilerAdapter, CompilerAdapterState, CompilerImplementation, DifferenceClassification,
-    DifferentialHarness, DifferentialIssue, DifferentialIssueKind, DifferentialOutcome,
-    DifferentialReport, RustReferenceCompiler,
+    CompilerAdapter, CompilerAdapterState, DifferenceClassification, DifferentialHarness,
+    DifferentialIssue, DifferentialIssueKind, DifferentialOutcome, DifferentialReport,
+    RustReferenceCompiler,
 };
 pub use lexer_differential::{
     FutaoLexerAdapter, LexerAdapter, LexerAdapterError, LexerDiagnosticSnapshot, LexerDifference,

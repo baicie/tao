@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "name": "futao-bootstrap-compiler",
   "version": "0.0.3",
   "toolchainVersion": "0.0.10",
@@ -26,7 +26,7 @@
     "typecheck/typecheck_profile.ft"
   ],
   "treeHashAlgorithm": "sha256",
-  "treeDigest": "sha256:93336b05e9779f97c3c5c04cbfb64a1b711e178a580915de24141ff397eede84",
+  "treeDigest": "sha256:15e4eafa43625e26ae03af2b14d5bd02c94d4239d08fbc3a6ce0cd6bcbea3465",
   "phaseRecords": [
     {
       "name": "lexer",
@@ -85,5 +85,7 @@
       "targetLayoutDescriptor": null
     }
   ],
+  "candidateImplementation": "futao-bootstrap-candidate",
+  "candidateObservationSchemaVersion": 1,
   "defaultImplementation": "rust-reference"
 }

@@ -4,27 +4,10 @@ use std::fmt::{Debug, Formatter};
 
 use sha2::{Digest, Sha256};
 
-use crate::{compile, CanonicalPhase, CompileError, CompilerInput, CompilerOutput};
-
-/// Identifies one compiler implementation participating in differential tests.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CompilerImplementation {
-    /// The Rust Stage 0 reference compiler.
-    RustReference,
-    /// The self-hosted Futao compiler.
-    Futao,
-}
-
-impl CompilerImplementation {
-    /// Returns the manifest spelling of this implementation.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::RustReference => "rust-reference",
-            Self::Futao => "futao-self-hosted",
-        }
-    }
-}
+use crate::{
+    compile, CanonicalPhase, CompileError, CompilerImplementation, CompilerInput,
+    CompilerObservation,
+};
 
 /// Compiles one explicit input into canonical, structured output.
 ///
@@ -40,7 +23,7 @@ pub trait CompilerAdapter {
     /// # Errors
     ///
     /// Returns [`CompileError`] when the input contract cannot be satisfied.
-    fn compile(&self, input: &CompilerInput) -> Result<CompilerOutput, CompileError>;
+    fn compile(&self, input: &CompilerInput) -> Result<CompilerObservation, CompileError>;
 }
 
 /// Adapter for the real Rust reference compiler.
@@ -52,8 +35,9 @@ impl CompilerAdapter for RustReferenceCompiler {
         CompilerImplementation::RustReference
     }
 
-    fn compile(&self, input: &CompilerInput) -> Result<CompilerOutput, CompileError> {
-        compile(input)
+    fn compile(&self, input: &CompilerInput) -> Result<CompilerObservation, CompileError> {
+        let output = compile(input)?;
+        CompilerObservation::from_rust_output(input, &output)
     }
 }
 
@@ -426,12 +410,15 @@ impl<'a> DifferentialHarness<'a> {
 
         let reference_output = reference.compile(input)?;
         let candidate_output = candidate.compile(input)?;
+        validate_adapter_identity(*reference, &reference_output)?;
+        validate_adapter_identity(*candidate, &candidate_output)?;
+        validate_observation_contract(&reference_output, &candidate_output)?;
         let issues = CanonicalPhase::ALL
             .iter()
             .copied()
             .filter_map(|phase| {
-                let reference = reference_output.dumps().artifact(phase);
-                let candidate = candidate_output.dumps().artifact(phase);
+                let reference = reference_output.artifact(phase);
+                let candidate = candidate_output.artifact(phase);
                 (reference != candidate).then_some((phase, reference, candidate))
             })
             .map(|(phase, reference, candidate)| {
@@ -475,7 +462,48 @@ impl<'a> DifferentialHarness<'a> {
     }
 }
 
-fn artifact_digest(artifact: &crate::CanonicalArtifact) -> Result<String, CompileError> {
+fn validate_adapter_identity(
+    adapter: &dyn CompilerAdapter,
+    observation: &CompilerObservation,
+) -> Result<(), CompileError> {
+    let declared = adapter.implementation();
+    let observed = observation.implementation();
+    if declared != observed {
+        return Err(CompileError::AdapterIdentityMismatch {
+            declared: declared.as_str(),
+            observed: observed.as_str(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_observation_contract(
+    reference: &CompilerObservation,
+    candidate: &CompilerObservation,
+) -> Result<(), CompileError> {
+    for (field, matches) in [
+        (
+            "schemaVersion",
+            reference.schema_version() == candidate.schema_version(),
+        ),
+        (
+            "languageVersion",
+            reference.language_version() == candidate.language_version(),
+        ),
+        (
+            "compilationProfile",
+            reference.compilation_profile() == candidate.compilation_profile(),
+        ),
+        ("sources", reference.sources() == candidate.sources()),
+    ] {
+        if !matches {
+            return Err(CompileError::AdapterObservationMismatch { field });
+        }
+    }
+    Ok(())
+}
+
+fn artifact_digest(artifact: &crate::CompilerArtifactObservation) -> Result<String, CompileError> {
     let encoded = serde_json::to_vec(artifact)?;
     Ok(format!("sha256:{:x}", Sha256::digest(encoded)))
 }
