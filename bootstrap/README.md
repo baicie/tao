@@ -5,20 +5,32 @@ start Futao self-hosting. It records the exact `nexac 0.0.1` commit, canonical
 Git archive and `Cargo.lock` SHA-256 digests, Rust 1.80 toolchain, and locked
 release build recipe.
 
-Futao bootstrap compiler source version `0.0.3` uses compiler manifest schema 3.
+Futao bootstrap compiler source version `0.0.3` uses compiler manifest schema 4.
 The manifest recursively binds the declared `src` and `typecheck` source roots,
 their sorted `.ft` files, and the source-tree digest. Ordered phase records bind
 the lexer, parser, resolver, and historical typecheck expression kernel profile
 and driver entries, observation and protocol schemas, accepted and rejected
 corpora, fuzz seeds, and nullable target-layout descriptor. The compiler still
 implements only `lexer`, `parser`, and `resolver`; Rust remains the default
-implementation. The Stage 0 schema 3 contract repeats the compiler manifest
-schema, source roots, digest, and phase records and rejects any mismatch.
+implementation. Schema 4 also binds candidate identity
+`futao-bootstrap-candidate` and complete observation schema 1; the reserved
+`futao-self-hosted` identity remains unavailable before Stage 1. The Stage 0
+schema 4 contract repeats the compiler manifest schema, source roots, digest,
+phase records, candidate identity, and observation schema and rejects any
+mismatch.
+
+Candidate observation schema 1 is a compare-only transport boundary. It binds
+the complete explicit source table and bytes, structured diagnostics, fixed
+phase order, state transitions, JSON envelopes, and resource ceilings. Token
+and CST tables are validated against source bytes, spans, syntax-kind classes,
+and each other. HIR, MIR, and NIR bodies remain opaque canonical bytes until
+their separately versioned strict validators construct verified phase values
+in later slices.
 
 The compiler source tree digest for this milestone is:
 
 ```text
-sha256:93336b05e9779f97c3c5c04cbfb64a1b711e178a580915de24141ff397eede84
+sha256:15e4eafa43625e26ae03af2b14d5bd02c94d4239d08fbc3a6ce0cd6bcbea3465
 ```
 
 TREE-V2 computes that digest over the following byte sequence, where

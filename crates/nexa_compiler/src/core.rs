@@ -235,6 +235,29 @@ pub enum CompileError {
     /// A source byte offset exceeded the canonical 32-bit span contract.
     #[error("source byte offset exceeded the canonical u32 range")]
     CanonicalOffsetOverflow,
+    /// Untrusted candidate output failed the strict observation boundary.
+    #[error(transparent)]
+    CandidateObservation(#[from] crate::candidate_observation::CandidateObservationError),
+    /// An adapter returned an observation carrying another implementation identity.
+    #[error("compiler adapter `{declared}` returned an `{observed}` observation")]
+    AdapterIdentityMismatch {
+        /// The implementation identity declared by the adapter.
+        declared: &'static str,
+        /// The immutable identity carried by the returned observation.
+        observed: &'static str,
+    },
+    /// Trusted output could not be bound back to the explicit adapter input.
+    #[error("compiler observation input mismatch: {message}")]
+    ObservationInputMismatch {
+        /// Deterministic context describing the inconsistent source binding.
+        message: String,
+    },
+    /// Two adapters returned observations with incompatible protocol metadata.
+    #[error("compiler observations disagree on validated `{field}`")]
+    AdapterObservationMismatch {
+        /// The observation field that differed before phase comparison.
+        field: &'static str,
+    },
 }
 
 /// A compiler phase represented in the differential output contract.

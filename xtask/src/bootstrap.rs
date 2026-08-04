@@ -5,6 +5,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::{bail, ensure, Context, Result};
 use nexa_compiler::{
+    CANDIDATE_OBSERVATION_SCHEMA_VERSION, FUTAO_BOOTSTRAP_CANDIDATE_IMPLEMENTATION,
     LEXER_SNAPSHOT_SCHEMA_VERSION, PARSER_SNAPSHOT_SCHEMA_VERSION,
     RESOLVER_SNAPSHOT_SCHEMA_VERSION, TYPECHECK_SNAPSHOT_SCHEMA_VERSION,
 };
@@ -89,6 +90,8 @@ struct BootstrapCompiler {
     tree_digest: String,
     implemented_phases: Vec<String>,
     phase_records: Vec<PhaseRecord>,
+    candidate_implementation: String,
+    candidate_observation_schema_version: u32,
     default_implementation: String,
 }
 
@@ -106,6 +109,8 @@ struct BootstrapCompilerManifest {
     tree_hash_algorithm: String,
     tree_digest: String,
     phase_records: Vec<PhaseRecord>,
+    candidate_implementation: String,
+    candidate_observation_schema_version: u32,
     default_implementation: String,
 }
 
@@ -291,7 +296,7 @@ fn parse_manifest(text: &str) -> Result<BootstrapManifest> {
 
 impl BootstrapManifest {
     fn validate(&self) -> Result<()> {
-        ensure!(self.schema_version == 3, "schemaVersion must be 3");
+        ensure!(self.schema_version == 4, "schemaVersion must be 4");
         expect(
             "toolchainVersion",
             &self.toolchain_version,
@@ -392,8 +397,8 @@ impl BootstrapManifest {
             "bootstrap/compiler/bootstrap-compiler.json",
         )?;
         ensure!(
-            self.bootstrap_compiler.manifest_schema_version == 3,
-            "bootstrapCompiler.manifestSchemaVersion must be 3"
+            self.bootstrap_compiler.manifest_schema_version == 4,
+            "bootstrapCompiler.manifestSchemaVersion must be 4"
         );
         ensure!(
             self.bootstrap_compiler.source_roots == ["src", "typecheck"],
@@ -408,6 +413,17 @@ impl BootstrapManifest {
             "bootstrapCompiler.implementedPhases must contain lexer, parser, then resolver"
         );
         validate_phase_record_shape(&self.bootstrap_compiler.phase_records)?;
+        expect(
+            "bootstrapCompiler.candidateImplementation",
+            &self.bootstrap_compiler.candidate_implementation,
+            FUTAO_BOOTSTRAP_CANDIDATE_IMPLEMENTATION,
+        )?;
+        ensure!(
+            self.bootstrap_compiler
+                .candidate_observation_schema_version
+                == CANDIDATE_OBSERVATION_SCHEMA_VERSION,
+            "bootstrapCompiler.candidateObservationSchemaVersion must be {CANDIDATE_OBSERVATION_SCHEMA_VERSION}"
+        );
         expect(
             "bootstrapCompiler.defaultImplementation",
             &self.bootstrap_compiler.default_implementation,
@@ -631,6 +647,18 @@ fn verify_bootstrap_compiler(manifest: &BootstrapManifest, root: &Path) -> Resul
             record.driver_entry
         );
     }
+    expect(
+        "compiler.candidateImplementation",
+        &compiler.candidate_implementation,
+        &manifest.bootstrap_compiler.candidate_implementation,
+    )?;
+    ensure!(
+        compiler.candidate_observation_schema_version
+            == manifest
+                .bootstrap_compiler
+                .candidate_observation_schema_version,
+        "compiler candidateObservationSchemaVersion does not match the top-level contract"
+    );
     expect(
         "compiler.defaultImplementation",
         &compiler.default_implementation,
@@ -1636,7 +1664,7 @@ mod tests {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let manifest = parse_manifest(ACCEPTED)?;
 
-        assert_eq!(manifest.schema_version, 3);
+        assert_eq!(manifest.schema_version, 4);
         assert_eq!(manifest.stage0.compiler_version, "0.0.1");
         assert_eq!(manifest.bootstrap_profile.id, "futao-bootstrap-v1");
         assert_eq!(
@@ -1657,7 +1685,7 @@ mod tests {
         assert_eq!(manifest.bootstrap_compiler.status, "resolver-differential");
         assert_eq!(manifest.bootstrap_compiler.version, "0.0.3");
         assert_eq!(manifest.bootstrap_compiler.profile, "futao-bootstrap-v1");
-        assert_eq!(manifest.bootstrap_compiler.manifest_schema_version, 3);
+        assert_eq!(manifest.bootstrap_compiler.manifest_schema_version, 4);
         assert_eq!(
             manifest.bootstrap_compiler.source_roots,
             ["src", "typecheck"]
@@ -1668,9 +1696,19 @@ mod tests {
         );
         assert_eq!(
             manifest.bootstrap_compiler.tree_digest,
-            "sha256:93336b05e9779f97c3c5c04cbfb64a1b711e178a580915de24141ff397eede84"
+            "sha256:15e4eafa43625e26ae03af2b14d5bd02c94d4239d08fbc3a6ce0cd6bcbea3465"
         );
         assert_eq!(manifest.bootstrap_compiler.phase_records.len(), 4);
+        assert_eq!(
+            manifest.bootstrap_compiler.candidate_implementation,
+            "futao-bootstrap-candidate"
+        );
+        assert_eq!(
+            manifest
+                .bootstrap_compiler
+                .candidate_observation_schema_version,
+            1
+        );
         assert_eq!(
             manifest.bootstrap_compiler.default_implementation,
             "rust-reference"
@@ -1705,7 +1743,7 @@ mod tests {
         let stage0 = parse_manifest(ACCEPTED)?;
         let compiler: super::BootstrapCompilerManifest = serde_json::from_str(COMPILER)?;
 
-        assert_eq!(compiler.schema_version, 3);
+        assert_eq!(compiler.schema_version, 4);
         assert_eq!(compiler.source_roots, ["src", "typecheck"]);
         assert_eq!(
             compiler.source_files,
@@ -1747,12 +1785,25 @@ mod tests {
         let compiler: Value = serde_json::from_str(COMPILER)?;
         let stage0: Value = serde_json::from_str(ACCEPTED)?;
 
-        assert_eq!(compiler["schemaVersion"], json!(3));
-        assert_eq!(stage0["schemaVersion"], json!(3));
+        assert_eq!(compiler["schemaVersion"], json!(4));
+        assert_eq!(stage0["schemaVersion"], json!(4));
         assert_eq!(
             compiler["phaseRecords"],
             stage0["bootstrapCompiler"]["phaseRecords"]
         );
+        assert_eq!(
+            compiler["candidateImplementation"],
+            stage0["bootstrapCompiler"]["candidateImplementation"]
+        );
+        assert_eq!(
+            compiler["candidateObservationSchemaVersion"],
+            stage0["bootstrapCompiler"]["candidateObservationSchemaVersion"]
+        );
+        assert_eq!(
+            compiler["candidateImplementation"],
+            json!("futao-bootstrap-candidate")
+        );
+        assert_eq!(compiler["candidateObservationSchemaVersion"], json!(1));
         let records = compiler["phaseRecords"]
             .as_array()
             .ok_or_else(|| std::io::Error::other("compiler phaseRecords must be an array"))?;
@@ -1932,13 +1983,13 @@ mod tests {
     fn parser_rejects_the_previous_stage0_manifest_schema() -> Result<(), Box<dyn std::error::Error>>
     {
         let mut manifest: Value = serde_json::from_str(ACCEPTED)?;
-        manifest["schemaVersion"] = json!(2);
+        manifest["schemaVersion"] = json!(3);
 
         let error = parse_manifest(&serde_json::to_string(&manifest)?).err();
 
         assert!(matches!(
             error,
-            Some(error) if error.to_string().contains("schemaVersion must be 3")
+            Some(error) if error.to_string().contains("schemaVersion must be 4")
         ));
         Ok(())
     }
@@ -1947,15 +1998,45 @@ mod tests {
     fn parser_rejects_an_unbound_compiler_manifest_schema() -> Result<(), Box<dyn std::error::Error>>
     {
         let mut manifest: Value = serde_json::from_str(ACCEPTED)?;
-        manifest["bootstrapCompiler"]["manifestSchemaVersion"] = json!(2);
+        manifest["bootstrapCompiler"]["manifestSchemaVersion"] = json!(3);
 
         let error = parse_manifest(&serde_json::to_string(&manifest)?).err();
 
         assert!(matches!(
             error,
             Some(error) if error.to_string().contains(
-                "bootstrapCompiler.manifestSchemaVersion must be 3"
+                "bootstrapCompiler.manifestSchemaVersion must be 4"
             )
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn parser_rejects_reserved_or_unbound_candidate_identity(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut manifest: Value = serde_json::from_str(ACCEPTED)?;
+        manifest["bootstrapCompiler"]["candidateImplementation"] = json!("futao-self-hosted");
+
+        let error = parse_manifest(&serde_json::to_string(&manifest)?).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains("candidateImplementation")
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn parser_rejects_an_unbound_candidate_observation_schema(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut manifest: Value = serde_json::from_str(ACCEPTED)?;
+        manifest["bootstrapCompiler"]["candidateObservationSchemaVersion"] = json!(2);
+
+        let error = parse_manifest(&serde_json::to_string(&manifest)?).err();
+
+        assert!(matches!(
+            error,
+            Some(error) if error.to_string().contains("candidateObservationSchemaVersion")
         ));
         Ok(())
     }
@@ -1988,7 +2069,7 @@ mod tests {
     fn bootstrap_compiler_provenance_accepts_recursive_declared_source_roots(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let mut manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        let mut manifest = prepare_schema_four_compiler_fixture(directory.path())?;
         let nested = directory
             .path()
             .join("bootstrap/compiler/src/nested/helper.ft");
@@ -2075,7 +2156,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_child_phase_record_drift(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_four_compiler_fixture(directory.path())?;
         mutate_compiler_manifest(directory.path(), |compiler| {
             compiler["phaseRecords"][0]["acceptedCaseCount"] = json!(5);
         })?;
@@ -2092,10 +2173,33 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_compiler_provenance_rejects_child_candidate_binding_drift(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let identity_error = compiler_fixture_error(|root| {
+            mutate_compiler_manifest(root, |compiler| {
+                compiler["candidateImplementation"] = json!("futao-self-hosted");
+            })?;
+            Ok(())
+        })?;
+        let schema_error = compiler_fixture_error(|root| {
+            mutate_compiler_manifest(root, |compiler| {
+                compiler["candidateObservationSchemaVersion"] = json!(2);
+            })?;
+            Ok(())
+        })?;
+
+        assert!(identity_error.contains("compiler.candidateImplementation"));
+        assert!(schema_error.contains(
+            "compiler candidateObservationSchemaVersion does not match the top-level contract"
+        ));
+        Ok(())
+    }
+
+    #[test]
     fn bootstrap_compiler_provenance_rejects_phase_case_count_drift(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let mut manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        let mut manifest = prepare_schema_four_compiler_fixture(directory.path())?;
         manifest.bootstrap_compiler.phase_records[0].accepted_case_count = 5;
         mutate_compiler_manifest(directory.path(), |compiler| {
             compiler["phaseRecords"][0]["acceptedCaseCount"] = json!(5);
@@ -2116,7 +2220,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_bound_phase_digest_drift(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let mut manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        let mut manifest = prepare_schema_four_compiler_fixture(directory.path())?;
         let drift = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         manifest.bootstrap_compiler.phase_records[0].accepted_corpus_digest = drift.to_owned();
         mutate_compiler_manifest(directory.path(), |compiler| {
@@ -2294,7 +2398,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_an_unbound_phase_entry(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let mut manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        let mut manifest = prepare_schema_four_compiler_fixture(directory.path())?;
         let source = directory
             .path()
             .join("bootstrap/compiler/src/lexer_profile.ft");
@@ -2439,7 +2543,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_an_undeclared_file_in_a_source_root(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_four_compiler_fixture(directory.path())?;
         fs::write(
             directory
                 .path()
@@ -2462,7 +2566,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_an_undeclared_source_root(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_four_compiler_fixture(directory.path())?;
         let source = directory
             .path()
             .join("bootstrap/compiler/lowering/lower.ft");
@@ -2482,7 +2586,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_unsorted_source_roots(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_four_compiler_fixture(directory.path())?;
         mutate_compiler_manifest(directory.path(), |compiler| {
             compiler["sourceRoots"] = json!(["typecheck", "src"]);
         })?;
@@ -2502,7 +2606,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_duplicate_source_roots(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_four_compiler_fixture(directory.path())?;
         mutate_compiler_manifest(directory.path(), |compiler| {
             compiler["sourceRoots"] = json!(["src", "src", "typecheck"]);
         })?;
@@ -2522,7 +2626,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_overlapping_source_roots(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_four_compiler_fixture(directory.path())?;
         mutate_compiler_manifest(directory.path(), |compiler| {
             compiler["sourceRoots"] = json!(["src", "src/nested", "typecheck"]);
         })?;
@@ -2552,7 +2656,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_non_portable_source_roots(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_four_compiler_fixture(directory.path())?;
         mutate_compiler_manifest(directory.path(), |compiler| {
             compiler["sourceRoots"] = json!(["../src", "typecheck"]);
         })?;
@@ -2572,7 +2676,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_unsorted_source_files(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_four_compiler_fixture(directory.path())?;
         mutate_compiler_manifest(directory.path(), |compiler| {
             if let Some(source_files) = compiler["sourceFiles"].as_array_mut() {
                 source_files.swap(0, 1);
@@ -2594,7 +2698,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_duplicate_source_files(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_four_compiler_fixture(directory.path())?;
         mutate_compiler_manifest(directory.path(), |compiler| {
             if let Some(sources) = compiler["sourceFiles"].as_array_mut() {
                 if let Some(first) = sources.first().cloned() {
@@ -2618,7 +2722,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_non_portable_source_files(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_four_compiler_fixture(directory.path())?;
         mutate_compiler_manifest(directory.path(), |compiler| {
             compiler["sourceFiles"][0] = json!("src\\lexer.ft");
         })?;
@@ -2638,7 +2742,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_invalid_utf8_source(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_four_compiler_fixture(directory.path())?;
         let source = directory
             .path()
             .join("bootstrap/compiler/typecheck/typecheck.ft");
@@ -2660,7 +2764,7 @@ mod tests {
         use std::os::unix::fs::symlink;
 
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_four_compiler_fixture(directory.path())?;
         let source = directory.path().join("bootstrap/compiler/src/lexer.ft");
         fs::remove_file(&source)?;
         symlink("sequence.ft", &source)?;
@@ -2767,7 +2871,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_source_drift() -> Result<(), Box<dyn std::error::Error>>
     {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_four_compiler_fixture(directory.path())?;
         let lexer = directory.path().join("bootstrap/compiler/src/lexer.ft");
         let mut source = fs::read_to_string(&lexer)?;
         source.push_str("// provenance drift\n");
@@ -2786,7 +2890,7 @@ mod tests {
     fn bootstrap_compiler_provenance_rejects_typecheck_source_drift(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_four_compiler_fixture(directory.path())?;
         let typecheck = directory
             .path()
             .join("bootstrap/compiler/typecheck/typecheck.ft");
@@ -2874,7 +2978,7 @@ function main(): Unit {
         mutate: impl FnOnce(&Path) -> Result<(), Box<dyn std::error::Error>>,
     ) -> Result<String, Box<dyn std::error::Error>> {
         let directory = TestDirectory::new()?;
-        let manifest = prepare_schema_three_compiler_fixture(directory.path())?;
+        let manifest = prepare_schema_four_compiler_fixture(directory.path())?;
         mutate(directory.path())?;
         match verify_bootstrap_compiler(&manifest, directory.path()) {
             Ok(()) => Err(std::io::Error::new(
@@ -2886,7 +2990,7 @@ function main(): Unit {
         }
     }
 
-    fn prepare_schema_three_compiler_fixture(
+    fn prepare_schema_four_compiler_fixture(
         destination: &Path,
     ) -> Result<super::BootstrapManifest, Box<dyn std::error::Error>> {
         copy_bootstrap_compiler_fixture(destination)?;
