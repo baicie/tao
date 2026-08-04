@@ -21,9 +21,11 @@ mismatch.
 
 Candidate observation schema 1 is a compare-only transport boundary. It binds
 the complete explicit source table and bytes, structured diagnostics, fixed
-phase order, state transitions, JSON envelopes, and resource ceilings. HIR,
-MIR, and NIR bodies remain opaque canonical bytes until their separately
-versioned strict validators construct verified phase values in later slices.
+phase order, state transitions, JSON envelopes, and resource ceilings. Token
+and CST tables are validated against source bytes, spans, syntax-kind classes,
+and each other. HIR, MIR, and NIR bodies remain opaque canonical bytes until
+their separately versioned strict validators construct verified phase values
+in later slices.
 
 The compiler source tree digest for this milestone is:
 

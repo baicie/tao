@@ -1,9 +1,11 @@
 //! Strict, compare-only observation boundary for compiler adapters.
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::fmt::Formatter;
 use std::marker::PhantomData;
+use std::path::Path;
 
 use serde::de::{self, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
@@ -319,21 +321,21 @@ fn reference_sources(
                 message: "reference source ordinals are not dense".to_owned(),
             });
         }
-        let identity = file
+        let key = file
             .key()
-            .and_then(|key| key.as_path().to_str())
             .ok_or_else(|| crate::CompileError::ObservationInputMismatch {
-                message: format!("reference source file {expected_file} has no portable identity"),
+                message: format!("reference source file {expected_file} has no canonical identity"),
             })?;
         let Some(source) = input_sources
             .iter()
             .copied()
-            .find(|source| source.identity() == identity)
+            .find(|source| key.as_path() == Path::new(source.identity()))
         else {
             return Err(crate::CompileError::ObservationInputMismatch {
-                message: format!("reference source `{identity}` is absent from explicit input"),
+                message: format!("reference source `{key}` is absent from explicit input"),
             });
         };
+        let identity = source.identity();
         if source.content() != file.text() || !observed.insert(identity) {
             return Err(crate::CompileError::ObservationInputMismatch {
                 message: format!("reference source `{identity}` is duplicated or has other bytes"),
@@ -478,7 +480,7 @@ impl CandidateObservation {
             "candidate observation",
         )?;
         let raw: RawCandidateObservation = serde_json::from_slice(bytes).map_err(|source| {
-            let code = if source.to_string().contains(RESOURCE_LIMIT_MARKER) {
+            let code = if source.to_string().starts_with(RESOURCE_LIMIT_MARKER) {
                 CandidateObservationErrorCode::ResourceLimit
             } else {
                 CandidateObservationErrorCode::InvalidJson
@@ -615,6 +617,8 @@ impl CandidateObservationError {
 
 const RESOURCE_LIMIT_MARKER: &str = "candidate-resource-limit";
 const PROTOCOL_TAG_MAX_BYTES: usize = 1_024;
+const DIAGNOSTIC_CODE_MAX_BYTES: usize = 5;
+const CANDIDATE_CST_ELEMENTS_PER_SOURCE_MAX: usize = CANDIDATE_OBSERVATION_MAX_SOURCE_BYTES * 4 + 1;
 
 struct BoundedString<const MAXIMUM: usize>(String);
 
@@ -683,8 +687,81 @@ impl<'de, const MAXIMUM: usize> Deserialize<'de> for BoundedString<MAXIMUM> {
 struct BoundedVec<T, const MAXIMUM: usize>(Vec<T>);
 
 impl<T, const MAXIMUM: usize> BoundedVec<T, MAXIMUM> {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
     fn into_vec(self) -> Vec<T> {
         self.0
+    }
+}
+
+struct BoundedDiagnostics<const MAXIMUM: usize, const TOTAL_LABELS: usize>(Vec<RawDiagnostic>);
+
+impl<const MAXIMUM: usize, const TOTAL_LABELS: usize> BoundedDiagnostics<MAXIMUM, TOTAL_LABELS> {
+    fn into_vec(self) -> Vec<RawDiagnostic> {
+        self.0
+    }
+}
+
+impl<'de, const MAXIMUM: usize, const TOTAL_LABELS: usize> Deserialize<'de>
+    for BoundedDiagnostics<MAXIMUM, TOTAL_LABELS>
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct DiagnosticsVisitor<const MAXIMUM: usize, const TOTAL_LABELS: usize>;
+
+        impl<'de, const MAXIMUM: usize, const TOTAL_LABELS: usize> Visitor<'de>
+            for DiagnosticsVisitor<MAXIMUM, TOTAL_LABELS>
+        {
+            type Value = BoundedDiagnostics<MAXIMUM, TOTAL_LABELS>;
+
+            fn expecting(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+                write!(
+                    formatter,
+                    "at most {MAXIMUM} diagnostics with {TOTAL_LABELS} total labels"
+                )
+            }
+
+            fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                if sequence.size_hint().is_some_and(|size| size > MAXIMUM) {
+                    return Err(de::Error::custom(format_args!(
+                        "{RESOURCE_LIMIT_MARKER}: diagnostic count exceeds {MAXIMUM}"
+                    )));
+                }
+                let mut diagnostics =
+                    Vec::with_capacity(sequence.size_hint().unwrap_or_default().min(MAXIMUM));
+                let mut total_labels = 0_usize;
+                while let Some(diagnostic) = sequence.next_element::<RawDiagnostic>()? {
+                    if diagnostics.len() == MAXIMUM {
+                        return Err(de::Error::custom(format_args!(
+                            "{RESOURCE_LIMIT_MARKER}: diagnostic count exceeds {MAXIMUM}"
+                        )));
+                    }
+                    total_labels = total_labels
+                        .checked_add(diagnostic.labels.len())
+                        .ok_or_else(|| {
+                            de::Error::custom(format_args!(
+                                "{RESOURCE_LIMIT_MARKER}: total label count overflowed"
+                            ))
+                        })?;
+                    if total_labels > TOTAL_LABELS {
+                        return Err(de::Error::custom(format_args!(
+                            "{RESOURCE_LIMIT_MARKER}: total label count exceeds {TOTAL_LABELS}"
+                        )));
+                    }
+                    diagnostics.push(diagnostic);
+                }
+                Ok(BoundedDiagnostics(diagnostics))
+            }
+        }
+
+        deserializer.deserialize_seq(DiagnosticsVisitor::<MAXIMUM, TOTAL_LABELS>)
     }
 }
 
@@ -744,7 +821,10 @@ struct RawCandidateObservation {
     compilation_profile: BoundedString<PROTOCOL_TAG_MAX_BYTES>,
     status: RawCompilationStatus,
     sources: BoundedVec<RawSource, CANDIDATE_OBSERVATION_MAX_SOURCES>,
-    diagnostics: BoundedVec<RawDiagnostic, CANDIDATE_OBSERVATION_MAX_DIAGNOSTICS>,
+    diagnostics: BoundedDiagnostics<
+        CANDIDATE_OBSERVATION_MAX_DIAGNOSTICS,
+        CANDIDATE_OBSERVATION_MAX_TOTAL_LABELS,
+    >,
     artifacts: BoundedVec<RawArtifact, 6>,
 }
 
@@ -765,7 +845,7 @@ struct RawSource {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RawDiagnostic {
-    code: String,
+    code: BoundedString<DIAGNOSTIC_CODE_MAX_BYTES>,
     severity: RawSeverity,
     message: BoundedString<CANDIDATE_OBSERVATION_MAX_MESSAGE_BYTES>,
     labels: BoundedVec<RawLabel, CANDIDATE_OBSERVATION_MAX_LABELS_PER_DIAGNOSTIC>,
@@ -821,6 +901,76 @@ struct BorrowedPhaseEnvelope<'a> {
     phase: &'a str,
     #[serde(borrow)]
     value: &'a RawValue,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BorrowedTokensEnvelope<'a> {
+    schema_version: u32,
+    phase: &'a str,
+    #[serde(borrow)]
+    value: BoundedVec<BorrowedModuleTokens<'a>, CANDIDATE_OBSERVATION_MAX_SOURCES>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BorrowedModuleTokens<'a> {
+    module: u32,
+    #[serde(borrow)]
+    tokens: BoundedVec<BorrowedToken<'a>, CANDIDATE_OBSERVATION_MAX_SOURCE_BYTES>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BorrowedToken<'a> {
+    kind_id: u16,
+    start: u32,
+    end: u32,
+    #[serde(borrow)]
+    text: Cow<'a, str>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BorrowedCstEnvelope<'a> {
+    schema_version: u32,
+    phase: &'a str,
+    #[serde(borrow)]
+    value: BoundedVec<BorrowedModuleCst<'a>, CANDIDATE_OBSERVATION_MAX_SOURCES>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BorrowedModuleCst<'a> {
+    module: u32,
+    #[serde(borrow)]
+    elements: BoundedVec<BorrowedCstElement<'a>, CANDIDATE_CST_ELEMENTS_PER_SOURCE_MAX>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum BorrowedCstElementKind {
+    Node,
+    Token,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BorrowedCstElement<'a> {
+    depth: u32,
+    element: BorrowedCstElementKind,
+    kind_id: u16,
+    start: u32,
+    end: u32,
+    #[serde(borrow)]
+    text: Option<Cow<'a, str>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ValidatedToken {
+    kind_id: u16,
+    start: u32,
+    end: u32,
 }
 
 #[derive(Serialize)]
@@ -918,7 +1068,12 @@ fn validate_candidate(
             );
         }
     };
-    let artifacts = validate_artifacts(raw.artifacts.into_vec(), status, &diagnostics)?;
+    let artifacts = validate_artifacts(
+        raw.artifacts.into_vec(),
+        status,
+        &diagnostics,
+        &source_texts,
+    )?;
     let compiler = CompilerObservation {
         implementation: CompilerImplementation::FutaoBootstrapCandidate,
         schema_version: CANONICAL_DUMP_SCHEMA_VERSION,
@@ -1044,12 +1199,12 @@ fn validate_diagnostics(
     let mut total_labels = 0_usize;
     let mut diagnostics = Vec::with_capacity(raw_diagnostics.len());
     for raw in raw_diagnostics {
-        if !valid_diagnostic_code(&raw.code, raw.severity) {
+        if !valid_diagnostic_code(raw.code.as_str(), raw.severity) {
             return candidate_error(
                 CandidateObservationErrorCode::InvalidDiagnostic,
                 format!(
                     "diagnostic code `{}` does not match its severity or [EW][0-9]{{4}}",
-                    raw.code
+                    raw.code.as_str()
                 ),
             );
         }
@@ -1142,7 +1297,7 @@ fn validate_diagnostics(
             });
         }
         diagnostics.push(CandidateDiagnosticObservation {
-            code: raw.code,
+            code: raw.code.into_string(),
             severity: canonical_severity(raw.severity),
             message: raw.message.into_string(),
             labels,
@@ -1165,6 +1320,7 @@ fn validate_artifacts(
     raw_artifacts: Vec<RawArtifact>,
     status: CandidateCompilationStatus,
     diagnostics: &[CandidateDiagnosticObservation],
+    sources: &[&str],
 ) -> Result<Vec<CompilerArtifactObservation>, CandidateObservationError> {
     if raw_artifacts.len() != CanonicalPhase::ALL.len() {
         return candidate_error(
@@ -1247,6 +1403,8 @@ fn validate_artifacts(
         }
     }
 
+    let tokens = validate_token_artifact(&artifacts[0], sources)?;
+    validate_cst_artifact(&artifacts[1], sources, &tokens)?;
     validate_diagnostic_artifact(&artifacts[2], diagnostics)?;
     Ok(artifacts)
 }
@@ -1331,6 +1489,283 @@ fn validate_phase_header(
         );
     }
     Ok(())
+}
+
+fn validate_token_artifact(
+    artifact: &CompilerArtifactObservation,
+    sources: &[&str],
+) -> Result<Vec<Vec<ValidatedToken>>, CandidateObservationError> {
+    let Some(content) = artifact.content() else {
+        return candidate_error(
+            CandidateObservationErrorCode::InvalidPhaseTable,
+            "token artifact is not produced",
+        );
+    };
+    let envelope: BorrowedTokensEnvelope<'_> = serde_json::from_str(content)
+        .map_err(|source| phase_decode_error(CanonicalPhase::Tokens, source))?;
+    validate_phase_header(
+        CanonicalPhase::Tokens,
+        envelope.schema_version,
+        envelope.phase,
+    )?;
+    let raw_modules = envelope.value.into_vec();
+    if raw_modules.is_empty() || raw_modules.len() > sources.len() {
+        return candidate_error(
+            CandidateObservationErrorCode::InvalidPhaseContent,
+            "token modules must contain the entry and stay within the source table",
+        );
+    }
+
+    let mut modules = Vec::with_capacity(raw_modules.len());
+    for (expected_module, raw_module) in raw_modules.into_iter().enumerate() {
+        let expected_module = u32::try_from(expected_module)
+            .map_err(|_| resource_error("token module ordinal exceeded u32"))?;
+        if raw_module.module != expected_module {
+            return candidate_error(
+                CandidateObservationErrorCode::InvalidPhaseContent,
+                "token modules must use dense source ordinals",
+            );
+        }
+        let source =
+            sources
+                .get(usize::try_from(expected_module).map_err(|_| {
+                    resource_error("token module ordinal did not fit the Host index")
+                })?)
+                .ok_or_else(|| CandidateObservationError {
+                    code: CandidateObservationErrorCode::InvalidPhaseContent,
+                    message: "token module references an unknown source".to_owned(),
+                    source: None,
+                })?;
+        let raw_tokens = raw_module.tokens.into_vec();
+        if raw_tokens.len() > source.len() {
+            return candidate_error(
+                CandidateObservationErrorCode::InvalidPhaseContent,
+                "token count exceeds the source byte length",
+            );
+        }
+
+        let mut cursor = 0_usize;
+        let mut tokens = Vec::with_capacity(raw_tokens.len());
+        for raw in raw_tokens {
+            let start = usize::try_from(raw.start)
+                .map_err(|_| resource_error("token start did not fit the Host index"))?;
+            let end = usize::try_from(raw.end)
+                .map_err(|_| resource_error("token end did not fit the Host index"))?;
+            let Some(source_text) = source.get(start..end) else {
+                return candidate_error(
+                    CandidateObservationErrorCode::InvalidPhaseContent,
+                    "token span is not an in-bounds UTF-8 source range",
+                );
+            };
+            if !valid_token_kind_id(raw.kind_id)
+                || start != cursor
+                || start == end
+                || raw.text.as_ref() != source_text
+            {
+                return candidate_error(
+                    CandidateObservationErrorCode::InvalidPhaseContent,
+                    "token kind, order, span, or text is inconsistent with its source",
+                );
+            }
+            cursor = end;
+            tokens.push(ValidatedToken {
+                kind_id: raw.kind_id,
+                start: raw.start,
+                end: raw.end,
+            });
+        }
+        if cursor != source.len() {
+            return candidate_error(
+                CandidateObservationErrorCode::InvalidPhaseContent,
+                "token stream does not cover the complete source",
+            );
+        }
+        modules.push(tokens);
+    }
+    Ok(modules)
+}
+
+fn validate_cst_artifact(
+    artifact: &CompilerArtifactObservation,
+    sources: &[&str],
+    token_modules: &[Vec<ValidatedToken>],
+) -> Result<(), CandidateObservationError> {
+    let Some(content) = artifact.content() else {
+        return candidate_error(
+            CandidateObservationErrorCode::InvalidPhaseTable,
+            "CST artifact is not produced",
+        );
+    };
+    let envelope: BorrowedCstEnvelope<'_> = serde_json::from_str(content)
+        .map_err(|source| phase_decode_error(CanonicalPhase::Cst, source))?;
+    validate_phase_header(CanonicalPhase::Cst, envelope.schema_version, envelope.phase)?;
+    let raw_modules = envelope.value.into_vec();
+    if raw_modules.len() != token_modules.len() {
+        return candidate_error(
+            CandidateObservationErrorCode::InvalidPhaseContent,
+            "CST and token module tables differ",
+        );
+    }
+
+    for (expected_module, (raw_module, tokens)) in
+        raw_modules.into_iter().zip(token_modules).enumerate()
+    {
+        let expected_module_u32 = u32::try_from(expected_module)
+            .map_err(|_| resource_error("CST module ordinal exceeded u32"))?;
+        if raw_module.module != expected_module_u32 {
+            return candidate_error(
+                CandidateObservationErrorCode::InvalidPhaseContent,
+                "CST modules must use dense source ordinals",
+            );
+        }
+        let source = sources
+            .get(expected_module)
+            .ok_or_else(|| CandidateObservationError {
+                code: CandidateObservationErrorCode::InvalidPhaseContent,
+                message: "CST module references an unknown source".to_owned(),
+                source: None,
+            })?;
+        let elements = raw_module.elements.into_vec();
+        if elements.is_empty() {
+            return candidate_error(
+                CandidateObservationErrorCode::InvalidPhaseContent,
+                "CST module must contain one source-file root",
+            );
+        }
+
+        let mut parents = Vec::<(usize, usize)>::new();
+        let mut token_index = 0_usize;
+        for (element_index, raw) in elements.into_iter().enumerate() {
+            let depth = usize::try_from(raw.depth)
+                .map_err(|_| resource_error("CST depth did not fit the Host index"))?;
+            let start = usize::try_from(raw.start)
+                .map_err(|_| resource_error("CST start did not fit the Host index"))?;
+            let end = usize::try_from(raw.end)
+                .map_err(|_| resource_error("CST end did not fit the Host index"))?;
+            let Some(source_text) = source.get(start..end) else {
+                return candidate_error(
+                    CandidateObservationErrorCode::InvalidPhaseContent,
+                    "CST span is not an in-bounds UTF-8 source range",
+                );
+            };
+            if depth > parents.len() {
+                return candidate_error(
+                    CandidateObservationErrorCode::InvalidPhaseContent,
+                    "CST preorder depth skipped a parent",
+                );
+            }
+            parents.truncate(depth);
+            if let Some((parent_start, parent_end)) = parents.last().copied() {
+                if start < parent_start || end > parent_end {
+                    return candidate_error(
+                        CandidateObservationErrorCode::InvalidPhaseContent,
+                        "CST child span escapes its parent",
+                    );
+                }
+            }
+            if element_index == 0 {
+                if depth != 0
+                    || raw.element != BorrowedCstElementKind::Node
+                    || raw.kind_id != nexa_syntax::SyntaxKind::SourceFile as u16
+                    || start != 0
+                    || end != source.len()
+                {
+                    return candidate_error(
+                        CandidateObservationErrorCode::InvalidPhaseContent,
+                        "CST root must be the complete source-file node",
+                    );
+                }
+            } else if depth == 0 {
+                return candidate_error(
+                    CandidateObservationErrorCode::InvalidPhaseContent,
+                    "CST module contains more than one root",
+                );
+            }
+
+            match raw.element {
+                BorrowedCstElementKind::Node => {
+                    if raw.text.is_some()
+                        || !valid_node_kind_id(raw.kind_id)
+                        || (element_index != 0
+                            && raw.kind_id == nexa_syntax::SyntaxKind::SourceFile as u16)
+                    {
+                        return candidate_error(
+                            CandidateObservationErrorCode::InvalidPhaseContent,
+                            "CST node kind or text field is invalid",
+                        );
+                    }
+                    parents.push((start, end));
+                }
+                BorrowedCstElementKind::Token => {
+                    let Some(text) = raw.text else {
+                        return candidate_error(
+                            CandidateObservationErrorCode::InvalidPhaseContent,
+                            "CST token is missing its source text",
+                        );
+                    };
+                    let Some(expected) = tokens.get(token_index) else {
+                        return candidate_error(
+                            CandidateObservationErrorCode::InvalidPhaseContent,
+                            "CST contains a token absent from the token phase",
+                        );
+                    };
+                    if !valid_token_kind_id(raw.kind_id)
+                        || start == end
+                        || text.as_ref() != source_text
+                        || expected.kind_id != raw.kind_id
+                        || expected.start != raw.start
+                        || expected.end != raw.end
+                    {
+                        return candidate_error(
+                            CandidateObservationErrorCode::InvalidPhaseContent,
+                            "CST token differs from its source or token phase",
+                        );
+                    }
+                    token_index += 1;
+                }
+            }
+        }
+        if token_index != tokens.len() {
+            return candidate_error(
+                CandidateObservationErrorCode::InvalidPhaseContent,
+                "CST omits tokens from the token phase",
+            );
+        }
+    }
+    Ok(())
+}
+
+fn phase_decode_error(
+    phase: CanonicalPhase,
+    source: serde_json::Error,
+) -> CandidateObservationError {
+    let code = if source.to_string().starts_with(RESOURCE_LIMIT_MARKER) {
+        CandidateObservationErrorCode::ResourceLimit
+    } else {
+        CandidateObservationErrorCode::InvalidPhaseContent
+    };
+    CandidateObservationError {
+        code,
+        message: format!(
+            "{} content does not match its strict schema",
+            phase_name(phase)
+        ),
+        source: Some(Box::new(source)),
+    }
+}
+
+const fn valid_token_kind_id(kind_id: u16) -> bool {
+    matches!(
+        kind_id,
+        0..=38 | 64..=68 | 74 | 80..=84 | 92..=94 | 101
+    )
+}
+
+const fn valid_node_kind_id(kind_id: u16) -> bool {
+    matches!(
+        kind_id,
+        39..=63 | 69..=73 | 75..=79 | 85..=91 | 95..=100 | 102..=106
+    )
 }
 
 fn validate_diagnostic_artifact(

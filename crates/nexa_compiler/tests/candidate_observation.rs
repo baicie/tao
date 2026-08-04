@@ -4,12 +4,12 @@
 #![allow(clippy::expect_used)]
 
 use nexa_compiler::{
-    CandidateCompilationStatus, CandidateObservation, CandidateObservationErrorCode,
-    CandidatePhaseStatus, CompilerImplementation, CompilerInput, CompilerOptions, CompilerSource,
-    CANDIDATE_OBSERVATION_MAX_DIAGNOSTICS, CANDIDATE_OBSERVATION_MAX_JSON_DEPTH,
+    compile, CandidateCompilationStatus, CandidateObservation, CandidateObservationErrorCode,
+    CandidatePhaseStatus, CanonicalPhase, CompilerImplementation, CompilerInput, CompilerOptions,
+    CompilerSource, CANDIDATE_OBSERVATION_MAX_DIAGNOSTICS, CANDIDATE_OBSERVATION_MAX_JSON_DEPTH,
     CANDIDATE_OBSERVATION_MAX_LABELS_PER_DIAGNOSTIC, CANDIDATE_OBSERVATION_MAX_MESSAGE_BYTES,
-    CANDIDATE_OBSERVATION_MAX_SOURCES, CANDIDATE_OBSERVATION_SCHEMA_VERSION,
-    FUTAO_BOOTSTRAP_CANDIDATE_IMPLEMENTATION,
+    CANDIDATE_OBSERVATION_MAX_SOURCES, CANDIDATE_OBSERVATION_MAX_TOTAL_LABELS,
+    CANDIDATE_OBSERVATION_SCHEMA_VERSION, FUTAO_BOOTSTRAP_CANDIDATE_IMPLEMENTATION,
 };
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -132,8 +132,44 @@ fn produced_phase(phase: &'static str, value: Value) -> ArtifactFixture {
     }
 }
 
+fn reference_phase_content(input: &CompilerInput, phase: CanonicalPhase) -> String {
+    compile(input)
+        .expect("reference fixture compiles")
+        .dumps()
+        .artifact(phase)
+        .content()
+        .expect("front-end reference artifact is produced")
+        .to_owned()
+}
+
+fn replace_frontend_artifacts(fixture: &mut ObservationFixture, input: &CompilerInput) {
+    for (index, phase) in [CanonicalPhase::Tokens, CanonicalPhase::Cst]
+        .into_iter()
+        .enumerate()
+    {
+        fixture.artifacts[index].artifact = ArtifactStateFixture::Produced {
+            content: reference_phase_content(input, phase),
+        };
+    }
+}
+
+fn mutate_phase_content(
+    fixture: &mut ObservationFixture,
+    phase_index: usize,
+    mutate: impl FnOnce(&mut Value),
+) {
+    let ArtifactStateFixture::Produced { content } = &mut fixture.artifacts[phase_index].artifact
+    else {
+        unreachable!("front-end fixture artifact is produced")
+    };
+    let mut value: Value = serde_json::from_str(content).expect("phase fixture is JSON");
+    mutate(&mut value);
+    *content = serde_json::to_string(&value).expect("mutated phase fixture serializes");
+}
+
 fn accepted_fixture() -> ObservationFixture {
-    ObservationFixture {
+    let case_input = input();
+    let mut fixture = ObservationFixture {
         schema_version: CANDIDATE_OBSERVATION_SCHEMA_VERSION,
         implementation: FUTAO_BOOTSTRAP_CANDIDATE_IMPLEMENTATION.to_owned(),
         language_version: "1.0".to_owned(),
@@ -152,7 +188,9 @@ fn accepted_fixture() -> ObservationFixture {
             produced_phase("mir", json!({})),
             produced_phase("nir", json!({})),
         ],
-    }
+    };
+    replace_frontend_artifacts(&mut fixture, &case_input);
+    fixture
 }
 
 fn rejected_fixture() -> ObservationFixture {
@@ -178,7 +216,8 @@ fn rejected_fixture() -> ObservationFixture {
             end: 1,
         }],
     }];
-    ObservationFixture {
+    let case_input = CompilerInput::new("main.ft", [CompilerSource::new("main.ft", "@")]);
+    let mut fixture = ObservationFixture {
         schema_version: CANDIDATE_OBSERVATION_SCHEMA_VERSION,
         implementation: FUTAO_BOOTSTRAP_CANDIDATE_IMPLEMENTATION.to_owned(),
         language_version: "1.0".to_owned(),
@@ -211,7 +250,9 @@ fn rejected_fixture() -> ObservationFixture {
                 artifact: ArtifactStateFixture::SkippedDueToDiagnostics,
             },
         ],
-    }
+    };
+    replace_frontend_artifacts(&mut fixture, &case_input);
+    fixture
 }
 
 fn warning_fixture() -> ObservationFixture {
@@ -393,6 +434,78 @@ fn observation_rejects_unknown_fields_and_schema_versions() {
         error_code(&fixture, &input()),
         CandidateObservationErrorCode::UnsupportedSchema
     );
+}
+
+#[test]
+fn token_and_cst_payloads_reject_malformed_protocol_data() {
+    let mut fixture = accepted_fixture();
+    mutate_phase_content(&mut fixture, 0, |content| {
+        content["value"] = json!([]);
+    });
+    mutate_phase_content(&mut fixture, 1, |content| {
+        content["value"] = json!([]);
+    });
+    assert_eq!(
+        error_code(&fixture, &input()),
+        CandidateObservationErrorCode::InvalidPhaseContent
+    );
+
+    let mut fixture = accepted_fixture();
+    mutate_phase_content(&mut fixture, 0, |content| {
+        content["value"][0]["tokens"][0]["hostPath"] = json!("/tmp/main.ft");
+    });
+    assert_eq!(
+        error_code(&fixture, &input()),
+        CandidateObservationErrorCode::InvalidPhaseContent
+    );
+
+    let mut fixture = accepted_fixture();
+    mutate_phase_content(&mut fixture, 0, |content| {
+        content["value"][0]["tokens"][0]["kindId"] = json!(39);
+    });
+    assert_eq!(
+        error_code(&fixture, &input()),
+        CandidateObservationErrorCode::InvalidPhaseContent
+    );
+
+    let mut fixture = accepted_fixture();
+    mutate_phase_content(&mut fixture, 0, |content| {
+        content["value"][0]["tokens"][0]["end"] = json!(u32::MAX);
+    });
+    assert_eq!(
+        error_code(&fixture, &input()),
+        CandidateObservationErrorCode::InvalidPhaseContent
+    );
+
+    let mut fixture = accepted_fixture();
+    mutate_phase_content(&mut fixture, 0, |content| {
+        content["value"][0]["tokens"][0]["text"] = json!("fabricated");
+    });
+    assert_eq!(
+        error_code(&fixture, &input()),
+        CandidateObservationErrorCode::InvalidPhaseContent
+    );
+
+    let mut fixture = accepted_fixture();
+    mutate_phase_content(&mut fixture, 1, |content| {
+        content["value"][0]["elements"][0]["text"] = json!("fabricated");
+    });
+    assert_eq!(
+        error_code(&fixture, &input()),
+        CandidateObservationErrorCode::InvalidPhaseContent
+    );
+}
+
+#[test]
+fn resource_limit_marker_cannot_be_spoofed_by_unknown_json() {
+    let mut value = serde_json::to_value(accepted_fixture()).expect("fixture is JSON");
+    value["candidate-resource-limit"] = json!(true);
+    let bytes = serde_json::to_vec(&value).expect("mutated fixture serializes");
+
+    let error = CandidateObservation::load(&bytes, &input())
+        .expect_err("unknown root fields are schema errors, not resource errors");
+
+    assert_eq!(error.code(), CandidateObservationErrorCode::InvalidJson);
 }
 
 #[test]
@@ -667,6 +780,50 @@ fn candidate_resource_dimensions_reject_one_over_the_frozen_bound() {
         error_code(&accepted_fixture(), &oversized_input),
         CandidateObservationErrorCode::ResourceLimit
     );
+}
+
+#[test]
+fn aggregate_label_bound_stops_before_decoding_later_invalid_data() {
+    let source = CompilerInput::new("main.ft", [CompilerSource::new("main.ft", "@")]);
+    let mut fixture = rejected_fixture();
+    let mut diagnostic = fixture.diagnostics[0].clone();
+    let mut secondary = diagnostic.labels[0].clone();
+    secondary.style = "secondary";
+    diagnostic.labels = vec![secondary; CANDIDATE_OBSERVATION_MAX_LABELS_PER_DIAGNOSTIC];
+    diagnostic.labels[0].style = "primary";
+    let diagnostics_at_bound =
+        CANDIDATE_OBSERVATION_MAX_TOTAL_LABELS / CANDIDATE_OBSERVATION_MAX_LABELS_PER_DIAGNOSTIC;
+    fixture.diagnostics = vec![diagnostic; diagnostics_at_bound];
+
+    assert_eq!(
+        error_code(&fixture, &source),
+        CandidateObservationErrorCode::InvalidPhaseContent,
+        "the exact aggregate label bound must reach phase validation"
+    );
+
+    let mut value = serde_json::to_value(fixture).expect("fixture is JSON");
+    let diagnostics = value["diagnostics"]
+        .as_array_mut()
+        .expect("diagnostics fixture is an array");
+    diagnostics.push(json!({
+        "code": "E1001",
+        "severity": "error",
+        "message": "one over",
+        "labels": [{
+            "style": "primary",
+            "file": 0,
+            "start": 0,
+            "end": 1,
+            "message": "one over"
+        }]
+    }));
+    diagnostics.push(json!({"unexpected": true}));
+    let bytes = serde_json::to_vec(&value).expect("mutated fixture serializes");
+
+    let error = CandidateObservation::load(&bytes, &source)
+        .expect_err("aggregate label overflow must stop before later invalid data");
+
+    assert_eq!(error.code(), CandidateObservationErrorCode::ResourceLimit);
 }
 
 #[test]

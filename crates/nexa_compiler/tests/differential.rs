@@ -62,8 +62,18 @@ fn every_observed_difference_is_unclassified_and_fails_closed(
     let rust = RustReferenceCompiler;
     let reference = rust.compile(&case_input)?;
     let mut artifacts = serde_json::to_value(reference.artifacts())?;
-    artifacts[0]["artifact"]["content"] =
-        json!(r#"{"schemaVersion":1,"phase":"tokens","value":[]}"#);
+    let token_content = artifacts[0]["artifact"]["content"]
+        .as_str()
+        .ok_or_else(|| std::io::Error::other("expected token content"))?;
+    let mut token_content: Value = serde_json::from_str(token_content)?;
+    token_content["value"][0]["tokens"][0]["kindId"] = json!(0);
+    artifacts[0]["artifact"]["content"] = json!(serde_json::to_string(&token_content)?);
+    let cst_content = artifacts[1]["artifact"]["content"]
+        .as_str()
+        .ok_or_else(|| std::io::Error::other("expected CST content"))?;
+    let mut cst_content: Value = serde_json::from_str(cst_content)?;
+    cst_content["value"][0]["elements"][2]["kindId"] = json!(0);
+    artifacts[1]["artifact"]["content"] = json!(serde_json::to_string(&cst_content)?);
     let candidate = CandidateAdapter(load_candidate(
         &case_input,
         json!([{"file": 0, "identity": "main.ft"}]),
@@ -106,6 +116,24 @@ fn every_observed_difference_is_unclassified_and_fails_closed(
 }
 
 #[test]
+fn rust_reference_observation_preserves_portable_directory_identities(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let case_input = CompilerInput::new(
+        "app/main.ft",
+        [CompilerSource::new(
+            "app/main.ft",
+            "function main(): Unit {}",
+        )],
+    );
+    let rust = RustReferenceCompiler;
+
+    let observation = rust.compile(&case_input)?;
+
+    assert_eq!(observation.sources()[0].identity(), "app/main.ft");
+    Ok(())
+}
+
+#[test]
 fn source_ordinals_must_bind_the_same_identity_in_both_observations(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let case_input = CompilerInput::new(
@@ -129,6 +157,20 @@ fn source_ordinals_must_bind_the_same_identity_in_both_observations(
             .collect::<Vec<_>>(),
         ["main.ft", "a.ft", "b.ft"]
     );
+    let mut artifacts = serde_json::to_value(reference.artifacts())?;
+    for artifact_index in [0, 1] {
+        let content = artifacts[artifact_index]["artifact"]["content"]
+            .as_str()
+            .ok_or_else(|| std::io::Error::other("expected front-end content"))?;
+        let mut content: Value = serde_json::from_str(content)?;
+        let modules = content["value"]
+            .as_array_mut()
+            .ok_or_else(|| std::io::Error::other("expected front-end modules"))?;
+        modules.swap(1, 2);
+        modules[1]["module"] = json!(1);
+        modules[2]["module"] = json!(2);
+        artifacts[artifact_index]["artifact"]["content"] = json!(serde_json::to_string(&content)?);
+    }
     let candidate = CandidateAdapter(load_candidate(
         &case_input,
         json!([
@@ -136,7 +178,7 @@ fn source_ordinals_must_bind_the_same_identity_in_both_observations(
             {"file": 1, "identity": "b.ft"},
             {"file": 2, "identity": "a.ft"}
         ]),
-        serde_json::to_value(reference.artifacts())?,
+        artifacts,
     )?);
     let harness = DifferentialHarness::new(
         CompilerAdapterState::available(&rust),
