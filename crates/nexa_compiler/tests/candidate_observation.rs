@@ -497,6 +497,77 @@ fn token_and_cst_payloads_reject_malformed_protocol_data() {
 }
 
 #[test]
+fn cst_payload_rejects_invalid_tree_structure_and_token_alignment() {
+    let mut fixture = accepted_fixture();
+    mutate_phase_content(&mut fixture, 1, |content| {
+        content["value"] = json!([]);
+    });
+    assert_eq!(
+        error_code(&fixture, &input()),
+        CandidateObservationErrorCode::InvalidPhaseContent
+    );
+
+    let mut fixture = accepted_fixture();
+    mutate_phase_content(&mut fixture, 1, |content| {
+        content["value"][0]["elements"][1]["depth"] = json!(2);
+    });
+    assert_eq!(
+        error_code(&fixture, &input()),
+        CandidateObservationErrorCode::InvalidPhaseContent
+    );
+
+    let mut fixture = accepted_fixture();
+    mutate_phase_content(&mut fixture, 1, |content| {
+        content["value"][0]["elements"][1]["end"] = json!(1);
+    });
+    assert_eq!(
+        error_code(&fixture, &input()),
+        CandidateObservationErrorCode::InvalidPhaseContent
+    );
+
+    let mut fixture = accepted_fixture();
+    mutate_phase_content(&mut fixture, 1, |content| {
+        content["value"][0]["elements"][1]["depth"] = json!(0);
+    });
+    assert_eq!(
+        error_code(&fixture, &input()),
+        CandidateObservationErrorCode::InvalidPhaseContent
+    );
+
+    let mut fixture = accepted_fixture();
+    mutate_phase_content(&mut fixture, 1, |content| {
+        let elements = content["value"][0]["elements"]
+            .as_array_mut()
+            .expect("CST fixture elements are an array");
+        let first_token = elements
+            .iter_mut()
+            .find(|element| element["element"] == "token")
+            .expect("CST fixture contains a token");
+        first_token["kindId"] = json!(0);
+    });
+    assert_eq!(
+        error_code(&fixture, &input()),
+        CandidateObservationErrorCode::InvalidPhaseContent
+    );
+
+    let mut fixture = accepted_fixture();
+    mutate_phase_content(&mut fixture, 1, |content| {
+        let elements = content["value"][0]["elements"]
+            .as_array_mut()
+            .expect("CST fixture elements are an array");
+        let token = elements
+            .iter()
+            .rposition(|element| element["element"] == "token")
+            .expect("CST fixture contains a token");
+        elements.remove(token);
+    });
+    assert_eq!(
+        error_code(&fixture, &input()),
+        CandidateObservationErrorCode::InvalidPhaseContent
+    );
+}
+
+#[test]
 fn resource_limit_marker_cannot_be_spoofed_by_unknown_json() {
     let mut value = serde_json::to_value(accepted_fixture()).expect("fixture is JSON");
     value["candidate-resource-limit"] = json!(true);
