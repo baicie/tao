@@ -44,7 +44,7 @@ nexa_compiler = { path = "crates/nexa_compiler", version = "0.0.10" }
 anyhow = "1"
 thiserror = "2"
 # Keep the resolved CLI stack compatible with the workspace MSRV (Rust 1.80).
-clap = { version = "=4.5.32", features = ["derive"] }
+clap = { version = "=4.6.6", features = ["derive"] }
 rowan = "0.16"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
